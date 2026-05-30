@@ -45,3 +45,15 @@ fn checks_corpus_without_panicking() {
     assert!(checked > 0, "no scripts found");
     eprintln!("checked {checked} scripts, {total_diags} type diagnostics");
 }
+
+#[test]
+fn audits_project_names_without_panicking() {
+    let Some(proj_path) = project_path() else {
+        return;
+    };
+    let project = Project::load(&proj_path).expect("load project");
+    let n = project.audit().len();
+    eprintln!("project name-audit produced {n} T050 diagnostics");
+    // No assertion on the exact count: the example project intentionally violates
+    // the conventions. This guards only against a panic / API regression.
+}
