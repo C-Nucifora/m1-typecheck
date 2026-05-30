@@ -10,4 +10,4 @@ pub mod rules;
 // Re-exports are added as the underlying types come online in later tasks.
 // pub use diagnostics::{CheckResult, TypeCode, TypeDiagnostic};
 // pub use project::Project;
-// pub use types::ValueType;
+pub use types::ValueType;
