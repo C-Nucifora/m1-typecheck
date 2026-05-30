@@ -31,3 +31,15 @@ fn member_index_unique_and_ambiguous() {
     // unknown member -> empty.
     assert!(t.enums_with_member("Zzz").is_empty());
 }
+
+#[test]
+fn m1cfg_enum_cell_associates_unique_member() {
+    use m1_typecheck::symbols::m1cfg;
+    use m1_typecheck::types::ValueType;
+    let mut parsed = m1prj::parse(&fixture("enums.m1prj")).unwrap();
+    m1cfg::augment(&mut parsed.table, &fixture("enums.m1cfg")).unwrap();
+    let sym = parsed.table.get("Root.Foo.SwitchMode.Value").unwrap();
+    let switch_id = parsed.table.enum_by_name("Switch State").unwrap();
+    assert_eq!(sym.enum_assoc, Some(switch_id));
+    assert_eq!(sym.value_type, ValueType::Enum(switch_id));
+}

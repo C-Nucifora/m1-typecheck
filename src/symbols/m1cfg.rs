@@ -35,11 +35,27 @@ pub fn augment(table: &mut SymbolTable, xml: &str) -> Result<(), ConfigError> {
         let Some(cell) = param.children().find(|c| c.has_tag_name("Cell")) else {
             continue;
         };
-        let vt = cell
-            .attribute("Type")
-            .map(cell_type)
-            .unwrap_or(ValueType::Unknown);
+        let type_attr = cell.attribute("Type").unwrap_or("");
         let unit = cell.attribute("Unit").map(str::to_string);
+
+        if type_attr == "enum" {
+            // Back-resolve the cell's member value to a *unique* enum type.
+            let member = cell.text().map(str::trim).unwrap_or("");
+            let candidates = table.enums_with_member(member);
+            if candidates.len() == 1 {
+                let id = candidates[0];
+                table.set_enum_assoc(name, id);
+            }
+            // zero or many -> leave Unknown (silent), but still record the unit.
+            if let Some(sym) = table.get_mut(name) {
+                if sym.unit.is_none() {
+                    sym.unit = unit;
+                }
+            }
+            continue;
+        }
+
+        let vt = cell_type(type_attr);
         if let Some(sym) = table.get_mut(name) {
             sym.value_type = vt;
             sym.unit = unit;
