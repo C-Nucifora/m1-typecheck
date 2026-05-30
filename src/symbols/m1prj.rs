@@ -67,9 +67,7 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
 
     for node in doc.descendants() {
         match node.tag_name().name() {
-            "File"
-                if node.parent().map(|p| p.tag_name().name()) == Some("SelectedModuleSets") =>
-            {
+            "File" if node.parent().map(|p| p.tag_name().name()) == Some("SelectedModuleSets") => {
                 if let Some(name) = node.attribute("Name") {
                     module_roots.insert(name.to_string());
                 }

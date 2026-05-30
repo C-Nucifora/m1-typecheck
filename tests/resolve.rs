@@ -80,6 +80,26 @@ fn unresolved_when_project_rooted_but_absent() {
 }
 
 #[test]
+fn accessor_on_resolved_channel_is_opaque() {
+    let p = proj();
+    let scope = Scope {
+        locals: HashMap::new(),
+        group: Some("Root.Foo".into()),
+        project: Some(&p),
+    };
+    // `Speed` is a channel; `Speed.AsInteger` is a built-in accessor, not a miss.
+    assert!(matches!(
+        resolve("Speed.AsInteger", &scope),
+        Resolution::Opaque
+    ));
+    // Absolute form too.
+    assert!(matches!(
+        resolve("Root.Foo.Speed.AsInteger", &scope),
+        Resolution::Opaque
+    ));
+}
+
+#[test]
 fn unknown_root_is_opaque_not_unresolved() {
     let p = proj();
     let scope = Scope {

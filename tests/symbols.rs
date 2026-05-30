@@ -52,7 +52,10 @@ fn parses_enum_types() {
 fn maps_filename_to_enclosing_group() {
     let parsed = m1prj::parse(&std::fs::read_to_string(fixture()).unwrap()).unwrap();
     assert_eq!(
-        parsed.file_to_group.get("Foo Update.m1scr").map(String::as_str),
+        parsed
+            .file_to_group
+            .get("Foo Update.m1scr")
+            .map(String::as_str),
         Some("Root.Foo")
     );
 }

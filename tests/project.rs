@@ -14,7 +14,11 @@ fn loads_table_and_config() {
     let p = proj();
     assert!(p.symbols().get("Root.Foo.Speed").is_some());
     assert_eq!(
-        p.symbols().get("Root.Foo.Gain.Value").unwrap().unit.as_deref(),
+        p.symbols()
+            .get("Root.Foo.Gain.Value")
+            .unwrap()
+            .unit
+            .as_deref(),
         Some("ratio")
     );
 }

@@ -40,7 +40,7 @@ fn main() {
     let args = Args::parse();
     let mut had_error = false;
 
-    let project = find_project(&args).and_then(|path| match Project::load(&path) {
+    let project = find_project(&args).map(|path| match Project::load(&path) {
         Ok(mut p) => {
             if let Some(cfg) = &args.config {
                 p = p.with_config(cfg).unwrap_or_else(|e| {
@@ -48,7 +48,7 @@ fn main() {
                     process::exit(2);
                 });
             }
-            Some(p)
+            p
         }
         Err(e) => {
             eprintln!("m1-typecheck: project {}: {e}", path.display());
