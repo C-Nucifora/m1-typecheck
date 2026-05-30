@@ -16,6 +16,9 @@ struct Args {
     /// parameters.m1cfg (optional)
     #[arg(long)]
     config: Option<PathBuf>,
+    /// Audit the project's own symbol names against the naming conventions (T050).
+    #[arg(long)]
+    audit_names: bool,
 }
 
 fn find_project(args: &Args) -> Option<PathBuf> {
@@ -40,7 +43,8 @@ fn main() {
     let args = Args::parse();
     let mut had_error = false;
 
-    let project = find_project(&args).map(|path| match Project::load(&path) {
+    let project_path = find_project(&args);
+    let project = project_path.clone().map(|path| match Project::load(&path) {
         Ok(mut p) => {
             if let Some(cfg) = &args.config {
                 p = p.with_config(cfg).unwrap_or_else(|e| {
@@ -101,6 +105,32 @@ fn main() {
                 d.code.as_str(),
                 d.inner.message
             );
+        }
+    }
+
+    if args.audit_names {
+        match &project {
+            Some(p) => {
+                let path_label = project_path
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "<project>".into());
+                for d in p.audit() {
+                    println!(
+                        "{}: {}[{}]: {}",
+                        path_label,
+                        match d.inner.severity {
+                            Severity::Error => "error",
+                            Severity::Warning => "warning",
+                            Severity::Info => "info",
+                            Severity::Hint => "hint",
+                        },
+                        d.code.as_str(),
+                        d.inner.message
+                    );
+                }
+            }
+            None => eprintln!("m1-typecheck: --audit-names needs a project; skipping"),
         }
     }
 

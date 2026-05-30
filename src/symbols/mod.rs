@@ -27,6 +27,9 @@ pub struct Symbol {
     pub value_type: ValueType,
     pub unit: Option<String>,
     pub filename: Option<String>,
+    /// Enum type this symbol's value belongs to, if known (set during .m1cfg
+    /// back-resolution). When set, the typer reports `ValueType::Enum(_)`.
+    pub enum_assoc: Option<EnumId>,
 }
 
 #[derive(Debug, Default)]
@@ -34,6 +37,8 @@ pub struct SymbolTable {
     symbols: Vec<Symbol>,
     by_path: HashMap<String, usize>,
     enums: Vec<EnumType>,
+    /// member name -> enum type ids that declare a member of that name.
+    member_index: HashMap<String, Vec<EnumId>>,
 }
 
 impl SymbolTable {
@@ -58,11 +63,45 @@ impl SymbolTable {
         self.symbols.iter()
     }
     pub fn add_enum(&mut self, e: EnumType) -> EnumId {
+        let id = self.enums.len();
+        for (member, _order) in &e.members {
+            self.member_index
+                .entry(member.clone())
+                .or_default()
+                .push(id);
+        }
         self.enums.push(e);
-        self.enums.len() - 1
+        id
     }
     pub fn enums(&self) -> &[EnumType] {
         &self.enums
+    }
+    /// The enum type whose *name* equals `name`, if any.
+    pub fn enum_by_name(&self, name: &str) -> Option<EnumId> {
+        self.enums.iter().position(|e| e.name == name)
+    }
+    /// Enum type ids that declare a member of this exact name.
+    pub fn enums_with_member(&self, member: &str) -> &[EnumId] {
+        self.member_index
+            .get(member)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+    pub fn enum_has_member(&self, id: EnumId, member: &str) -> bool {
+        self.enums
+            .get(id)
+            .map(|e| e.members.iter().any(|(m, _)| m == member))
+            .unwrap_or(false)
+    }
+    pub fn enum_type(&self, id: EnumId) -> &EnumType {
+        &self.enums[id]
+    }
+    /// Associate a symbol (by path) with an enum type id. No-op if absent.
+    pub fn set_enum_assoc(&mut self, path: &str, id: EnumId) {
+        if let Some(&i) = self.by_path.get(path) {
+            self.symbols[i].enum_assoc = Some(id);
+            self.symbols[i].value_type = ValueType::Enum(id);
+        }
     }
     /// True if `path` exists as a symbol with a direct child of the given leaf
     /// name (e.g. a group `…Drive State` that contains `…Drive State.Value`).

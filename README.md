@@ -9,6 +9,32 @@ impossible without that knowledge.
 It is both a **library** (consumed by `m1-lsp` for hover/types and as a third
 diagnostic source) and a **CLI**.
 
+## Workspace layout
+
+The M1 toolchain lives in **six separate repositories** coupled through Cargo
+**path** dependencies. They are not published to crates.io, so this crate does
+**not** build from a standalone clone — check out the whole set as siblings under
+one parent directory:
+
+```
+<parent>/
+├── tree-sitter-m1/   # grammar (root)
+├── m1-core/          # parse / CST / diagnostics
+├── m1-lint/          # linter
+├── m1-fmt/           # formatter
+├── m1-typecheck/     # this crate
+└── m1-lsp/           # language server; depends on the four above
+```
+
+**`m1-typecheck` depends on `../m1-core`** (`m1-core = { path = "../m1-core" }`,
+which in turn needs `../tree-sitter-m1`), so both must be checked out alongside
+it. It is in turn depended on by `m1-lsp`. (The `EV-M1` example project, used by
+the corpus gate, is an optional further sibling — see the env-var notes below.)
+
+Because the repos are independent on GitHub, this coupling is **not visible
+there**: each repo's CI and PRs see only itself. Build/merge ordering across the
+stack is a manual, local-workspace concern.
+
 ## The symbol model
 
 `m1-typecheck` parses the project's MoTeC `Project.m1prj` (XML) into a flat
@@ -48,21 +74,65 @@ typed by Hungarian prefix (`b`/`u`/`i`/`f` + UpperCase).
 | T010 | Warning | **local-hungarian-prefix** — a `local` lacking a recognised type prefix. |
 | T011 | Warning | **hungarian-prefix-mismatch** — a `local` whose prefix disagrees with its initialiser's known type. |
 
+## v2: enum domain model, flow analysis, and the project audit
+
+v2 builds a live **enum domain model** on top of the v1 symbol table:
+
+- A **member index** (member name → enum type ids) is built once at load, with
+  queries `enum_by_name`, `enums_with_member`, `enum_has_member`, `enum_type`.
+- **Enum association**: a `.m1cfg` parameter cell `<Cell Type="enum">…</Cell>`
+  back-resolves its member value to a *unique* enum type and associates the
+  parameter with it (zero or many candidates → left `Unknown`, silent).
+- The **typer** produces `ValueType::Enum(id)` for a typed member path
+  `<EnumTypeName>.<Member>` (when the head names an enum that declares the member)
+  and for any enum-associated symbol.
+
+This unlocks four new rules (added to the new `Registry::default_v2()`, which is
+now the default for `check_script`; `default_v1()` is kept for callers that want
+to pin the v1 rule set):
+
+| Code | Severity | Rule |
+|------|----------|------|
+| T020 | Warning | **enum-non-member** — a typed member path `<EnumType>.<Member>` whose member the enum does not declare. |
+| T021 | Warning | **enum-numeric-comparison** — a comparison with one *known* `Enum` operand and the other *known* numeric. |
+| T030 | Warning | **assignment-type-mismatch** — `target = value` where the target is a Channel/Parameter with a known type and the value's known type is incompatible. |
+| T040 | Warning | **channel-multiple-assignment** — a Channel assigned more than once on a single code path (control-flow aware: mutually-exclusive `if`/`else` arms are not a conflict). Implemented as a whole-tree pass in `flow.rs`, not a node-at-a-time rule. |
+
+Every v2 rule keeps the v1 invariant: it fires only when every type/enum it needs
+is **known**, and stays silent under `Unknown` — so the EV-M1 corpus stays free of
+spurious diagnostics.
+
+### T050 project-name audit (opt-in)
+
+`--audit-names` runs a project-wide symbol-name audit (`Project::audit()`),
+checking each symbol's leaf name against the EV-M1 naming conventions: Channels and
+Functions/Methods `lowerCamelCase`, Parameters/Groups and enum types
+`UpperCamelCase`, Constants `CAPITALISATION` (spaces allowed). It emits **T050**
+diagnostics at the project level (no source line/col). It is **off by default**:
+the example project massively violates these conventions, so running it as part of
+the per-script CI flow would be pure noise. The corpus gate records only a baseline
+count for it.
+
 ## CLI usage
 
 ```
-m1-typecheck [--project <Project.m1prj>] [--config <parameters.m1cfg>] <file.m1scr>...
+m1-typecheck [--project <Project.m1prj>] [--config <parameters.m1cfg>]
+             [--audit-names] <file.m1scr>...
 ```
 
 ```sh
 m1-typecheck --project Project.m1prj --config parameters.m1cfg Scripts/*.m1scr
+m1-typecheck --project Project.m1prj --audit-names
 ```
 
 - `--project` defaults to the nearest `Project.m1prj` upward from the first input
   file, or `$M1_PROJECT`. With no project found, runs in project-less mode (T001
   disabled).
+- `--audit-names` prints the project-name audit (T050) as
+  `<project-path>: warning[T050]: <message>`; requires a loaded project.
 - Output: `path:line:col: severity[T0xx]: message`. Syntax errors print first.
-- Exit codes: `0` no errors, `1` ≥1 error, `2` invocation error.
+- Exit codes: `0` no errors, `1` ≥1 error, `2` invocation error. All v2 rules are
+  `Warning` severity, so they never by themselves cause a non-zero exit.
 
 ## Environment variables
 
