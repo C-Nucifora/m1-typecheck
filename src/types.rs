@@ -23,6 +23,9 @@ impl ValueType {
     pub fn is_known(self) -> bool {
         !matches!(self, ValueType::Unknown)
     }
+    pub fn is_enum(self) -> bool {
+        matches!(self, ValueType::Enum(_))
+    }
 }
 
 /// Type of a numeric literal from its source text.
