@@ -11,6 +11,7 @@ pub mod t003_int_float_mix;
 pub mod t010_local_prefix;
 pub mod t011_prefix_mismatch;
 pub mod t020_enum_member;
+pub mod t021_enum_numeric_cmp;
 
 pub trait Rule: Send + Sync {
     fn check_node(&self, node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>);
@@ -41,6 +42,7 @@ impl Registry {
                 Box::new(t010_local_prefix::Rule),
                 Box::new(t011_prefix_mismatch::Rule),
                 Box::new(t020_enum_member::Rule),
+                Box::new(t021_enum_numeric_cmp::Rule),
             ],
         }
     }

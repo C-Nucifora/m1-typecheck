@@ -32,6 +32,25 @@ fn t020_no_flag_for_real_member() {
     assert!(!codes(&p, "driveMode = Drive State.Idle;\n").contains(&TypeCode::T020));
 }
 
+#[test]
+fn t021_flags_enum_vs_integer() {
+    let p = proj();
+    // SwitchMode.Value is enum; comparing to integer literal 1.
+    assert!(codes(&p, "if (SwitchMode.Value eq 1) {\n}\n").contains(&TypeCode::T021));
+}
+
+#[test]
+fn t021_no_flag_enum_vs_member() {
+    let p = proj();
+    assert!(!codes(&p, "if (SwitchMode.Value eq Switch State.On) {\n}\n").contains(&TypeCode::T021));
+}
+
+#[test]
+fn t021_no_flag_int_vs_int() {
+    let p = proj();
+    assert!(!codes(&p, "local iX = 1;\nif (iX eq 2) {\n}\n").contains(&TypeCode::T021));
+}
+
 // NOTE (deviation from plan): the `LHS is (Member)` clause that the plan's
 // Trigger 2 targeted is NOT valid syntax in the tree-sitter-m1 grammar — `is`
 // always parses as an ERROR node, and the runner short-circuits on syntax
