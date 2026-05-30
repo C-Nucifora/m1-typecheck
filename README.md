@@ -9,6 +9,32 @@ impossible without that knowledge.
 It is both a **library** (consumed by `m1-lsp` for hover/types and as a third
 diagnostic source) and a **CLI**.
 
+## Workspace layout
+
+The M1 toolchain lives in **six separate repositories** coupled through Cargo
+**path** dependencies. They are not published to crates.io, so this crate does
+**not** build from a standalone clone — check out the whole set as siblings under
+one parent directory:
+
+```
+<parent>/
+├── tree-sitter-m1/   # grammar (root)
+├── m1-core/          # parse / CST / diagnostics
+├── m1-lint/          # linter
+├── m1-fmt/           # formatter
+├── m1-typecheck/     # this crate
+└── m1-lsp/           # language server; depends on the four above
+```
+
+**`m1-typecheck` depends on `../m1-core`** (`m1-core = { path = "../m1-core" }`,
+which in turn needs `../tree-sitter-m1`), so both must be checked out alongside
+it. It is in turn depended on by `m1-lsp`. (The `EV-M1` example project, used by
+the corpus gate, is an optional further sibling — see the env-var notes below.)
+
+Because the repos are independent on GitHub, this coupling is **not visible
+there**: each repo's CI and PRs see only itself. Build/merge ordering across the
+stack is a manual, local-workspace concern.
+
 ## The symbol model
 
 `m1-typecheck` parses the project's MoTeC `Project.m1prj` (XML) into a flat
