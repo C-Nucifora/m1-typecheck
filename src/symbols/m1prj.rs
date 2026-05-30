@@ -122,6 +122,7 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                     value_type,
                     unit: None,
                     filename,
+                    enum_assoc: None,
                 });
             }
             _ => {}
