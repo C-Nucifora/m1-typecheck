@@ -14,6 +14,6 @@ name = "m1_typecheck"
 path = "src/lib.rs"
 
 [dependencies]
-m1-core = { path = "../m1-core" }
+m1-core = { path = "vendor/m1-core" }
 roxmltree = "0.20"
 clap = { version = "4", features = ["derive"] }
