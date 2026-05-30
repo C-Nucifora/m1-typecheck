@@ -24,6 +24,7 @@
     <Component Classname="BuiltIn.GroupCompound" Name="Root.Foo"/>
     <Component Classname="BuiltIn.Channel" Name="Root.Foo.driveMode"><Props Security="Tune"/></Component>
     <Component Classname="BuiltIn.Parameter" Name="Root.Foo.SwitchMode.Value"><Props/></Component>
+    <Component Classname="BuiltIn.Channel" Name="Root.Foo.gain"><Props Security="Tune"/></Component>
     <Component Classname="BuiltIn.FuncUser" Filename="Foo Update.m1scr" Name="Root.Foo.Update"/>
    </List>
   </ComponentStream>

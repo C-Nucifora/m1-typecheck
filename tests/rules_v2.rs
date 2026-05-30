@@ -51,6 +51,26 @@ fn t021_no_flag_int_vs_int() {
     assert!(!codes(&p, "local iX = 1;\nif (iX eq 2) {\n}\n").contains(&TypeCode::T021));
 }
 
+#[test]
+fn t030_flags_enum_member_into_wrong_enum() {
+    let p = proj();
+    // SwitchMode.Value is Switch State; assigning a Drive State member is a mismatch.
+    assert!(codes(&p, "SwitchMode.Value = Drive State.Idle;\n").contains(&TypeCode::T030));
+}
+
+#[test]
+fn t030_no_flag_same_enum() {
+    let p = proj();
+    assert!(!codes(&p, "SwitchMode.Value = Switch State.On;\n").contains(&TypeCode::T030));
+}
+
+#[test]
+fn t030_no_flag_unknown_target() {
+    let p = proj();
+    // driveMode has no known type -> silent.
+    assert!(!codes(&p, "driveMode = 1.0;\n").contains(&TypeCode::T030));
+}
+
 // NOTE (deviation from plan): the `LHS is (Member)` clause that the plan's
 // Trigger 2 targeted is NOT valid syntax in the tree-sitter-m1 grammar — `is`
 // always parses as an ERROR node, and the runner short-circuits on syntax
