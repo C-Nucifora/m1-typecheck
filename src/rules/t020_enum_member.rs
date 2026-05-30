@@ -19,7 +19,10 @@ impl super::Rule for Rule {
         if node.kind() != Kind::MemberExpression {
             return;
         }
-        if matches!(node.parent().map(|p| p.kind()), Some(Kind::MemberExpression)) {
+        if matches!(
+            node.parent().map(|p| p.kind()),
+            Some(Kind::MemberExpression)
+        ) {
             return; // only the outermost path
         }
         let path = path_text(*node);

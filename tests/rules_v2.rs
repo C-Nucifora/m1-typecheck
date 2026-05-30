@@ -42,7 +42,9 @@ fn t021_flags_enum_vs_integer() {
 #[test]
 fn t021_no_flag_enum_vs_member() {
     let p = proj();
-    assert!(!codes(&p, "if (SwitchMode.Value eq Switch State.On) {\n}\n").contains(&TypeCode::T021));
+    assert!(
+        !codes(&p, "if (SwitchMode.Value eq Switch State.On) {\n}\n").contains(&TypeCode::T021)
+    );
 }
 
 #[test]

@@ -28,9 +28,7 @@ pub fn single_assignment(root: Node, scope: &Scope, out: &mut Vec<TypeDiagnostic
                     TypeCode::T040,
                     &node,
                     m1_core::Severity::Warning,
-                    format!(
-                        "channel `{path}` is assigned more than once on a single code path"
-                    ),
+                    format!("channel `{path}` is assigned more than once on a single code path"),
                 ));
             }
         }
@@ -77,7 +75,10 @@ fn facts_of(node: Node, scope: &Scope) -> Facts {
         }
         Kind::WhenStatement | Kind::ExpandStatement => {
             // Treated as a no-else conditional body (see spec §5.2).
-            let body = node.children().into_iter().find(|c| c.kind() == Kind::Block);
+            let body = node
+                .children()
+                .into_iter()
+                .find(|c| c.kind() == Kind::Block);
             let body_f = body.map(|b| seq_children(b, scope)).unwrap_or_default();
             merge_alt(body_f, Facts::default())
         }
