@@ -28,7 +28,10 @@ fn literals() {
 
 #[test]
 fn local_and_arithmetic() {
-    assert_eq!(ty("fGain", &[("fGain", ValueType::Float)]), ValueType::Float);
+    assert_eq!(
+        ty("fGain", &[("fGain", ValueType::Float)]),
+        ValueType::Float
+    );
     assert_eq!(ty("1 + 2", &[]), ValueType::Integer);
     assert_eq!(
         ty("fGain * 2", &[("fGain", ValueType::Float)]),

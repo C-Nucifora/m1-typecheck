@@ -5,8 +5,19 @@ use std::path::Path;
 
 /// M1 standard-library roots always treated as opaque (never flagged).
 const STATIC_OPAQUE_ROOTS: &[&str] = &[
-    "This", "Calculate", "Limit", "Convert", "Math", "Time", "Filter", "CanComms", "Table",
-    "Channel", "Constant", "Parameter", "Diagnostic",
+    "This",
+    "Calculate",
+    "Limit",
+    "Convert",
+    "Math",
+    "Time",
+    "Filter",
+    "CanComms",
+    "Table",
+    "Channel",
+    "Constant",
+    "Parameter",
+    "Diagnostic",
 ];
 
 pub struct Project {

@@ -1,7 +1,7 @@
 //! Symbol model loaded from .m1prj / .m1cfg.
 pub mod enums;
-pub mod m1prj;
 pub mod m1cfg;
+pub mod m1prj;
 
 use crate::types::ValueType;
 pub use enums::{EnumId, EnumType};
@@ -63,5 +63,12 @@ impl SymbolTable {
     }
     pub fn enums(&self) -> &[EnumType] {
         &self.enums
+    }
+    /// True if `path` exists as a symbol with a direct child of the given leaf
+    /// name (e.g. a group `…Drive State` that contains `…Drive State.Value`).
+    /// Used to recognise value-bearing enum/channel compounds, whose members
+    /// expose built-in accessors that are not themselves stored symbols.
+    pub fn has_child(&self, path: &str, leaf: &str) -> bool {
+        self.by_path.contains_key(&format!("{path}.{leaf}"))
     }
 }
