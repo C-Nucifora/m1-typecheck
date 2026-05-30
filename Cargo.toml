@@ -16,3 +16,4 @@ path = "src/lib.rs"
 [dependencies]
 m1-core = { path = "../m1-core" }
 roxmltree = "0.20"
+clap = { version = "4", features = ["derive"] }
