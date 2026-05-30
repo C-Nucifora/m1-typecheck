@@ -62,3 +62,18 @@ fn collects_module_set_roots() {
     let parsed = m1prj::parse(&std::fs::read_to_string(fixture()).unwrap()).unwrap();
     assert!(parsed.module_roots.contains("MoTeC Comms"));
 }
+
+#[test]
+fn m1cfg_augments_parameter_types() {
+    use m1_typecheck::symbols::{m1cfg, m1prj};
+    use m1_typecheck::types::ValueType;
+    let mut parsed = m1prj::parse(&std::fs::read_to_string(fixture()).unwrap()).unwrap();
+    let cfg = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mini.m1cfg"),
+    )
+    .unwrap();
+    m1cfg::augment(&mut parsed.table, &cfg).unwrap();
+    let gain = parsed.table.get("Root.Foo.Gain.Value").unwrap();
+    assert_eq!(gain.value_type, ValueType::Float);
+    assert_eq!(gain.unit.as_deref(), Some("ratio"));
+}
