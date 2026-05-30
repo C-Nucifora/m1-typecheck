@@ -111,6 +111,7 @@ fn run(project: Option<&Project>, file_name: Option<&str>, source: &str) -> Chec
     let registry = Registry::default_v2();
     let mut diagnostics = Vec::new();
     walk(cst.root(), &registry, &scope, &mut diagnostics);
+    crate::flow::single_assignment(cst.root(), &scope, &mut diagnostics);
     CheckResult {
         diagnostics,
         syntax_errors,
