@@ -48,11 +48,24 @@ pub fn type_of(node: Node, scope: &Scope) -> ValueType {
         Kind::ParenthesizedExpression => child_expr(node)
             .map(|c| type_of(c, scope))
             .unwrap_or(ValueType::Unknown),
-        Kind::Identifier | Kind::MemberExpression => match resolve(&path_text(node), scope) {
-            Resolution::Local(t) => t,
-            Resolution::Symbol(s) => s.value_type,
-            Resolution::Opaque | Resolution::Unresolved => ValueType::Unknown,
-        },
+        Kind::Identifier | Kind::MemberExpression => {
+            let path = path_text(node);
+            // Typed enum-member path: `<EnumTypeName>.<Member>` -> Enum(id).
+            if let Some(p) = scope.project {
+                if let Some((head, member)) = path.rsplit_once('.') {
+                    if let Some(id) = p.symbols().enum_by_name(head) {
+                        if p.symbols().enum_has_member(id, member) {
+                            return ValueType::Enum(id);
+                        }
+                    }
+                }
+            }
+            match resolve(&path, scope) {
+                Resolution::Local(t) => t,
+                Resolution::Symbol(s) => s.value_type,
+                Resolution::Opaque | Resolution::Unresolved => ValueType::Unknown,
+            }
+        }
         Kind::CallExpression => ValueType::Unknown, // v1: return types unknown
         Kind::UnaryExpression => {
             // `not`/`!` -> Boolean; `-x` -> type of x.

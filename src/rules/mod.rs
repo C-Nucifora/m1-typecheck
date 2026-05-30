@@ -10,6 +10,9 @@ pub mod t002_float_eq;
 pub mod t003_int_float_mix;
 pub mod t010_local_prefix;
 pub mod t011_prefix_mismatch;
+pub mod t020_enum_member;
+pub mod t021_enum_numeric_cmp;
+pub mod t030_assign_mismatch;
 
 pub trait Rule: Send + Sync {
     fn check_node(&self, node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>);
@@ -28,6 +31,20 @@ impl Registry {
                 Box::new(t003_int_float_mix::Rule),
                 Box::new(t010_local_prefix::Rule),
                 Box::new(t011_prefix_mismatch::Rule),
+            ],
+        }
+    }
+    pub fn default_v2() -> Self {
+        Registry {
+            rules: vec![
+                Box::new(t001_unresolved::Rule),
+                Box::new(t002_float_eq::Rule),
+                Box::new(t003_int_float_mix::Rule),
+                Box::new(t010_local_prefix::Rule),
+                Box::new(t011_prefix_mismatch::Rule),
+                Box::new(t020_enum_member::Rule),
+                Box::new(t021_enum_numeric_cmp::Rule),
+                Box::new(t030_assign_mismatch::Rule),
             ],
         }
     }
@@ -91,9 +108,10 @@ fn run(project: Option<&Project>, file_name: Option<&str>, source: &str) -> Chec
         group,
         project,
     };
-    let registry = Registry::default_v1();
+    let registry = Registry::default_v2();
     let mut diagnostics = Vec::new();
     walk(cst.root(), &registry, &scope, &mut diagnostics);
+    crate::flow::single_assignment(cst.root(), &scope, &mut diagnostics);
     CheckResult {
         diagnostics,
         syntax_errors,

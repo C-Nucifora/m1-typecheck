@@ -74,4 +74,9 @@ impl Project {
     pub fn group_for_script(&self, file_name: &str) -> Option<String> {
         self.file_to_group.get(file_name).cloned()
     }
+
+    /// Audit the project's own symbol names (T050).
+    pub fn audit(&self) -> Vec<crate::diagnostics::TypeDiagnostic> {
+        crate::audit::audit_project(self)
+    }
 }
