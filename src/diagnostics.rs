@@ -1,5 +1,5 @@
 //! Type-check diagnostic codes and result types.
-use m1_core::{Code, Diagnostic, Node, Severity};
+use m1_core::{Code, Diagnostic, Node, Position, Range, Severity};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeCode {
@@ -8,6 +8,11 @@ pub enum TypeCode {
     T003, // int-float-mixing
     T010, // local-hungarian-prefix
     T011, // hungarian-prefix-mismatch
+    T020, // enum-non-member
+    T021, // enum-numeric-comparison
+    T030, // assignment-type-mismatch
+    T040, // channel-multiple-assignment
+    T050, // symbol-name-convention (project audit)
 }
 
 impl TypeCode {
@@ -18,6 +23,11 @@ impl TypeCode {
             TypeCode::T003 => "T003",
             TypeCode::T010 => "T010",
             TypeCode::T011 => "T011",
+            TypeCode::T020 => "T020",
+            TypeCode::T021 => "T021",
+            TypeCode::T030 => "T030",
+            TypeCode::T040 => "T040",
+            TypeCode::T050 => "T050",
         }
     }
 }
@@ -37,6 +47,24 @@ pub fn make(code: TypeCode, node: &Node, severity: Severity, message: String) ->
         inner: Diagnostic {
             range: node.range(),
             byte_range: node.byte_range(),
+            severity,
+            code: Code::SyntaxError,
+            message,
+        },
+    }
+}
+
+/// Build a project-level `TypeDiagnostic` (no source node; zero range).
+pub fn make_project(code: TypeCode, severity: Severity, message: String) -> TypeDiagnostic {
+    let zero = Position { line: 0, column: 0 };
+    TypeDiagnostic {
+        code,
+        inner: Diagnostic {
+            range: Range {
+                start: zero,
+                end: zero,
+            },
+            byte_range: 0..0,
             severity,
             code: Code::SyntaxError,
             message,
