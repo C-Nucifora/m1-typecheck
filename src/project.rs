@@ -1,5 +1,5 @@
 //! The loaded project: symbol table + enum types + opaque roots + file->group.
-use crate::symbols::{SymbolTable, m1cfg, m1prj};
+use crate::symbols::{SymbolTable, m1cfg, m1dbc, m1prj};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -58,6 +58,16 @@ impl Project {
     pub fn with_config(mut self, m1cfg_path: &Path) -> Result<Project, LoadError> {
         let xml = std::fs::read_to_string(m1cfg_path).map_err(LoadError::Io)?;
         m1cfg::augment(&mut self.table, &xml).map_err(|e| LoadError::Parse(e.to_string()))?;
+        Ok(self)
+    }
+
+    /// Merge a `.m1dbc`'s CAN objects (DBC/Message/Signal) into the symbol
+    /// table. `rel_filename` is the `.m1dbc` path relative to the project root
+    /// (stored on each symbol for goto). May be called once per DBC file.
+    pub fn with_dbc(mut self, dbc_path: &Path, rel_filename: &str) -> Result<Project, LoadError> {
+        let xml = std::fs::read_to_string(dbc_path).map_err(LoadError::Io)?;
+        m1dbc::augment(&mut self.table, &xml, rel_filename)
+            .map_err(|e| LoadError::Parse(e.to_string()))?;
         Ok(self)
     }
 
