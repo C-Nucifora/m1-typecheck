@@ -64,16 +64,12 @@ function M.setup(opts)
     end,
   }, opts.linter or {})
 
-  lint.linters_by_ft = vim.tbl_deep_extend(
-    "force",
-    lint.linters_by_ft or {},
-    {
-      m1scr = vim.list_extend(
-        lint.linters_by_ft and lint.linters_by_ft.m1scr or {},
-        { "m1_typecheck" }
-      ),
-    }
-  )
+  lint.linters_by_ft = vim.tbl_deep_extend("force", lint.linters_by_ft or {}, {
+    m1scr = vim.list_extend(
+      lint.linters_by_ft and lint.linters_by_ft.m1scr or {},
+      { "m1_typecheck" }
+    ),
+  })
 
   if opts.auto_lint ~= false then
     vim.api.nvim_create_autocmd({ "BufWritePost", "InsertLeave" }, {
