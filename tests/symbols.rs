@@ -1,4 +1,4 @@
-use m1_typecheck::symbols::{m1prj, SymbolKind};
+use m1_typecheck::symbols::{SymbolKind, m1prj};
 use std::path::Path;
 
 fn fixture() -> std::path::PathBuf {

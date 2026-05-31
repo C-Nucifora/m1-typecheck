@@ -1,5 +1,5 @@
 //! The loaded project: symbol table + enum types + opaque roots + file->group.
-use crate::symbols::{m1cfg, m1prj, SymbolTable};
+use crate::symbols::{SymbolTable, m1cfg, m1prj};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 

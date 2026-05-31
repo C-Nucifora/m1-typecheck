@@ -1,6 +1,6 @@
 //! Best-effort expression typing over the m1-core CST.
-use crate::resolve::{resolve, Resolution, Scope};
-use crate::types::{numeric_join, type_of_number_literal, ValueType};
+use crate::resolve::{Resolution, Scope, resolve};
+use crate::types::{ValueType, numeric_join, type_of_number_literal};
 use m1_core::{Kind, Node};
 
 /// Type the first expression found in a parsed source string. Test/utility entry.
@@ -51,14 +51,12 @@ pub fn type_of(node: Node, scope: &Scope) -> ValueType {
         Kind::Identifier | Kind::MemberExpression => {
             let path = path_text(node);
             // Typed enum-member path: `<EnumTypeName>.<Member>` -> Enum(id).
-            if let Some(p) = scope.project {
-                if let Some((head, member)) = path.rsplit_once('.') {
-                    if let Some(id) = p.symbols().enum_by_name(head) {
-                        if p.symbols().enum_has_member(id, member) {
-                            return ValueType::Enum(id);
-                        }
-                    }
-                }
+            if let Some(p) = scope.project
+                && let Some((head, member)) = path.rsplit_once('.')
+                && let Some(id) = p.symbols().enum_by_name(head)
+                && p.symbols().enum_has_member(id, member)
+            {
+                return ValueType::Enum(id);
             }
             match resolve(&path, scope) {
                 Resolution::Local(t) => t,
@@ -91,11 +89,7 @@ pub fn type_of(node: Node, scope: &Scope) -> ValueType {
             match (exprs.get(1), exprs.get(2)) {
                 (Some(a), Some(b)) => {
                     let (ta, tb) = (type_of(*a, scope), type_of(*b, scope));
-                    if ta == tb {
-                        ta
-                    } else {
-                        numeric_join(ta, tb)
-                    }
+                    if ta == tb { ta } else { numeric_join(ta, tb) }
                 }
                 _ => ValueType::Unknown,
             }
@@ -135,7 +129,7 @@ fn binary_op_kind(node: Node) -> OpClass {
     for c in node.children() {
         match c.kind() {
             Kind::Plus | Kind::Minus | Kind::Star | Kind::Slash | Kind::Percent => {
-                return OpClass::Arithmetic
+                return OpClass::Arithmetic;
             }
             Kind::EqEq
             | Kind::BangEq
@@ -147,7 +141,7 @@ fn binary_op_kind(node: Node) -> OpClass {
             | Kind::GtEq => return OpClass::Comparison,
             Kind::And | Kind::Or | Kind::AmpAmp | Kind::PipePipe => return OpClass::Logical,
             Kind::Amp | Kind::Pipe | Kind::Caret | Kind::LtLt | Kind::GtGt => {
-                return OpClass::Bitwise
+                return OpClass::Bitwise;
             }
             _ => {}
         }

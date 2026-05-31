@@ -4,8 +4,8 @@
 //! of assignments on any single execution path (`max_per_path`). Sequential
 //! statements add; mutually-exclusive `if`/`else` arms take the per-key max. A
 //! channel whose top-level `max_per_path` reaches 2 is assigned twice on one path.
-use crate::diagnostics::{make, TypeCode, TypeDiagnostic};
-use crate::resolve::{resolve, Resolution, Scope};
+use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
+use crate::resolve::{Resolution, Scope, resolve};
 use crate::symbols::SymbolKind;
 use crate::typer::path_text;
 use m1_core::{Kind, Node};
