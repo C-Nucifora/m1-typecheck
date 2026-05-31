@@ -1,5 +1,5 @@
-use crate::diagnostics::{make, TypeCode, TypeDiagnostic};
-use crate::resolve::{resolve, Resolution, Scope};
+use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
+use crate::resolve::{Resolution, Scope, resolve};
 use m1_core::{Kind, Node, Severity};
 
 pub struct Rule;

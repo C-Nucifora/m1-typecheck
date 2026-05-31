@@ -26,10 +26,10 @@ fn root_segment(path: &str) -> &str {
 
 pub fn resolve<'p>(path: &str, scope: &Scope<'p>) -> Resolution<'p> {
     // 1. Local (single segment).
-    if !path.contains('.') {
-        if let Some(&t) = scope.locals.get(path) {
-            return Resolution::Local(t);
-        }
+    if !path.contains('.')
+        && let Some(&t) = scope.locals.get(path)
+    {
+        return Resolution::Local(t);
     }
     let Some(project) = scope.project else {
         // project-less mode: locals only, everything else opaque

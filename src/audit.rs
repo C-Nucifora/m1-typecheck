@@ -1,5 +1,5 @@
 //! Project-wide symbol-name audit (T050) against the m1-example naming conventions.
-use crate::diagnostics::{make_project, TypeCode, TypeDiagnostic};
+use crate::diagnostics::{TypeCode, TypeDiagnostic, make_project};
 use crate::project::Project;
 use crate::symbols::SymbolKind;
 use m1_core::Severity;
@@ -22,17 +22,17 @@ pub fn audit_project(project: &Project) -> Vec<TypeDiagnostic> {
             }
             _ => None,
         };
-        if let Some((name, ok)) = conv {
-            if !ok {
-                out.push(make_project(
-                    TypeCode::T050,
-                    Severity::Warning,
-                    format!(
-                        "{:?} `{leaf}` does not follow {name} (in `{}`)",
-                        sym.kind, sym.path
-                    ),
-                ));
-            }
+        if let Some((name, ok)) = conv
+            && !ok
+        {
+            out.push(make_project(
+                TypeCode::T050,
+                Severity::Warning,
+                format!(
+                    "{:?} `{leaf}` does not follow {name} (in `{}`)",
+                    sym.kind, sym.path
+                ),
+            ));
         }
     }
     for e in table.enums() {

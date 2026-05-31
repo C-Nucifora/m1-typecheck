@@ -1,5 +1,5 @@
-use crate::diagnostics::{make, TypeCode, TypeDiagnostic};
-use crate::resolve::{resolve, Resolution, Scope};
+use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
+use crate::resolve::{Resolution, Scope, resolve};
 use crate::symbols::SymbolKind;
 use crate::typer::{path_text, type_of};
 use crate::types::ValueType;

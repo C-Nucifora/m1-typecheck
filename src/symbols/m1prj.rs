@@ -101,10 +101,10 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                 };
                 let kind = classify(classname);
                 let filename = node.attribute("Filename").map(str::to_string);
-                if matches!(kind, SymbolKind::Function | SymbolKind::Method) {
-                    if let (Some(f), Some(g)) = (filename.clone(), parent_group(name)) {
-                        file_to_group.insert(f, g);
-                    }
+                if matches!(kind, SymbolKind::Function | SymbolKind::Method)
+                    && let (Some(f), Some(g)) = (filename.clone(), parent_group(name))
+                {
+                    file_to_group.insert(f, g);
                 }
                 // Constant value type from Props/@Value literal, if any.
                 let value_type = if kind == SymbolKind::Constant {

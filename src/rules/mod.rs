@@ -55,19 +55,18 @@ impl Registry {
 
 /// Collect locals (name -> type) declared anywhere in the script.
 fn collect_locals(root: Node) -> std::collections::HashMap<String, crate::types::ValueType> {
-    use crate::types::{type_from_hungarian, ValueType};
+    use crate::types::{ValueType, type_from_hungarian};
     let mut locals = std::collections::HashMap::new();
     fn walk(n: Node, locals: &mut std::collections::HashMap<String, ValueType>) {
-        if n.kind() == m1_core::Kind::LocalDeclaration {
-            if let Some(name_node) = n
+        if n.kind() == m1_core::Kind::LocalDeclaration
+            && let Some(name_node) = n
                 .named_children()
                 .into_iter()
                 .find(|c| c.kind() == m1_core::Kind::Identifier)
-            {
-                let name = name_node.text().to_string();
-                let t = type_from_hungarian(&name).unwrap_or(ValueType::Unknown);
-                locals.insert(name, t);
-            }
+        {
+            let name = name_node.text().to_string();
+            let t = type_from_hungarian(&name).unwrap_or(ValueType::Unknown);
+            locals.insert(name, t);
         }
         for c in n.children() {
             walk(c, locals);
@@ -135,9 +134,10 @@ mod tests {
         // local with proper prefix, simple int math -> no T010/T011/T002/T003
         let r = check_script_no_project("local iSum = 1 + 2;\n");
         assert!(r.syntax_errors.is_empty());
-        assert!(r
-            .diagnostics
-            .iter()
-            .all(|d| d.code != crate::diagnostics::TypeCode::T010));
+        assert!(
+            r.diagnostics
+                .iter()
+                .all(|d| d.code != crate::diagnostics::TypeCode::T010)
+        );
     }
 }

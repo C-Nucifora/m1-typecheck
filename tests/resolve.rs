@@ -1,5 +1,5 @@
 use m1_typecheck::project::Project;
-use m1_typecheck::resolve::{resolve, Resolution, Scope};
+use m1_typecheck::resolve::{Resolution, Scope, resolve};
 use m1_typecheck::types::ValueType;
 use std::collections::HashMap;
 use std::path::Path;

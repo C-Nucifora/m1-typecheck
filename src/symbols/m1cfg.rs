@@ -47,10 +47,10 @@ pub fn augment(table: &mut SymbolTable, xml: &str) -> Result<(), ConfigError> {
                 table.set_enum_assoc(name, id);
             }
             // zero or many -> leave Unknown (silent), but still record the unit.
-            if let Some(sym) = table.get_mut(name) {
-                if sym.unit.is_none() {
-                    sym.unit = unit;
-                }
+            if let Some(sym) = table.get_mut(name)
+                && sym.unit.is_none()
+            {
+                sym.unit = unit;
             }
             continue;
         }

@@ -1,4 +1,4 @@
-use crate::diagnostics::{make, TypeCode, TypeDiagnostic};
+use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
 use crate::resolve::Scope;
 use crate::typer::type_of;
 use crate::types::ValueType;

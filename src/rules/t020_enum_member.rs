@@ -1,4 +1,4 @@
-use crate::diagnostics::{make, TypeCode, TypeDiagnostic};
+use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
 use crate::resolve::Scope;
 use crate::typer::path_text;
 use m1_core::{Kind, Node, Severity};
@@ -26,17 +26,16 @@ impl super::Rule for Rule {
             return; // only the outermost path
         }
         let path = path_text(*node);
-        if let Some((head, member)) = path.rsplit_once('.') {
-            if let Some(id) = table.enum_by_name(head) {
-                if !table.enum_has_member(id, member) {
-                    out.push(make(
-                        TypeCode::T020,
-                        node,
-                        Severity::Warning,
-                        format!("`{member}` is not a member of enum `{head}`"),
-                    ));
-                }
-            }
+        if let Some((head, member)) = path.rsplit_once('.')
+            && let Some(id) = table.enum_by_name(head)
+            && !table.enum_has_member(id, member)
+        {
+            out.push(make(
+                TypeCode::T020,
+                node,
+                Severity::Warning,
+                format!("`{member}` is not a member of enum `{head}`"),
+            ));
         }
     }
 }
