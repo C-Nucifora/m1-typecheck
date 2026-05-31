@@ -15,15 +15,11 @@ impl std::fmt::Display for ConfigError {
 }
 impl std::error::Error for ConfigError {}
 
+/// Map a `.m1cfg` cell primitive type to a [`ValueType`]. `enum` cells are
+/// handled separately in [`augment`] (back-resolved to a specific enum type);
+/// any non-primitive name falls through to `Unknown`.
 pub fn cell_type(t: &str) -> ValueType {
-    match t {
-        "f32" | "f64" => ValueType::Float,
-        "u8" | "u16" | "u32" | "u64" => ValueType::Unsigned,
-        "s8" | "s16" | "s32" | "s64" => ValueType::Integer,
-        "bool" => ValueType::Boolean,
-        "enum" => ValueType::Unknown, // enum association deferred to v2
-        _ => ValueType::Unknown,
-    }
+    crate::types::primitive_type(t).unwrap_or(ValueType::Unknown)
 }
 
 pub fn augment(table: &mut SymbolTable, xml: &str) -> Result<(), ConfigError> {

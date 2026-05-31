@@ -1,6 +1,6 @@
 //! Parse Project.m1prj into a SymbolTable, enum types, and a file->group map.
-use super::{EnumType, Symbol, SymbolKind, SymbolTable};
-use crate::types::ValueType;
+use super::{EnumId, EnumType, Symbol, SymbolKind, SymbolTable};
+use crate::types::{ValueType, primitive_type};
 use std::collections::{HashMap, HashSet};
 
 pub struct Parsed {
@@ -112,15 +112,20 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                 {
                     file_to_group.insert(f, g);
                 }
-                // Constant value type from Props/@Value literal, if any.
-                let value_type = if kind == SymbolKind::Constant {
-                    node.children()
-                        .find(|c| c.has_tag_name("Props"))
+                let props = node.children().find(|c| c.has_tag_name("Props"));
+                // Value type: Constants from their @Value literal; everything
+                // else from the declared @Type (primitive or `::This.<enum>`).
+                let (value_type, enum_assoc) = if kind == SymbolKind::Constant {
+                    let vt = props
                         .and_then(|p| p.attribute("Value"))
                         .map(constant_value_type)
-                        .unwrap_or(ValueType::Unknown)
+                        .unwrap_or(ValueType::Unknown);
+                    (vt, None)
                 } else {
-                    ValueType::Unknown
+                    props
+                        .and_then(|p| p.attribute("Type"))
+                        .map(|t| resolve_props_type(t, &table))
+                        .unwrap_or((ValueType::Unknown, None))
                 };
                 let class = if kind == SymbolKind::Object {
                     Some(classname.to_string())
@@ -133,7 +138,7 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                     value_type,
                     unit: None,
                     filename,
-                    enum_assoc: None,
+                    enum_assoc,
                     class,
                 });
             }
@@ -145,6 +150,28 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
         file_to_group,
         module_roots,
     })
+}
+
+/// Resolve a component's declared `<Props Type="…">` to a value type (and the
+/// enum id when it names a project enum). Recognised forms:
+///
+///   * primitive — `u32`, `s16`, `f32`, `bool`, …
+///   * `::This.<EnumName>` — an enum defined in this project's `<DataTypes>`
+///
+/// Anything else (cross-module enums like `MoTeC Types.…`, derived `$(…)`
+/// expressions, an unknown enum name) is left `Unknown` rather than guessed.
+/// Enums are registered earlier in the document than the components that use
+/// them, so they are already present in `table` when this is called.
+fn resolve_props_type(type_attr: &str, table: &SymbolTable) -> (ValueType, Option<EnumId>) {
+    if let Some(vt) = primitive_type(type_attr) {
+        return (vt, None);
+    }
+    if let Some(name) = type_attr.strip_prefix("::This.")
+        && let Some(id) = table.enum_by_name(name)
+    {
+        return (ValueType::Enum(id), Some(id));
+    }
+    (ValueType::Unknown, None)
 }
 
 fn constant_value_type(value: &str) -> ValueType {
@@ -174,6 +201,85 @@ mod tests {
         assert_eq!(classify("BuiltIn.MethodUser"), SymbolKind::Method);
         // An unhandled BuiltIn.* stays Other, not Object.
         assert_eq!(classify("BuiltIn.IOCharacteristic"), SymbolKind::Other);
+    }
+
+    #[test]
+    fn channel_gets_enum_type_from_props_this_reference() {
+        // A channel declared with `<Props Type="::This.<EnumName>">` must be
+        // associated with the enum defined in the project's <DataTypes>.
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <DataTypes>
+    <Type Name="Drive State" Storage="enum" Default="Off">
+      <Enum Name="Off" ContainerOrder="0"/>
+      <Enum Name="On" ContainerOrder="1"/>
+    </Type>
+  </DataTypes>
+  <Component Classname="BuiltIn.Channel" Name="Root.Control.State">
+    <Props Type="::This.Drive State"/>
+  </Component>
+</Project>"#;
+        let parsed = parse(xml).unwrap();
+        let id = parsed
+            .table
+            .enum_by_name("Drive State")
+            .expect("enum loaded");
+        let sym = parsed.table.get("Root.Control.State").expect("channel");
+        assert_eq!(sym.value_type, ValueType::Enum(id));
+        assert_eq!(sym.enum_assoc, Some(id));
+    }
+
+    #[test]
+    fn channel_gets_primitive_type_from_props() {
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.Channel" Name="Root.A"><Props Type="u32"/></Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.B"><Props Type="s32"/></Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.C"><Props Type="f32"/></Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.D"><Props Type="bool"/></Component>
+</Project>"#;
+        let parsed = parse(xml).unwrap();
+        assert_eq!(
+            parsed.table.get("Root.A").unwrap().value_type,
+            ValueType::Unsigned
+        );
+        assert_eq!(
+            parsed.table.get("Root.B").unwrap().value_type,
+            ValueType::Integer
+        );
+        assert_eq!(
+            parsed.table.get("Root.C").unwrap().value_type,
+            ValueType::Float
+        );
+        assert_eq!(
+            parsed.table.get("Root.D").unwrap().value_type,
+            ValueType::Boolean
+        );
+    }
+
+    #[test]
+    fn unresolvable_props_type_stays_unknown() {
+        // Cross-module enum (not defined in this file) and derived types are
+        // left Unknown rather than guessed.
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.Channel" Name="Root.M"><Props Type="MoTeC Types.Mode Enumeration"/></Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.N"><Props Type="$(Parent.Value:Type)"/></Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.O"/>
+</Project>"#;
+        let parsed = parse(xml).unwrap();
+        assert_eq!(
+            parsed.table.get("Root.M").unwrap().value_type,
+            ValueType::Unknown
+        );
+        assert_eq!(
+            parsed.table.get("Root.N").unwrap().value_type,
+            ValueType::Unknown
+        );
+        assert_eq!(
+            parsed.table.get("Root.O").unwrap().value_type,
+            ValueType::Unknown
+        );
     }
 
     #[test]
