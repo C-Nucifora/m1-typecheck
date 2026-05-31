@@ -145,3 +145,9 @@ m1-typecheck --project Project.m1prj --audit-names
 
 Example identifiers in the docs and fixtures are **synthetic placeholders**, not
 drawn from any real project.
+
+## License
+
+Licensed under the GNU General Public License v3.0 or later (GPL-3.0-or-later) — see [LICENSE](LICENSE).
+
+Copyright (C) 2026 The M1 Tools authors.
