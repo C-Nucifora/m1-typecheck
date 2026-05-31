@@ -57,21 +57,17 @@ pub fn numeric_join(a: ValueType, b: ValueType) -> ValueType {
     }
 }
 
-/// Infer a local's type from its Hungarian prefix (prefix letter + UpperCase).
-pub fn type_from_hungarian(name: &str) -> Option<ValueType> {
-    let mut chars = name.chars();
-    let first = chars.next()?;
-    let second = chars.next()?;
-    if !second.is_ascii_uppercase() {
-        return None;
-    }
-    match first {
-        'b' => Some(ValueType::Boolean),
-        'u' => Some(ValueType::Unsigned),
-        'i' => Some(ValueType::Integer),
-        'f' => Some(ValueType::Float),
-        _ => None,
-    }
+/// Map an M1 primitive storage/cell type name (`u32`, `s16`, `f32`, `bool`, …)
+/// to a [`ValueType`]. Returns `None` for non-primitive names (enums, derived
+/// `$(…)` expressions, etc.). Shared by the `.m1prj` and `.m1cfg` parsers.
+pub fn primitive_type(t: &str) -> Option<ValueType> {
+    Some(match t {
+        "f32" | "f64" => ValueType::Float,
+        "u8" | "u16" | "u32" | "u64" => ValueType::Unsigned,
+        "s8" | "s16" | "s32" | "s64" => ValueType::Integer,
+        "bool" => ValueType::Boolean,
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -99,16 +95,5 @@ mod tests {
         assert_eq!(numeric_join(Integer, Unsigned), Integer);
         assert_eq!(numeric_join(Unknown, Float), Unknown);
         assert_eq!(numeric_join(Boolean, Integer), Unknown);
-    }
-
-    #[test]
-    fn prefix_types() {
-        assert_eq!(type_from_hungarian("bReady"), Some(ValueType::Boolean));
-        assert_eq!(type_from_hungarian("uCount"), Some(ValueType::Unsigned));
-        assert_eq!(type_from_hungarian("iDelta"), Some(ValueType::Integer));
-        assert_eq!(type_from_hungarian("fGain"), Some(ValueType::Float));
-        assert_eq!(type_from_hungarian("count"), None); // no prefix
-        assert_eq!(type_from_hungarian("freq"), None); // 'f' not followed by upper
-        assert_eq!(type_from_hungarian("x"), None);
     }
 }
