@@ -59,8 +59,10 @@ fn opaque_root_passes_through() {
         group: Some("Root.Foo".into()),
         project: Some(&p),
     };
+    // An unknown member of a known library object is a built-in root, not a miss.
+    // (`Calculate.Min`/`Max` are now real overloads, so use a name that isn't.)
     assert!(matches!(
-        resolve("Calculate.Min", &scope),
+        resolve("Calculate.NoSuchMethod", &scope),
         Resolution::Opaque
     ));
 }
