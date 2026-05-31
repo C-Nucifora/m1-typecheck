@@ -121,11 +121,16 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                         .map(constant_value_type)
                         .unwrap_or(ValueType::Unknown);
                     (vt, None)
+                } else if let Some(t) = props.and_then(|p| p.attribute("Type")) {
+                    // Explicit storage type: a primitive (`u32`, `s16`, …) or a
+                    // `::This.<enum>` reference.
+                    resolve_props_type(t, &table)
+                } else if props.and_then(|p| p.attribute("Qty")).is_some() {
+                    // No explicit storage type but a physical quantity (`Qty`,
+                    // e.g. `rad/s`, `V`, `K`): a measured channel, stored as Float.
+                    (ValueType::Float, None)
                 } else {
-                    props
-                        .and_then(|p| p.attribute("Type"))
-                        .map(|t| resolve_props_type(t, &table))
-                        .unwrap_or((ValueType::Unknown, None))
+                    (ValueType::Unknown, None)
                 };
                 let class = if kind == SymbolKind::Object {
                     Some(classname.to_string())
@@ -278,6 +283,32 @@ mod tests {
         );
         assert_eq!(
             parsed.table.get("Root.O").unwrap().value_type,
+            ValueType::Unknown
+        );
+    }
+
+    #[test]
+    fn channel_with_qty_but_no_type_is_float() {
+        // A measured channel declares a physical quantity (Qty) and no explicit
+        // storage Type; it is stored as Float. (A bare channel with neither
+        // stays Unknown.)
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.Channel" Name="Root.Speed"><Props Qty="rad/s" Security="Tune"/></Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.Volts"><Props Qty="V"/></Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.Bare"/>
+</Project>"#;
+        let parsed = parse(xml).unwrap();
+        assert_eq!(
+            parsed.table.get("Root.Speed").unwrap().value_type,
+            ValueType::Float
+        );
+        assert_eq!(
+            parsed.table.get("Root.Volts").unwrap().value_type,
+            ValueType::Float
+        );
+        assert_eq!(
+            parsed.table.get("Root.Bare").unwrap().value_type,
             ValueType::Unknown
         );
     }
