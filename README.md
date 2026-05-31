@@ -71,8 +71,6 @@ typed by Hungarian prefix (`b`/`u`/`i`/`f` + UpperCase).
 | T001 | Warning | **unresolved-reference** — member path whose root is a known project group does not resolve. |
 | T002 | Error | **float-equality** — `==`/`!=`/`eq`/`neq` with a `Float` operand; use a tolerance check. |
 | T003 | Warning | **int-float-mixing** — arithmetic mixing `Float` with `Integer`/`Unsigned` without an explicit conversion. |
-| T010 | Warning | **local-hungarian-prefix** — a `local` lacking a recognised type prefix. |
-| T011 | Warning | **hungarian-prefix-mismatch** — a `local` whose prefix disagrees with its initialiser's known type. |
 
 ## v2: enum domain model, flow analysis, and the project audit
 
