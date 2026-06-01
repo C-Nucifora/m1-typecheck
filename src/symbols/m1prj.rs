@@ -66,10 +66,10 @@ fn parent_group(path: &str) -> Option<String> {
 }
 
 /// Derive an untyped channel's value type from the class of the object that
-/// owns it (its parent in the component tree). Only unambiguously-numeric
-/// classes are mapped; anything else stays `Unknown` (no worse than before).
-/// Ambiguous classes (`_IOMethod.abs`, tables, switches, references, …) are
-/// deliberately left out pending confirmation of their output types.
+/// owns it (its parent in the component tree). Each mapping is a known output
+/// type for that package class; classes whose output is tune-defined or
+/// otherwise indeterminate (`BuiltIn.[Calibration]Table`, `MoTeC Comms.CAN Bus`,
+/// `BuiltIn.Reference`, the odd built-ins) stay `Unknown` — no worse than before.
 fn type_from_owner_class(path: &str, classname_by_path: &HashMap<String, String>) -> ValueType {
     let Some(parent) = parent_group(path) else {
         return ValueType::Unknown;
@@ -77,13 +77,15 @@ fn type_from_owner_class(path: &str, classname_by_path: &HashMap<String, String>
     let Some(class) = classname_by_path.get(&parent) else {
         return ValueType::Unknown;
     };
-    // `MoTeC Input.*` sensors are physical measurements (temperature,
-    // acceleration, pressure, …) and a `ratio` IO method outputs a dimensionless
-    // value — both FloatingPoint, unambiguously.
-    if class.starts_with("MoTeC Input.") || class == "_IOMethod.ratio" {
-        ValueType::Float
-    } else {
-        ValueType::Unknown
+    match class.as_str() {
+        // Physical-measurement sensors and float-producing IO methods.
+        // `MoTeC Input.*` = temperature/acceleration/pressure/…; `ratio` =
+        // dimensionless; `abs` = magnitude of a signal — all FloatingPoint.
+        c if c.starts_with("MoTeC Input.") => ValueType::Float,
+        "_IOMethod.ratio" | "_IOMethod.abs" => ValueType::Float,
+        // A switched output is on/off.
+        "MoTeC Output.Switched Output" => ValueType::Boolean,
+        _ => ValueType::Unknown,
     }
 }
 
@@ -385,18 +387,33 @@ mod tests {
     #[test]
     fn untyped_channel_typed_from_owner_class() {
         // A channel with no inline Type/Qty inherits a type from its owning
-        // object's class: MoTeC Input.* sensors and `_IOMethod.ratio` are
-        // FloatingPoint (#25). Ambiguous classes stay Unknown — no guessing.
+        // object's class (#25): MoTeC Input.* sensors, `_IOMethod.ratio`/`abs`
+        // are FloatingPoint; a switched output is Boolean. Tune-defined /
+        // indeterminate classes (tables) stay Unknown — no guessing.
         let xml = r#"<?xml version="1.0"?>
 <Project>
   <Component Classname="MoTeC Input.Temperature" Name="Root.Coolant"/>
   <Component Classname="BuiltIn.Channel" Name="Root.Coolant.Value"/>
   <Component Classname="_IOMethod.ratio" Name="Root.Brake Bias"/>
   <Component Classname="BuiltIn.Channel" Name="Root.Brake Bias.Output"/>
+  <Component Classname="_IOMethod.abs" Name="Root.Yaw"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.Yaw.Magnitude"/>
+  <Component Classname="MoTeC Output.Switched Output" Name="Root.Fan"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.Fan.State"/>
   <Component Classname="BuiltIn.Table" Name="Root.Tbl"/>
   <Component Classname="BuiltIn.Channel" Name="Root.Tbl.Out"/>
 </Project>"#;
         let parsed = parse(xml).unwrap();
+        assert_eq!(
+            parsed.table.get("Root.Yaw.Magnitude").unwrap().value_type,
+            ValueType::Float,
+            "_IOMethod.abs output should be Float"
+        );
+        assert_eq!(
+            parsed.table.get("Root.Fan.State").unwrap().value_type,
+            ValueType::Boolean,
+            "Switched Output channel should be Boolean"
+        );
         assert_eq!(
             parsed.table.get("Root.Coolant.Value").unwrap().value_type,
             ValueType::Float,
