@@ -46,6 +46,8 @@ fn comparisons_are_boolean() {
 }
 
 #[test]
-fn calls_are_unknown() {
-    assert_eq!(ty("Calculate.Min(1, 2)", &[]), ValueType::Unknown);
+fn calls_resolve_builtin_return_types() {
+    // Calculate.Min -> Integer|FloatingPoint, following its argument types (#17).
+    assert_eq!(ty("Calculate.Min(1, 2)", &[]), ValueType::Integer);
+    assert_eq!(ty("Calculate.Min(1.0, 2.0)", &[]), ValueType::Float);
 }

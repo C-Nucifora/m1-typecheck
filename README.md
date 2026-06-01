@@ -70,7 +70,7 @@ typed by Hungarian prefix (`b`/`u`/`i`/`f` + UpperCase).
 |------|----------|------|
 | T001 | Warning | **unresolved-reference** — member path whose root is a known project group does not resolve. |
 | T002 | Error | **float-equality** — `==`/`!=`/`eq`/`neq` with a `Float` operand; use a tolerance check. |
-| T003 | Warning | **int-float-mixing** — arithmetic mixing `Float` with `Integer`/`Unsigned` without an explicit conversion. |
+| T003 | Warning | **float→integer narrowing** — a compound assignment (`+=` `-=` `*=` `/=`) storing a `Float` value back into an integral target, which truncates. Plain integer/float *widening* in arithmetic is implicit in M1 Build and not flagged. |
 
 ## v2: enum domain model, flow analysis, and the project audit
 

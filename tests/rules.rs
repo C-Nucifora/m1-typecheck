@@ -21,15 +21,16 @@ fn t002_no_false_positive_on_integers() {
 }
 
 #[test]
-fn t003_flags_int_float_mix() {
+fn t003_allows_int_float_widening_in_arithmetic() {
+    // M1 Build implicitly widens the integer to float; this is not flagged (#17).
     assert!(
-        codes("local fX = 1.0;\nlocal iY = 2;\nlocal fZ = fX + iY;\n").contains(&TypeCode::T003)
+        !codes("local fX = 1.0;\nlocal iY = 2;\nlocal fZ = fX + iY;\n").contains(&TypeCode::T003)
     );
 }
 
 #[test]
 fn t003_no_flag_when_converted() {
-    // Convert.ToFloat(iY) is a call -> Unknown -> join is Unknown -> no T003
+    // Convert.ToFloat(iY) returns FloatingPoint -> float + float, no narrowing.
     let src = "local fX = 1.0;\nlocal iY = 2;\nlocal fZ = fX + Convert.ToFloat(iY);\n";
     assert!(!codes(src).contains(&TypeCode::T003));
 }
@@ -42,10 +43,16 @@ fn t003_no_flag_pure_float() {
 }
 
 #[test]
-fn t003_flags_compound_assign_mix() {
-    // fX is Float, the literal 2 is integer; `+=` mixes them (#22).
-    assert!(codes("local fX = 1.0;\nfX += 2;\n").contains(&TypeCode::T003));
-    assert!(codes("local fX = 1.0;\nfX *= 3;\n").contains(&TypeCode::T003));
+fn t003_flags_float_to_integer_narrowing_compound_assign() {
+    // iX is an integer target; `+=`/`*=` of a float narrows on store (precision loss).
+    assert!(codes("local iX = 1;\niX += 2.0;\n").contains(&TypeCode::T003));
+    assert!(codes("local iX = 1;\niX *= 3.5;\n").contains(&TypeCode::T003));
+}
+
+#[test]
+fn t003_no_flag_compound_assign_widening_into_float_target() {
+    // Float target, integer value: widening, safe.
+    assert!(!codes("local fX = 1.0;\nfX += 2;\n").contains(&TypeCode::T003));
 }
 
 #[test]

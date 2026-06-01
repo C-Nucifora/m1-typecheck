@@ -68,7 +68,7 @@ pub fn type_of(node: Node, scope: &Scope) -> ValueType {
                 Resolution::Opaque | Resolution::Unresolved => ValueType::Unknown,
             }
         }
-        Kind::CallExpression => ValueType::Unknown, // v1: return types unknown
+        Kind::CallExpression => type_of_call(node, scope),
         Kind::UnaryExpression => {
             // `not`/`!` -> Boolean; `-x` -> type of x.
             let op_is_not = node
@@ -99,6 +99,76 @@ pub fn type_of(node: Node, scope: &Scope) -> ValueType {
             }
         }
         Kind::BinaryExpression => type_of_binary(node, scope),
+        _ => ValueType::Unknown,
+    }
+}
+
+/// Type a call from the declared `returns` of its resolved built-in overload(s).
+/// User-function calls and unresolved callees stay `Unknown` (no signature in the
+/// symbol model yet). When overloads disagree on the mapped type we return
+/// `Unknown` rather than guess.
+fn type_of_call(node: Node, scope: &Scope) -> ValueType {
+    let Some(callee) = node
+        .named_children()
+        .into_iter()
+        .find(|c| matches!(c.kind(), Kind::Identifier | Kind::MemberExpression))
+    else {
+        return ValueType::Unknown;
+    };
+    match resolve(&path_text(callee), scope) {
+        Resolution::BuiltinFn(overloads) => {
+            let arg_types = call_arg_types(node, scope);
+            let mut result: Option<ValueType> = None;
+            for ov in &overloads {
+                let t = returns_to_type(&ov.returns, &arg_types);
+                match result {
+                    None => result = Some(t),
+                    Some(prev) if prev == t => {}
+                    Some(_) => return ValueType::Unknown,
+                }
+            }
+            result.unwrap_or(ValueType::Unknown)
+        }
+        _ => ValueType::Unknown,
+    }
+}
+
+/// Types of a call's positional argument expressions, in order.
+fn call_arg_types(node: Node, scope: &Scope) -> Vec<ValueType> {
+    node.children()
+        .into_iter()
+        .find(|c| c.kind() == Kind::ArgumentList)
+        .map(|al| {
+            al.named_children()
+                .into_iter()
+                .filter(|c| is_expr(c.kind()))
+                .map(|c| type_of(c, scope))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Map an intrinsic overload's declared `returns` to a [`ValueType`]. The
+/// `Integer|FloatingPoint` union (Min/Max/Abs/…) follows the argument types.
+fn returns_to_type(returns: &str, arg_types: &[ValueType]) -> ValueType {
+    match returns {
+        "FloatingPoint" | "FixedPoint7dps" => ValueType::Float,
+        "Integer" => ValueType::Integer,
+        "UnsignedInteger" => ValueType::Unsigned,
+        "Boolean" => ValueType::Boolean,
+        "String" => ValueType::String,
+        "Integer|FloatingPoint" => arg_types
+            .iter()
+            .copied()
+            .filter(|t| {
+                matches!(
+                    t,
+                    ValueType::Integer | ValueType::Unsigned | ValueType::Float
+                )
+            })
+            .reduce(numeric_join)
+            .unwrap_or(ValueType::Unknown),
+        // Void, Handle, Enumeration (unknown which enum), Bit: not usefully typed.
         _ => ValueType::Unknown,
     }
 }
@@ -162,4 +232,70 @@ fn child_expr(node: Node) -> Option<Node> {
 /// The dotted source text of an identifier / member-expression path.
 pub fn path_text(node: Node) -> String {
     node.text().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn type_of_first_call(src: &str) -> ValueType {
+        let cst = m1_core::parse(src);
+        fn find_call(n: Node) -> Option<Node> {
+            if n.kind() == Kind::CallExpression {
+                return Some(n);
+            }
+            n.children().into_iter().find_map(find_call)
+        }
+        let scope = Scope {
+            locals: HashMap::new(),
+            group: None,
+            project: None,
+        };
+        type_of(find_call(cst.root()).expect("a call expression"), &scope)
+    }
+
+    #[test]
+    fn builtin_return_types_map_to_value_types() {
+        // Calculate.Bias -> FloatingPoint; Calculate.Between -> Boolean;
+        // CanComms.GetID -> Integer; CanComms.GetTicks -> UnsignedInteger.
+        assert_eq!(
+            type_of_first_call("local x = Calculate.Bias(1.0, 2.0, 3.0);\n"),
+            ValueType::Float
+        );
+        assert_eq!(
+            type_of_first_call("local x = Calculate.Between(1.0, 0.0, 2.0);\n"),
+            ValueType::Boolean
+        );
+        assert_eq!(
+            type_of_first_call("local x = CanComms.GetID(h);\n"),
+            ValueType::Integer
+        );
+        assert_eq!(
+            type_of_first_call("local x = CanComms.GetTicks();\n"),
+            ValueType::Unsigned
+        );
+    }
+
+    #[test]
+    fn numeric_union_return_follows_argument_types() {
+        // Calculate.Absolute -> Integer|FloatingPoint: result follows the argument.
+        assert_eq!(
+            type_of_first_call("local x = Calculate.Absolute(1.0);\n"),
+            ValueType::Float
+        );
+        assert_eq!(
+            type_of_first_call("local x = Calculate.Absolute(2);\n"),
+            ValueType::Integer
+        );
+    }
+
+    #[test]
+    fn unknown_callee_is_unknown() {
+        // A user/unresolved function has no signature in the model yet.
+        assert_eq!(
+            type_of_first_call("local x = SomeGroup.UserFunc(1);\n"),
+            ValueType::Unknown
+        );
+    }
 }
