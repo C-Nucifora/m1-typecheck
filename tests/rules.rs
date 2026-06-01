@@ -40,3 +40,20 @@ fn t003_no_flag_pure_float() {
         !codes("local fX = 1.0;\nlocal fY = 2.0;\nlocal fZ = fX + fY;\n").contains(&TypeCode::T003)
     );
 }
+
+#[test]
+fn t003_flags_compound_assign_mix() {
+    // fX is Float, the literal 2 is integer; `+=` mixes them (#22).
+    assert!(codes("local fX = 1.0;\nfX += 2;\n").contains(&TypeCode::T003));
+    assert!(codes("local fX = 1.0;\nfX *= 3;\n").contains(&TypeCode::T003));
+}
+
+#[test]
+fn t003_no_flag_compound_assign_pure_float() {
+    assert!(!codes("local fX = 1.0;\nfX += 2.0;\n").contains(&TypeCode::T003));
+}
+
+#[test]
+fn t003_no_flag_compound_assign_pure_int() {
+    assert!(!codes("local iX = 1;\niX += 2;\n").contains(&TypeCode::T003));
+}
