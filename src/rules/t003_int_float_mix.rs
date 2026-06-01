@@ -1,3 +1,13 @@
+//! T003 — float→integer narrowing.
+//!
+//! M1 Build implicitly *widens* integral operands to float in arithmetic, so a
+//! plain `float OP integer` expression is well-defined and not flagged (#17:
+//! flagging all such mixing floods the corpus once call-return types are known —
+//! 243 diagnostics on cleanly-building code). The genuinely lossy case is the
+//! reverse: storing a float *back into an integral target* via a compound
+//! assignment (`intCh += floatVal`), which M1 will not do implicitly. That
+//! narrowing is what T003 now flags; widening in expressions, and plain `=`
+//! assignment mismatches (T030), are out of scope here.
 use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
 use crate::resolve::Scope;
 use crate::typer::type_of;
@@ -8,41 +18,17 @@ pub struct Rule;
 
 impl super::Rule for Rule {
     fn check_node(&self, node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>) {
-        match node.kind() {
-            Kind::BinaryExpression => self.check_binary(node, scope, out),
-            Kind::AssignmentStatement => self.check_compound_assign(node, scope, out),
-            _ => {}
+        if node.kind() == Kind::AssignmentStatement {
+            self.check_compound_assign(node, scope, out);
         }
     }
 }
 
 impl Rule {
-    fn check_binary(&self, node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>) {
-        let is_arith = node.children().iter().any(|c| {
-            matches!(
-                c.kind(),
-                Kind::Plus | Kind::Minus | Kind::Star | Kind::Slash | Kind::Percent
-            )
-        });
-        if !is_arith {
-            return;
-        }
-        let ops: Vec<_> = node
-            .named_children()
-            .into_iter()
-            .filter(|c| is_expr(c.kind()))
-            .collect();
-        let (Some(l), Some(r)) = (ops.first(), ops.get(1)) else {
-            return;
-        };
-        if mixes_int_and_float(type_of(*l, scope), type_of(*r, scope)) {
-            push_t003(node, out);
-        }
-    }
-
-    /// Compound assignments (`+=`, `-=`, `*=`, `/=`) are arithmetic too: the
-    /// target and value operands must not mix integer and float (#22). Plain
-    /// `=` is handled by T030 (assignment type mismatch), not here.
+    /// Compound assignment (`+=`, `-=`, `*=`, `/=`) whose target is integral and
+    /// whose value is a float narrows on store: the float result is truncated
+    /// back into the integer target. Flag it; the reverse (`floatCh += intVal`)
+    /// is safe widening and is left alone.
     fn check_compound_assign(&self, node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>) {
         let Some(op) = node.child_by_field(Field::Operator) else {
             return;
@@ -59,37 +45,13 @@ impl Rule {
         ) else {
             return;
         };
-        if mixes_int_and_float(type_of(target, scope), type_of(value, scope)) {
-            push_t003(node, out);
+        if type_of(target, scope).is_integral() && type_of(value, scope) == ValueType::Float {
+            out.push(make(
+                TypeCode::T003,
+                node,
+                Severity::Warning,
+                "float value narrows to an integer target; use Convert.ToInteger".into(),
+            ));
         }
     }
-}
-
-fn mixes_int_and_float(lt: ValueType, rt: ValueType) -> bool {
-    (lt == ValueType::Float && rt.is_integral()) || (rt == ValueType::Float && lt.is_integral())
-}
-
-fn push_t003(node: &Node, out: &mut Vec<TypeDiagnostic>) {
-    out.push(make(
-        TypeCode::T003,
-        node,
-        Severity::Warning,
-        "mixing integer and float in arithmetic; use Convert.ToFloat/ToInteger".into(),
-    ));
-}
-
-fn is_expr(k: Kind) -> bool {
-    matches!(
-        k,
-        Kind::Identifier
-            | Kind::MemberExpression
-            | Kind::CallExpression
-            | Kind::UnaryExpression
-            | Kind::BinaryExpression
-            | Kind::TernaryExpression
-            | Kind::ParenthesizedExpression
-            | Kind::Number
-            | Kind::Boolean
-            | Kind::String
-    )
 }
