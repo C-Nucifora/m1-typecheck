@@ -45,7 +45,14 @@ fn conditional_context(call: &Node) -> Option<&'static str> {
     while let Some(n) = cur {
         match n.kind() {
             Kind::IfStatement | Kind::ElseClause => return Some("inside an `if`/`else` branch"),
-            Kind::WhenStatement | Kind::IsClause => return Some("inside a `when`/`is` branch"),
+            // An `is` clause is a conditional arm (only the matching state runs),
+            // so a stateful call there is conditional. The enclosing
+            // `WhenStatement` itself is NOT: a top-level `when` runs on every
+            // tick (it's the state-machine main) and its subject expression is
+            // evaluated unconditionally. Keep walking past a `WhenStatement` —
+            // if it is a *nested* when, the surrounding `is`/`if` ancestor is
+            // caught on the way up; if top-level, the call is unconditional (#21).
+            Kind::IsClause => return Some("inside a `when`/`is` branch"),
             Kind::TernaryExpression => return Some("inside a `?:` expression"),
             Kind::BinaryExpression if is_comparison_or_logical(&n) => {
                 return Some("inside a comparison/logical expression");
@@ -122,5 +129,20 @@ mod tests {
     fn non_stateful_call_inside_if_is_ok() {
         let src = "if (ready) { x = Calculate.Max(a, b); }\n";
         assert!(!codes(src).contains(&TypeCode::T060));
+    }
+
+    #[test]
+    fn stateful_call_in_when_subject_is_ok() {
+        // The `when` subject is evaluated on every tick (the state machine is the
+        // unconditional main), so a stateful call there is not conditional (#21).
+        let src = "when (Delay.Rising(go, 5.0)) {\n    is (true) {\n        x = 1;\n    }\n}\n";
+        assert!(!codes(src).contains(&TypeCode::T060));
+    }
+
+    #[test]
+    fn stateful_call_inside_is_clause_is_flagged() {
+        // An `is` clause only runs when its state matches → conditional.
+        let src = "when (state) {\n    is (true) {\n        x = Delay.Rising(go, 5.0);\n    }\n}\n";
+        assert!(codes(src).contains(&TypeCode::T060));
     }
 }
