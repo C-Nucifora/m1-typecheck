@@ -93,6 +93,7 @@ to pin the v1 rule set):
 |------|----------|------|
 | T020 | Warning | **enum-non-member** — a typed member path `<EnumType>.<Member>` whose member the enum does not declare. |
 | T021 | Warning | **enum-numeric-comparison** — a comparison with one *known* `Enum` operand and the other *known* numeric. |
+| T004 | Warning | **signed-unsigned-comparison** — an ordering comparison (`<` `>` `<=` `>=`) mixing a known `Unsigned` operand with a known signed `Integer`, where the result can flip on wraparound. Narrow by design: ordering only, and literal operands are allowed. |
 | T030 | Warning | **assignment-type-mismatch** — `target = value` where the target is a Channel/Parameter with a known type and the value's known type is incompatible. |
 | T040 | Warning | **channel-multiple-assignment** — a Channel assigned more than once on a single code path (control-flow aware: mutually-exclusive `if`/`else` arms are not a conflict). Implemented as a whole-tree pass in `flow.rs`, not a node-at-a-time rule. |
 

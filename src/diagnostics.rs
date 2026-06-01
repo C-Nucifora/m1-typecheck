@@ -6,6 +6,7 @@ pub enum TypeCode {
     T001, // unresolved-reference
     T002, // float-equality
     T003, // int-float-mixing
+    T004, // signed-unsigned-comparison
     T020, // enum-non-member
     T021, // enum-numeric-comparison
     T030, // assignment-type-mismatch
@@ -22,6 +23,7 @@ impl TypeCode {
             TypeCode::T001 => "T001",
             TypeCode::T002 => "T002",
             TypeCode::T003 => "T003",
+            TypeCode::T004 => "T004",
             TypeCode::T020 => "T020",
             TypeCode::T021 => "T021",
             TypeCode::T030 => "T030",
