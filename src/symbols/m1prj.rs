@@ -147,9 +147,20 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                 let kind = classify(classname);
                 let filename = node.attribute("Filename").map(str::to_string);
                 if matches!(kind, SymbolKind::Function | SymbolKind::Method)
-                    && let (Some(f), Some(g)) = (filename.clone(), parent_group(name))
+                    && let Some(g) = parent_group(name)
                 {
-                    file_to_group.insert(f, g);
+                    // Map the script to its enclosing group, anchoring
+                    // group-relative resolution in scripts. Prefer an explicit
+                    // `Filename`; otherwise derive the conventional basename
+                    // (`Root.Engine.Update` -> `Engine.Update.m1scr`), since real
+                    // projects omit the attribute and name script files by this
+                    // path convention. (`filename` on the symbol stays
+                    // attribute-only — it locates the backing file, and the
+                    // basename can't carry a subdirectory.)
+                    let key = filename.clone().unwrap_or_else(|| {
+                        format!("{}.m1scr", name.strip_prefix("Root.").unwrap_or(name))
+                    });
+                    file_to_group.insert(key, g);
                 }
                 let props = node.children().find(|c| c.has_tag_name("Props"));
                 // Value type: Constants from their @Value literal; everything
@@ -392,6 +403,38 @@ mod tests {
         assert_eq!(
             members,
             ["Root.Throttle.Calculation", "Root.Throttle.Value"]
+        );
+    }
+
+    #[test]
+    fn maps_scripts_to_groups_by_filename_convention() {
+        // No `Filename=` attributes (the real-corpus shape): the file → group
+        // map must still be derived, from the path-encoding convention, so that
+        // group-relative references in scripts resolve.
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root.Control"/>
+  <Component Classname="BuiltIn.MethodUser" Name="Root.Control.Update"/>
+  <Component Classname="BuiltIn.FuncUser" Name="Root.Control.Helper" Filename="custom.m1scr"/>
+</Project>"#;
+        let parsed = parse(xml).unwrap();
+        // Convention-derived: drop `Root.`, append `.m1scr`; group is the parent.
+        assert_eq!(
+            parsed
+                .file_to_group
+                .get("Control.Update.m1scr")
+                .map(String::as_str),
+            Some("Root.Control")
+        );
+        // An explicit `Filename=` still wins over the convention.
+        assert_eq!(
+            parsed.file_to_group.get("custom.m1scr").map(String::as_str),
+            Some("Root.Control")
+        );
+        assert!(
+            !parsed.file_to_group.contains_key("Control.Helper.m1scr"),
+            "the explicit Filename should be the key, not the derived one"
         );
     }
 
