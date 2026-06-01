@@ -24,6 +24,25 @@ fn t040_flags_unconditional_double_assignment() {
 }
 
 #[test]
+fn t040_points_at_first_write() {
+    // The diagnostic should land on the earlier (first) conflicting write, not
+    // the second. Regression for #15.
+    let p = proj();
+    let src = "driveMode = Drive State.Idle;\ndriveMode = Drive State.Ready To Drive;\n";
+    let first_line_end = src.find('\n').unwrap();
+    let d = check_script(&p, Path::new("Foo Update.m1scr"), src)
+        .diagnostics
+        .into_iter()
+        .find(|d| d.code == TypeCode::T040)
+        .expect("expected a T040 diagnostic");
+    assert!(
+        d.inner.byte_range.start < first_line_end,
+        "T040 should point at the first write (line 0), got byte {}",
+        d.inner.byte_range.start
+    );
+}
+
+#[test]
 fn t040_no_flag_mutually_exclusive_branches() {
     let p = proj();
     let src = "if (gain > 1) {\ndriveMode = Drive State.Idle;\n} else {\ndriveMode = Drive State.Ready To Drive;\n}\n";

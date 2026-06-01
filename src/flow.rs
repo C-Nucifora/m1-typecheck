@@ -22,8 +22,10 @@ pub fn single_assignment(root: Node, scope: &Scope, out: &mut Vec<TypeDiagnostic
     let facts = seq_children(root, scope);
     for (path, n) in &facts.max_per_path {
         if *n >= 2 {
-            // Re-walk to find the 2nd assignment node for a precise span.
-            if let Some(node) = nth_assignment(root, scope, path, 2) {
+            // Point at the FIRST conflicting write (the earlier assignment that
+            // establishes the conflict) so the diagnostic / quick-fix lands at
+            // the write the user typically removes or guards.
+            if let Some(node) = nth_assignment(root, scope, path, 1) {
                 out.push(make(
                     TypeCode::T040,
                     &node,
