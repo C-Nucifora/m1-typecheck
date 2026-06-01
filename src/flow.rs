@@ -75,7 +75,27 @@ fn facts_of(node: Node, scope: &Scope) -> Facts {
                 .unwrap_or_default();
             merge_alt(then_f, else_f)
         }
-        Kind::WhenStatement | Kind::ExpandStatement => {
+        Kind::WhenStatement => {
+            // A `when` body is a set of `is` clauses (the CST is
+            // WhenStatement -> IsClause -> Block). The clauses are mutually
+            // exclusive — only the matching state runs per tick — so take the
+            // per-channel MAX across them (merge_alt), not the sequential sum
+            // (#20). Two writes in different arms are fine; two in one arm still
+            // flag T040 (seq_children sums within a single Block).
+            node.children()
+                .into_iter()
+                .filter(|c| c.kind() == Kind::IsClause)
+                .map(|clause| {
+                    clause
+                        .children()
+                        .into_iter()
+                        .find(|c| c.kind() == Kind::Block)
+                        .map(|b| seq_children(b, scope))
+                        .unwrap_or_default()
+                })
+                .fold(Facts::default(), merge_alt)
+        }
+        Kind::ExpandStatement => {
             // Treated as a no-else conditional body (see spec §5.2).
             let body = node
                 .children()
