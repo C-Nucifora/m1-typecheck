@@ -39,6 +39,10 @@ pub struct Symbol {
     /// For [`SymbolKind::Object`], the component's package class name
     /// (`Classname`, e.g. `"MoTeC Input.Sensor"`). `None` otherwise.
     pub class: Option<String>,
+    /// 0-based line of this symbol's declaration in the `.m1prj` (the
+    /// `<Component>` element), for goto-definition. `None` for symbols not
+    /// sourced from the project file (e.g. DBC signals).
+    pub def_line: Option<u32>,
 }
 
 #[derive(Debug, Default)]

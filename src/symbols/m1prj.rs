@@ -180,6 +180,7 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                 } else {
                     None
                 };
+                let def_line = Some(doc.text_pos_at(node.range().start).row.saturating_sub(1));
                 table.push(Symbol {
                     path: name.to_string(),
                     kind,
@@ -188,6 +189,7 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                     filename,
                     enum_assoc,
                     class,
+                    def_line,
                 });
             }
             _ => {}
@@ -249,6 +251,15 @@ mod tests {
         assert_eq!(classify("BuiltIn.MethodUser"), SymbolKind::Method);
         // An unhandled BuiltIn.* stays Other, not Object.
         assert_eq!(classify("BuiltIn.IOCharacteristic"), SymbolKind::Other);
+    }
+
+    #[test]
+    fn symbols_record_their_m1prj_definition_line() {
+        // 0-based: line 0 = <?xml>, 1 = <Project>, 2 = Root.A, 3 = Root.B.
+        let xml = "<?xml version=\"1.0\"?>\n<Project>\n  <Component Classname=\"BuiltIn.Channel\" Name=\"Root.A\"><Props Type=\"u32\"/></Component>\n  <Component Classname=\"BuiltIn.Channel\" Name=\"Root.B\"><Props Type=\"s32\"/></Component>\n</Project>";
+        let parsed = parse(xml).unwrap();
+        assert_eq!(parsed.table.get("Root.A").unwrap().def_line, Some(2));
+        assert_eq!(parsed.table.get("Root.B").unwrap().def_line, Some(3));
     }
 
     #[test]
