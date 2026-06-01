@@ -51,3 +51,17 @@ fn calls_resolve_builtin_return_types() {
     assert_eq!(ty("Calculate.Min(1, 2)", &[]), ValueType::Integer);
     assert_eq!(ty("Calculate.Min(1.0, 2.0)", &[]), ValueType::Float);
 }
+
+#[test]
+fn convert_functions_type_to_their_real_returns() {
+    // M1's Convert library has exactly ToInteger and ToUnsignedInteger — and no
+    // ToFloat, because int->float widening is implicit. Guard the real names so
+    // the phantom `Convert.ToFloat` can't creep back into messages/tests.
+    assert_eq!(ty("Convert.ToInteger(1.5)", &[]), ValueType::Integer);
+    assert_eq!(
+        ty("Convert.ToUnsignedInteger(1.5)", &[]),
+        ValueType::Unsigned
+    );
+    // A non-existent Convert function doesn't resolve, so it types as Unknown.
+    assert_eq!(ty("Convert.ToFloat(1)", &[]), ValueType::Unknown);
+}
