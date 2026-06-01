@@ -65,11 +65,48 @@ fn parent_group(path: &str) -> Option<String> {
     Some(path[..idx].to_string())
 }
 
+/// Derive an untyped channel's value type from the class of the object that
+/// owns it (its parent in the component tree). Only unambiguously-numeric
+/// classes are mapped; anything else stays `Unknown` (no worse than before).
+/// Ambiguous classes (`_IOMethod.abs`, tables, switches, references, …) are
+/// deliberately left out pending confirmation of their output types.
+fn type_from_owner_class(path: &str, classname_by_path: &HashMap<String, String>) -> ValueType {
+    let Some(parent) = parent_group(path) else {
+        return ValueType::Unknown;
+    };
+    let Some(class) = classname_by_path.get(&parent) else {
+        return ValueType::Unknown;
+    };
+    // `MoTeC Input.*` sensors are physical measurements (temperature,
+    // acceleration, pressure, …) and a `ratio` IO method outputs a dimensionless
+    // value — both FloatingPoint, unambiguously.
+    if class.starts_with("MoTeC Input.") || class == "_IOMethod.ratio" {
+        ValueType::Float
+    } else {
+        ValueType::Unknown
+    }
+}
+
 pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
     let doc = roxmltree::Document::parse(xml).map_err(ParseError::Xml)?;
     let mut table = SymbolTable::default();
     let mut file_to_group = HashMap::new();
     let mut module_roots = HashSet::new();
+
+    // Pre-pass: map every component's path -> its Classname, so a channel that
+    // carries no inline `<Props Type>`/`Qty` can be typed from the class of the
+    // object that owns it (its parent). M1 Build derives these the same way —
+    // the object's class is the type source (#25).
+    let classname_by_path: HashMap<String, String> = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("Component"))
+        .filter_map(|n| {
+            Some((
+                n.attribute("Name")?.to_string(),
+                n.attribute("Classname")?.to_string(),
+            ))
+        })
+        .collect();
 
     for node in doc.descendants() {
         match node.tag_name().name() {
@@ -129,6 +166,10 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                     // No explicit storage type but a physical quantity (`Qty`,
                     // e.g. `rad/s`, `V`, `K`): a measured channel, stored as Float.
                     (ValueType::Float, None)
+                } else if kind == SymbolKind::Channel {
+                    // Auto-created output channels carry no inline type/quantity;
+                    // derive it from the owning object's class (#25).
+                    (type_from_owner_class(name, &classname_by_path), None)
                 } else {
                     (ValueType::Unknown, None)
                 };
@@ -338,6 +379,42 @@ mod tests {
         assert_eq!(
             members,
             ["Root.Throttle.Calculation", "Root.Throttle.Value"]
+        );
+    }
+
+    #[test]
+    fn untyped_channel_typed_from_owner_class() {
+        // A channel with no inline Type/Qty inherits a type from its owning
+        // object's class: MoTeC Input.* sensors and `_IOMethod.ratio` are
+        // FloatingPoint (#25). Ambiguous classes stay Unknown — no guessing.
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="MoTeC Input.Temperature" Name="Root.Coolant"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.Coolant.Value"/>
+  <Component Classname="_IOMethod.ratio" Name="Root.Brake Bias"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.Brake Bias.Output"/>
+  <Component Classname="BuiltIn.Table" Name="Root.Tbl"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.Tbl.Out"/>
+</Project>"#;
+        let parsed = parse(xml).unwrap();
+        assert_eq!(
+            parsed.table.get("Root.Coolant.Value").unwrap().value_type,
+            ValueType::Float,
+            "MoTeC Input.* sensor channel should be Float"
+        );
+        assert_eq!(
+            parsed
+                .table
+                .get("Root.Brake Bias.Output")
+                .unwrap()
+                .value_type,
+            ValueType::Float,
+            "_IOMethod.ratio output should be Float"
+        );
+        assert_eq!(
+            parsed.table.get("Root.Tbl.Out").unwrap().value_type,
+            ValueType::Unknown,
+            "ambiguous owner class (Table) is left Unknown"
         );
     }
 }
