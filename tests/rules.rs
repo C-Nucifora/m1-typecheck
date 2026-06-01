@@ -29,9 +29,11 @@ fn t003_allows_int_float_widening_in_arithmetic() {
 }
 
 #[test]
-fn t003_no_flag_when_converted() {
-    // Convert.ToFloat(iY) returns FloatingPoint -> float + float, no narrowing.
-    let src = "local fX = 1.0;\nlocal iY = 2;\nlocal fZ = fX + Convert.ToFloat(iY);\n";
+fn t003_no_flag_with_convert_call() {
+    // `Convert.ToInteger` returns Integer; Float + Integer is implicit widening,
+    // so no T003. (There is deliberately no `Convert.ToFloat` in M1: int->float
+    // widening is implicit, so only the narrowing direction has a Convert fn.)
+    let src = "local fX = 1.0;\nlocal iY = 2;\nlocal fZ = fX + Convert.ToInteger(iY);\n";
     assert!(!codes(src).contains(&TypeCode::T003));
 }
 
