@@ -70,6 +70,33 @@ pub struct Symbol {
     /// startup-only functions (`On Startup`), and triggers that are parameter
     /// references (`$(…)`) the model can't resolve statically. Surfaced in hover.
     pub call_rate_hz: Option<f64>,
+    /// For a `BuiltIn.Table` symbol, its shape (input axes) and output unit, read
+    /// from the `.m1cfg` `<Table>` (the `.m1prj` carries none). `None` for
+    /// non-tables and when no `.m1cfg` is loaded. See [`TableMeta`].
+    pub table_meta: Option<TableMeta>,
+}
+
+/// Shape of a `BuiltIn.Table`, read from the `.m1cfg` `<Table>` element: its
+/// input axes (X/Y/Z breakpoints) and the unit of the interpolated output. The
+/// table's *output type* lands on its auto-created `.Value` channel
+/// ([`Symbol::value_type`]); this struct carries the dimensionality a hover
+/// wants to show (e.g. a 2-D `11×7` table). See `m1cfg::augment`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TableMeta {
+    /// Input axes in X, Y, Z order. `axes.len()` is the table's dimension; each
+    /// [`TableAxis::size`] is that axis's breakpoint count.
+    pub axes: Vec<TableAxis>,
+    /// Unit of the interpolated output value (the `<Body>` cells), e.g. `N.m`.
+    pub output_unit: Option<String>,
+}
+
+/// One input axis of a table: its breakpoint count and engineering unit.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TableAxis {
+    /// Number of breakpoints along this axis.
+    pub size: u32,
+    /// Engineering unit of the axis breakpoints, when the cfg declares one.
+    pub unit: Option<String>,
 }
 
 /// CAN layout metadata retained from a `.m1dbc` `<Props>`, attached to a

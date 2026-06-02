@@ -249,6 +249,7 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                     dbc_range: None,
                     can: None,
                     call_rate_hz,
+                    table_meta: None,
                 });
             }
             _ => {}
