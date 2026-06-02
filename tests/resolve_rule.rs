@@ -8,29 +8,60 @@ fn proj() -> Project {
     Project::load(&dir.join("mini.m1prj")).unwrap()
 }
 
-#[test]
-fn t001_flags_project_rooted_miss() {
-    let p = proj();
-    // "Foo Update.m1scr" maps to group Root.Foo; "Root.Foo.Missing" is project-rooted but absent.
-    let src = "Root.Foo.Missing = 1;\n";
-    let codes: Vec<_> = check_script(&p, Path::new("Foo Update.m1scr"), src)
+fn codes(p: &Project, file: &str, src: &str) -> Vec<TypeCode> {
+    check_script(p, Path::new(file), src)
         .diagnostics
         .iter()
         .map(|d| d.code)
-        .collect();
-    assert!(codes.contains(&TypeCode::T001));
-    // Exactly one T001 (not one per path prefix).
-    assert_eq!(codes.iter().filter(|c| **c == TypeCode::T001).count(), 1);
+        .collect()
 }
 
 #[test]
-fn t001_no_flag_for_known_symbol_or_library() {
+fn write_to_project_rooted_miss_is_t031_not_t001() {
     let p = proj();
-    let src = "Speed = Calculate.Min(1, 2);\n"; // Speed resolves (group-relative); Calculate is opaque
-    let codes: Vec<_> = check_script(&p, Path::new("Foo Update.m1scr"), src)
-        .diagnostics
-        .iter()
-        .map(|d| d.code)
-        .collect();
-    assert!(!codes.contains(&TypeCode::T001));
+    // "Foo Update.m1scr" maps to group Root.Foo; "Root.Foo.Missing" is project-rooted but absent.
+    // In *write* position this is T031 (unresolved assignment target), not T001
+    // (unresolved reference) — issue #19: a write target is not a read.
+    let c = codes(&p, "Foo Update.m1scr", "Root.Foo.Missing = 1;\n");
+    assert!(c.contains(&TypeCode::T031), "expected T031, got {c:?}");
+    assert!(
+        !c.contains(&TypeCode::T001),
+        "should not be T001, got {c:?}"
+    );
+    // Exactly one diagnostic (not one per path prefix).
+    assert_eq!(c.iter().filter(|x| **x == TypeCode::T031).count(), 1);
+}
+
+#[test]
+fn read_of_project_rooted_miss_is_still_t001() {
+    let p = proj();
+    // Same missing path in *read* position (RHS) remains a genuine T001.
+    let c = codes(&p, "Foo Update.m1scr", "local x = Root.Foo.Missing;\n");
+    assert!(c.contains(&TypeCode::T001), "expected T001, got {c:?}");
+    assert!(
+        !c.contains(&TypeCode::T031),
+        "should not be T031, got {c:?}"
+    );
+}
+
+#[test]
+fn compound_assignment_to_miss_stays_t001() {
+    let p = proj();
+    // A compound assignment reads the target before writing, so an unresolved
+    // compound target is a genuine unresolved read → T001, not T031.
+    let c = codes(&p, "Foo Update.m1scr", "Root.Foo.Missing += 1;\n");
+    assert!(c.contains(&TypeCode::T001), "expected T001, got {c:?}");
+    assert!(
+        !c.contains(&TypeCode::T031),
+        "should not be T031, got {c:?}"
+    );
+}
+
+#[test]
+fn no_flag_for_known_symbol_or_library() {
+    let p = proj();
+    // Speed resolves (group-relative); Calculate is an opaque library object.
+    let c = codes(&p, "Foo Update.m1scr", "Speed = Calculate.Min(1, 2);\n");
+    assert!(!c.contains(&TypeCode::T001));
+    assert!(!c.contains(&TypeCode::T031));
 }
