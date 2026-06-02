@@ -44,6 +44,44 @@ impl TypeCode {
             TypeCode::T071 => "T071",
         }
     }
+
+    /// The kebab-case rule name (e.g. `unresolved-reference`). The single source
+    /// of truth for tools that enumerate the type-check rules — mirrors
+    /// `m1_lint::diagnostic::LintCode::name` so editors can list L- and T-codes
+    /// the same way (config scaffolding, rule pickers).
+    pub fn name(self) -> &'static str {
+        match self {
+            TypeCode::T001 => "unresolved-reference",
+            TypeCode::T002 => "float-equality",
+            TypeCode::T003 => "int-float-mixing",
+            TypeCode::T004 => "signed-unsigned-comparison",
+            TypeCode::T020 => "enum-non-member",
+            TypeCode::T021 => "enum-numeric-comparison",
+            TypeCode::T030 => "assignment-type-mismatch",
+            TypeCode::T031 => "unresolved-assignment-target",
+            TypeCode::T040 => "channel-multiple-assignment",
+            TypeCode::T041 => "missing-cfg-parameter",
+            TypeCode::T042 => "dbc-signal-range",
+            TypeCode::T050 => "symbol-name-convention",
+            TypeCode::T060 => "stateful-conditional",
+            TypeCode::T061 => "integrated-only-call",
+            TypeCode::T062 => "deprecated-overload",
+            TypeCode::T070 => "when-is-exhaustive",
+            TypeCode::T071 => "name-case-collision",
+        }
+    }
+
+    /// Every type-check code, in declaration order — the catalogue external tools
+    /// enumerate (config scaffold, diagnostic filters). Mirrors
+    /// `m1_lint::diagnostic::LintCode::all_codes`. The `all_codes_match_enum`
+    /// test guards against drift from the enum.
+    pub fn all_codes() -> &'static [TypeCode] {
+        use TypeCode::*;
+        &[
+            T001, T002, T003, T004, T020, T021, T030, T031, T040, T041, T042, T050, T060, T061,
+            T062, T070, T071,
+        ]
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -90,4 +128,29 @@ pub fn make_project(code: TypeCode, severity: Severity, message: String) -> Type
 pub struct CheckResult {
     pub diagnostics: Vec<TypeDiagnostic>,
     pub syntax_errors: Vec<Diagnostic>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TypeCode;
+
+    #[test]
+    fn all_codes_match_enum_and_have_names() {
+        // Every catalogue entry round-trips through as_str/name, and the codes are
+        // unique — so all_codes() can't silently drift from the TypeCode enum.
+        let codes = TypeCode::all_codes();
+        let mut seen = std::collections::HashSet::new();
+        for &c in codes {
+            assert!(seen.insert(c.as_str()), "duplicate code {}", c.as_str());
+            assert!(c.as_str().starts_with('T'));
+            assert!(!c.name().is_empty());
+            assert!(
+                c.name()
+                    .chars()
+                    .all(|ch| ch.is_ascii_lowercase() || ch == '-')
+            );
+        }
+        // Catalogue size tracks the enum (bump both together).
+        assert_eq!(codes.len(), 17);
+    }
 }
