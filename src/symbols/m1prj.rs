@@ -222,6 +222,7 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                     class,
                     def_line,
                     dbc_range: None,
+                    can: None,
                 });
             }
             _ => {}
