@@ -106,6 +106,10 @@ impl Intrinsics {
     pub fn library_object(&self, name: &str) -> Option<&LibraryObject> {
         self.library.get(name)
     }
+    /// The names of the firmware library objects (`Calculate`, `CanComms`, …).
+    pub fn library_object_names(&self) -> impl Iterator<Item = &str> {
+        self.library.keys().map(String::as_str)
+    }
     pub fn is_integrated_only(&self, name: &str) -> bool {
         self.integrated_only.iter().any(|n| n == name)
     }

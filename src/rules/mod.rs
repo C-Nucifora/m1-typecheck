@@ -15,6 +15,7 @@ pub mod t030_assign_mismatch;
 pub mod t060_stateful_conditional;
 pub mod t061_integrated_only;
 pub mod t062_deprecated_overload;
+pub mod t070_when_exhaustive;
 
 pub trait Rule: Send + Sync {
     fn check_node(&self, node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>);
@@ -45,6 +46,7 @@ impl Default for Registry {
                 Box::new(t060_stateful_conditional::Rule),
                 Box::new(t061_integrated_only::Rule),
                 Box::new(t062_deprecated_overload::Rule),
+                Box::new(t070_when_exhaustive::Rule),
             ],
         }
     }

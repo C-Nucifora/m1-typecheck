@@ -16,6 +16,8 @@ pub enum TypeCode {
     T060, // stateful-conditional
     T061, // integrated-only-call
     T062, // deprecated-overload
+    T070, // when-is-exhaustive
+    T071, // name-case-collision (project audit)
 }
 
 impl TypeCode {
@@ -34,6 +36,8 @@ impl TypeCode {
             TypeCode::T060 => "T060",
             TypeCode::T061 => "T061",
             TypeCode::T062 => "T062",
+            TypeCode::T070 => "T070",
+            TypeCode::T071 => "T071",
         }
     }
 }
