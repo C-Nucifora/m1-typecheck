@@ -54,7 +54,12 @@ pub fn augment(table: &mut SymbolTable, xml: &str) -> Result<(), ConfigError> {
         let vt = cell_type(type_attr);
         if let Some(sym) = table.get_mut(name) {
             sym.value_type = vt;
-            sym.unit = unit;
+            // Only override the unit when the cfg cell actually carries one, so a
+            // unit already populated from the `.m1prj` `<Default Unit>` (#75) is
+            // not wiped to `None` for a parameter the cfg lists without a unit.
+            if unit.is_some() {
+                sym.unit = unit;
+            }
         }
     }
     Ok(())
