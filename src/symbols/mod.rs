@@ -59,6 +59,33 @@ pub struct Symbol {
     /// `Multiplier`/`Offset`. `None` for non-signals and float signals (whose
     /// range is unbounded for this check). Powers the T042 range check.
     pub dbc_range: Option<(f64, f64)>,
+    /// CAN frame/signal layout metadata from a `.m1dbc`, for hover. Present on
+    /// `BuiltIn.CAN.Message` objects (`can_id`/`dlc`) and `BuiltIn.CAN.Signal`
+    /// channels (`start_bit`/`length`/`multiplier`/`offset`). `None` for symbols
+    /// not sourced from a `.m1dbc`. See [`CanMeta`].
+    pub can: Option<CanMeta>,
+}
+
+/// CAN layout metadata retained from a `.m1dbc` `<Props>`, attached to a
+/// [`Symbol`] so the LSP can render it in hover. Message-level fields
+/// (`can_id`, `dlc`) populate on `BuiltIn.CAN.Message` objects; signal-level
+/// fields (`start_bit`, `length`, `multiplier`, `offset`) on
+/// `BuiltIn.CAN.Signal` channels. A signal's parent message is looked up by
+/// path to combine the two in one tooltip.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CanMeta {
+    /// CAN identifier of the message (decimal, as stored in the `.m1dbc`).
+    pub can_id: Option<u32>,
+    /// Data-length code — the message payload size in bytes.
+    pub dlc: Option<u32>,
+    /// Signal's least-significant bit position within the frame.
+    pub start_bit: Option<u32>,
+    /// Signal width in bits.
+    pub length: Option<u32>,
+    /// Scale factor applied to the raw value (`physical = raw * multiplier + offset`).
+    pub multiplier: Option<f64>,
+    /// Offset added after scaling.
+    pub offset: Option<f64>,
 }
 
 #[derive(Debug, Default)]
