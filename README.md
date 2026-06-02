@@ -65,9 +65,6 @@ ships a `parameters.m1cfg` gets type-aware checking with no extra configuration.
 `FuncUser`/`MethodUser` components carry a `Filename`, mapping each script to its
 **enclosing group** — the base for relative name resolution.
 
-`FuncUser`/`MethodUser` components carry a `Filename`, mapping each script to its
-**enclosing group** — the base for relative name resolution.
-
 ### Name resolution
 
 A reference resolves as: local → absolute (and `Root.`-prefixed) → group-relative
