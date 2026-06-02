@@ -1,6 +1,6 @@
 [package]
 name = "m1-typecheck"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 license = "GPL-3.0-or-later"
 description = "Symbol model and type checker for the MoTeC M1 script language"
@@ -15,7 +15,7 @@ name = "m1_typecheck"
 path = "src/lib.rs"
 
 [dependencies]
-m1-core = { git = "https://github.com/C-Nucifora/m1-core.git", tag = "v0.3.0" }
+m1-core = { git = "https://github.com/C-Nucifora/m1-core.git", tag = "v0.3.1" }
 m1-workspace = { git = "https://github.com/nedlane/m1-workspace.git", tag = "v0.1.0" }
 roxmltree = "0.21"
 serde = { version = "1", features = ["derive"] }
