@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<MoTeCM1BuildSession>
+ <Project Name="ClassStructure" TargetHardware="ecu120">
+  <SelectedModuleSets><File Name="MoTeC Comms"/></SelectedModuleSets>
+  <ComponentStream>
+   <List>
+    <!-- A well-formed CAN frame hierarchy: DBC > Message > Signal. -->
+    <Component Classname="BuiltIn.CAN.DBC" Name="Root.Comms"/>
+    <Component Classname="BuiltIn.CAN.Message" Name="Root.Comms.Status"/>
+    <Component Classname="BuiltIn.CAN.Signal" Name="Root.Comms.Status.Speed"/>
+    <!-- A mistake: a CAN signal placed directly under a group compound. -->
+    <Component Classname="BuiltIn.GroupCompound" Name="Root.Loose"/>
+    <Component Classname="BuiltIn.CAN.Signal" Name="Root.Loose.Rpm"/>
+   </List>
+  </ComponentStream>
+ </Project>
+</MoTeCM1BuildSession>

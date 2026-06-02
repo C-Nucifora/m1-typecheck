@@ -48,8 +48,19 @@ pub struct Symbol {
     /// back-resolution). When set, the typer reports `ValueType::Enum(_)`.
     pub enum_assoc: Option<EnumId>,
     /// For [`SymbolKind::Object`], the component's package class name
-    /// (`Classname`, e.g. `"MoTeC Input.Sensor"`). `None` otherwise.
+    /// (`Classname`, e.g. `"MoTeC Input.Sensor"`). `None` otherwise. This is the
+    /// user-facing class shown in hover; it is the [`SymbolKind::Object`] subset
+    /// of [`Symbol::classname`].
     pub class: Option<String>,
+    /// Raw `Classname` attribute of the originating `<Component>`, verbatim for
+    /// *every* component — `BuiltIn.Channel`, `BuiltIn.Parameter`, `BuiltIn.Table`,
+    /// `BuiltIn.CAN.Signal`, `MoTeC Input.Sensor`, … — not just objects. `None`
+    /// for symbols not sourced from a project/DBC `<Component>`. Lets the LSP
+    /// reason about a component's class for class-aware structure checks and
+    /// completion (#47). See [`crate::classname::valid_parent_classes`] for the
+    /// schema of which parent classes a given child class is conventionally nested
+    /// under.
+    pub classname: Option<String>,
     /// 0-based line of this symbol's declaration in the `.m1prj` (the
     /// `<Component>` element), for goto-definition. `None` for symbols not
     /// sourced from the project file (e.g. DBC signals).

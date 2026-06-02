@@ -245,6 +245,7 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                     filename,
                     enum_assoc,
                     class,
+                    classname: Some(classname.to_string()),
                     def_line,
                     dbc_range: None,
                     can: None,
@@ -530,6 +531,15 @@ mod tests {
         let obj = parsed.table.get("Root.Throttle").expect("object symbol");
         assert_eq!(obj.kind, SymbolKind::Object);
         assert_eq!(obj.class.as_deref(), Some("MoTeC Input.Sensor"));
+        // The raw classname is stored for every component (#47), not just objects:
+        // the object's matches `class`, and a BuiltIn channel carries its own.
+        assert_eq!(obj.classname.as_deref(), Some("MoTeC Input.Sensor"));
+        let ch = parsed
+            .table
+            .get("Root.Throttle.Value")
+            .expect("channel symbol");
+        assert_eq!(ch.class, None, "non-object has no user-facing `class`");
+        assert_eq!(ch.classname.as_deref(), Some("BuiltIn.Channel"));
 
         // Immediate members are Value and Calculation (not the nested Diagnostic.Value).
         let mut members: Vec<&str> = parsed

@@ -141,6 +141,15 @@ per colliding pair), and (b) any project symbol whose leaf name case-insensitive
 matches a firmware library object name (`Calculate`, `CanComms`, …), which it would
 shadow. Both flow through `Project::audit()` / `--audit-names` alongside T050.
 
+The audit also emits **T010 invalid-component-parent** (Warning): a component
+whose `Classname` is only valid under a specific parent class but whose actual
+parent has a different class. The class schema (`classname.rs`) is deliberately
+conservative — only classes with an unambiguous nesting invariant are constrained
+(today the CAN frame hierarchy: a `BuiltIn.CAN.Signal` must sit under a
+`BuiltIn.CAN.Message`, a `BuiltIn.CAN.Message` under a `BuiltIn.CAN.DBC`), so
+well-formed projects never flag. Every component's raw `Classname` is stored on
+`Symbol::classname`, ready for richer class-aware checks and completion.
+
 ## CLI usage
 
 ```
