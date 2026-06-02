@@ -79,6 +79,9 @@ fn resolve_path(table: &SymbolTable, name: &str) -> Option<String> {
     if table.get(name).is_some() {
         return Some(name.to_string());
     }
-    let rooted = format!("Root.{name}");
-    table.get(&rooted).is_some().then_some(rooted)
+    let rooted = m1_workspace::qualify_root(name);
+    table
+        .get(rooted.as_ref())
+        .is_some()
+        .then(|| rooted.into_owned())
 }
