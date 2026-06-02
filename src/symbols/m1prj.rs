@@ -83,9 +83,9 @@ fn event_rate_hz(trigger: &str) -> Option<f64> {
 
 /// Derive an untyped channel's value type from the class of the object that
 /// owns it (its parent in the component tree). Each mapping is a known output
-/// type for that package class; classes whose output is tune-defined or
-/// otherwise indeterminate (`BuiltIn.[Calibration]Table`, `MoTeC Comms.CAN Bus`,
-/// `BuiltIn.Reference`, the odd built-ins) stay `Unknown` — no worse than before.
+/// type for that package class; classes whose output is genuinely indeterminate
+/// (`MoTeC Comms.CAN Bus`, `BuiltIn.Reference`, the odd built-ins) stay
+/// `Unknown` — no worse than before.
 fn type_from_owner_class(path: &str, classname_by_path: &HashMap<String, String>) -> ValueType {
     let Some(parent) = parent_group(path) else {
         return ValueType::Unknown;
@@ -101,6 +101,10 @@ fn type_from_owner_class(path: &str, classname_by_path: &HashMap<String, String>
         "_IOMethod.ratio" | "_IOMethod.abs" => ValueType::Float,
         // A switched output is on/off.
         "MoTeC Output.Switched Output" => ValueType::Boolean,
+        // A table's auto-created `.Value` output is always a floating-point
+        // quantity — the interpolated result is real-valued regardless of the
+        // table's tune (#25, case 1).
+        "BuiltIn.Table" | "BuiltIn.CalibrationTable" => ValueType::Float,
         _ => ValueType::Unknown,
     }
 }
@@ -576,8 +580,8 @@ mod tests {
     fn untyped_channel_typed_from_owner_class() {
         // A channel with no inline Type/Qty inherits a type from its owning
         // object's class (#25): MoTeC Input.* sensors, `_IOMethod.ratio`/`abs`
-        // are FloatingPoint; a switched output is Boolean. Tune-defined /
-        // indeterminate classes (tables) stay Unknown — no guessing.
+        // and table outputs are FloatingPoint; a switched output is Boolean.
+        // Genuinely indeterminate classes (CAN bus, references) stay Unknown.
         let xml = r#"<?xml version="1.0"?>
 <Project>
   <Component Classname="MoTeC Input.Temperature" Name="Root.Coolant"/>
@@ -618,8 +622,8 @@ mod tests {
         );
         assert_eq!(
             parsed.table.get("Root.Tbl.Out").unwrap().value_type,
-            ValueType::Unknown,
-            "ambiguous owner class (Table) is left Unknown"
+            ValueType::Float,
+            "table output channel should be Float (#25 case 1)"
         );
     }
 }
