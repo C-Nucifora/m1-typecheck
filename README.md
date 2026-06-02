@@ -41,9 +41,28 @@ stack is a manual, local-workspace concern.
 `SymbolTable` keyed by fully-qualified dotted path (`Root.Foo.Bar`). Each symbol
 carries a `SymbolKind` (Channel, Parameter, Constant, Function, Method, Table,
 Group, Reference, Other), derived from the component `Classname`. Enum data types
-(`<DataTypes>`) become `EnumType`s. The optional sibling `parameters.m1cfg`
-augments parameter symbols with concrete value types (`f32`, `u16`, `enum`, …)
-and units.
+(`<DataTypes>`) become `EnumType`s.
+
+### `parameters.m1cfg` — the parameter type source
+
+The `.m1prj` names parameters but rarely says what *type* they hold. The sibling
+**`parameters.m1cfg`** is where that lives: each `<Parameter><Cell Type="…"
+Unit="…">` gives a parameter its concrete **value type** (`f32`→`Float`,
+`u16`→`Unsigned`, `s16`→`Integer`, `bool`→`Boolean`, `enum`→a specific enum type)
+and its **unit**. Loading it is what turns parameters from untyped names into
+typed symbols, which is what powers:
+
+- assignment type-mismatch checking (`T030`) against parameter targets,
+- enum association of `enum`-typed cells (see below),
+- richer hover/completion in the language server (type + unit).
+
+It is **auto-discovered**: the first `*.m1cfg` sibling of the project file is
+loaded automatically (the CLI, the language server, and therefore m1-ci all do
+this), so a project that ships a `parameters.m1cfg` gets type-aware checking with
+no extra configuration. `--config` overrides the discovered file.
+
+`FuncUser`/`MethodUser` components carry a `Filename`, mapping each script to its
+**enclosing group** — the base for relative name resolution.
 
 `FuncUser`/`MethodUser` components carry a `Filename`, mapping each script to its
 **enclosing group** — the base for relative name resolution.
@@ -127,6 +146,9 @@ m1-typecheck --project Project.m1prj --audit-names
 - `--project` defaults to the nearest `Project.m1prj` upward from the first input
   file, or `$M1_PROJECT`. With no project found, runs in project-less mode (T001
   disabled).
+- `--config` defaults to the first `*.m1cfg` sibling of the project file (or
+  `$M1_CONFIG`); pass it explicitly to override. Without a cfg, parameters are
+  untyped (`Unknown`) and type-dependent rules stay silent for them.
 - `--audit-names` prints the project-name audit (T050) as
   `<project-path>: warning[T050]: <message>`; requires a loaded project.
 - Output: `path:line:col: severity[T0xx]: message`. Syntax errors print first.
@@ -137,6 +159,7 @@ m1-typecheck --project Project.m1prj --audit-names
 
 - `M1_PROJECT` — path to `Project.m1prj` (overrides discovery; used by the corpus
   gate).
+- `M1_CONFIG` — path to `parameters.m1cfg` (overrides the sibling auto-discovery).
 - `M1_CORPUS_PATH` — directory of `.m1scr` scripts for the corpus gate
   (`tests/corpus.rs`), which loads the project and checks every script without
   panicking. The gate is skipped if neither the env vars nor the sibling example

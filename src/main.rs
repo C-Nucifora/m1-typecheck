@@ -39,14 +39,34 @@ fn find_project(args: &Args) -> Option<PathBuf> {
     }
 }
 
+/// Locate the `parameters.m1cfg` that augments parameter symbols with concrete
+/// value types and units. Explicit `--config` (or `$M1_CONFIG`) wins; otherwise
+/// auto-discover the first `*.m1cfg` sibling of the project file — the same rule
+/// the language server uses, so CLI checks (and m1-ci) get the cfg's parameter
+/// types for free whenever one sits beside the project.
+fn find_config(args: &Args, project_path: Option<&PathBuf>) -> Option<PathBuf> {
+    if let Some(p) = &args.config {
+        return Some(p.clone());
+    }
+    if let Some(p) = std::env::var_os("M1_CONFIG") {
+        return Some(PathBuf::from(p));
+    }
+    let root = project_path?.parent()?;
+    std::fs::read_dir(root).ok()?.flatten().find_map(|e| {
+        let p = e.path();
+        (p.extension().and_then(|x| x.to_str()) == Some("m1cfg")).then_some(p)
+    })
+}
+
 fn main() {
     let args = Args::parse();
     let mut had_error = false;
 
     let project_path = find_project(&args);
+    let config_path = find_config(&args, project_path.as_ref());
     let project = project_path.clone().map(|path| match Project::load(&path) {
         Ok(mut p) => {
-            if let Some(cfg) = &args.config {
+            if let Some(cfg) = &config_path {
                 p = p.with_config(cfg).unwrap_or_else(|e| {
                     eprintln!("m1-typecheck: config {}: {e}", cfg.display());
                     process::exit(2);
