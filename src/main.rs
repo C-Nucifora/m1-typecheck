@@ -29,14 +29,7 @@ fn find_project(args: &Args) -> Option<PathBuf> {
         return Some(PathBuf::from(p));
     }
     let start = args.files.first()?;
-    let mut dir = start.parent()?;
-    loop {
-        let cand = dir.join("Project.m1prj");
-        if cand.is_file() {
-            return Some(cand);
-        }
-        dir = dir.parent()?;
-    }
+    m1_workspace::find_project_file(start.parent()?)
 }
 
 /// Locate the `parameters.m1cfg` that augments parameter symbols with concrete
@@ -53,19 +46,7 @@ fn find_config(args: &Args, project_path: Option<&PathBuf>) -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("M1_CONFIG") {
         return Some(PathBuf::from(p));
     }
-    let mut dir = project_path?.parent()?;
-    loop {
-        let found = std::fs::read_dir(dir).ok().and_then(|entries| {
-            entries.flatten().find_map(|e| {
-                let p = e.path();
-                (p.extension().and_then(|x| x.to_str()) == Some("m1cfg")).then_some(p)
-            })
-        });
-        if found.is_some() {
-            return found;
-        }
-        dir = dir.parent()?;
-    }
+    m1_workspace::find_config_file(project_path?.parent()?)
 }
 
 fn main() {
