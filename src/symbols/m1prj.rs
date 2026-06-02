@@ -65,6 +65,22 @@ fn parent_group(path: &str) -> Option<String> {
     Some(path[..idx].to_string())
 }
 
+/// Parse a script's call rate (Hz) from its `<Props SelectedTrigger="…">`. The
+/// trigger is a (parent-relative) path to a `BuiltIn.EventKernel` whose leaf
+/// name encodes the clock, e.g. `Parent.Parent.Events.On 500Hz` → `500`. Returns
+/// `None` for `On Startup` (startup-only functions), `$(…)` parameter-reference
+/// triggers that aren't statically resolvable, and any leaf not of the form
+/// `On <N>Hz`. The rate lives entirely in the kernel leaf, so the relative path
+/// prefix need not be resolved to read it.
+fn event_rate_hz(trigger: &str) -> Option<f64> {
+    if trigger.contains("$(") {
+        return None;
+    }
+    let leaf = trigger.rsplit('.').next().unwrap_or(trigger);
+    let n = leaf.strip_prefix("On ")?.strip_suffix("Hz")?;
+    n.trim().parse::<f64>().ok()
+}
+
 /// Derive an untyped channel's value type from the class of the object that
 /// owns it (its parent in the component tree). Each mapping is a known output
 /// type for that package class; classes whose output is tune-defined or
@@ -206,6 +222,11 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                 let security = props
                     .and_then(|p| p.attribute("Security"))
                     .map(str::to_string);
+                // Call rate (#76): a script/function runs on the clock named by
+                // its `SelectedTrigger`, a `BuiltIn.EventKernel` like `On 100Hz`.
+                let call_rate_hz = props
+                    .and_then(|p| p.attribute("SelectedTrigger"))
+                    .and_then(event_rate_hz);
                 let def_line = Some(doc.text_pos_at(node.range().start).row.saturating_sub(1));
                 table.push(Symbol {
                     path: name.to_string(),
@@ -223,6 +244,7 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                     def_line,
                     dbc_range: None,
                     can: None,
+                    call_rate_hz,
                 });
             }
             _ => {}
@@ -444,6 +466,46 @@ mod tests {
             Some("Master Calibration")
         );
         assert_eq!(parsed.table.get("Root.Open").unwrap().security, None);
+    }
+
+    #[test]
+    fn event_rate_hz_parses_kernel_leaf() {
+        assert_eq!(event_rate_hz("Parent.Parent.Events.On 500Hz"), Some(500.0));
+        assert_eq!(event_rate_hz("Root.Events.On 10Hz"), Some(10.0));
+        // Startup-only functions have no rate.
+        assert_eq!(event_rate_hz("Parent.Events.On Startup"), None);
+        // Parameter-reference triggers aren't statically resolvable.
+        assert_eq!(event_rate_hz("$(Parent.Calc:SelectedTrigger)"), None);
+    }
+
+    #[test]
+    fn function_gets_call_rate_from_selected_trigger() {
+        // A function/method runs at the rate named by the EventKernel its
+        // SelectedTrigger points at; one with no trigger has no rate (#76).
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.EventKernel" Name="Root.Events.On 100Hz"/>
+  <Component Classname="BuiltIn.MethodUser" Name="Root.Engine.Control"><Props SelectedTrigger="Parent.Parent.Events.On 100Hz"/></Component>
+  <Component Classname="BuiltIn.FuncUser" Name="Root.Engine.Init"><Props SelectedTrigger="Parent.Parent.Events.On Startup"/></Component>
+  <Component Classname="BuiltIn.MethodUser" Name="Root.Engine.Untriggered"/>
+</Project>"#;
+        let parsed = parse(xml).unwrap();
+        assert_eq!(
+            parsed.table.get("Root.Engine.Control").unwrap().call_rate_hz,
+            Some(100.0)
+        );
+        assert_eq!(
+            parsed.table.get("Root.Engine.Init").unwrap().call_rate_hz,
+            None
+        );
+        assert_eq!(
+            parsed
+                .table
+                .get("Root.Engine.Untriggered")
+                .unwrap()
+                .call_rate_hz,
+            None
+        );
     }
 
     #[test]

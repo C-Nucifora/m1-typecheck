@@ -64,6 +64,12 @@ pub struct Symbol {
     /// channels (`start_bit`/`length`/`multiplier`/`offset`). `None` for symbols
     /// not sourced from a `.m1dbc`. See [`CanMeta`].
     pub can: Option<CanMeta>,
+    /// Execution rate (Hz) of a script/function, derived from its `.m1prj`
+    /// `<Props SelectedTrigger="…Events.On <N>Hz">` pointing at a
+    /// `BuiltIn.EventKernel` clock. `None` for symbols with no trigger,
+    /// startup-only functions (`On Startup`), and triggers that are parameter
+    /// references (`$(…)`) the model can't resolve statically. Surfaced in hover.
+    pub call_rate_hz: Option<f64>,
 }
 
 /// CAN layout metadata retained from a `.m1dbc` `<Props>`, attached to a
