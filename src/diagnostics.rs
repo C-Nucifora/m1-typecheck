@@ -13,6 +13,7 @@ pub enum TypeCode {
     T031, // unresolved-assignment-target
     T040, // channel-multiple-assignment
     T041, // missing-cfg-parameter (project audit; in .m1prj, absent from .m1cfg)
+    T042, // dbc-signal-range (literal assigned to a CAN signal is out of range)
     T050, // symbol-name-convention (project audit)
     T060, // stateful-conditional
     T061, // integrated-only-call
@@ -34,6 +35,7 @@ impl TypeCode {
             TypeCode::T031 => "T031",
             TypeCode::T040 => "T040",
             TypeCode::T041 => "T041",
+            TypeCode::T042 => "T042",
             TypeCode::T050 => "T050",
             TypeCode::T060 => "T060",
             TypeCode::T061 => "T061",
