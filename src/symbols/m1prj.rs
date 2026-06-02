@@ -202,12 +202,17 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                     .and_then(|d| d.attribute("Unit"))
                     .filter(|u| !u.starts_with("$("))
                     .map(str::to_string);
+                // Security / access level (#77): `<Props Security="Tune">`.
+                let security = props
+                    .and_then(|p| p.attribute("Security"))
+                    .map(str::to_string);
                 let def_line = Some(doc.text_pos_at(node.range().start).row.saturating_sub(1));
                 table.push(Symbol {
                     path: name.to_string(),
                     kind,
                     value_type,
                     unit,
+                    security,
                     filename,
                     enum_assoc,
                     class,
@@ -416,6 +421,23 @@ mod tests {
         );
         assert_eq!(parsed.table.get("Root.Derived").unwrap().unit, None);
         assert_eq!(parsed.table.get("Root.NoUnit").unwrap().unit, None);
+    }
+
+    #[test]
+    fn channel_security_comes_from_props() {
+        // Security/access level lives on `<Props Security="…">` (#77); a channel
+        // without it has none.
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.Channel" Name="Root.Tuned"><Props Qty="rad/s" Security="Master Calibration"/></Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.Open"><Props Qty="V"/></Component>
+</Project>"#;
+        let parsed = parse(xml).unwrap();
+        assert_eq!(
+            parsed.table.get("Root.Tuned").unwrap().security.as_deref(),
+            Some("Master Calibration")
+        );
+        assert_eq!(parsed.table.get("Root.Open").unwrap().security, None);
     }
 
     #[test]
