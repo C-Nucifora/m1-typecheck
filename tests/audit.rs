@@ -7,6 +7,23 @@ fn proj() -> Project {
         .unwrap()
 }
 
+fn load(fixture: &str) -> Project {
+    Project::load(
+        &Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(fixture),
+    )
+    .unwrap()
+}
+
+fn t071_messages(p: &Project) -> Vec<String> {
+    p.audit()
+        .iter()
+        .filter(|d| d.code == TypeCode::T071)
+        .map(|d| d.inner.message.clone())
+        .collect()
+}
+
 #[test]
 fn t050_flags_only_violators() {
     let p = proj();
@@ -44,4 +61,34 @@ fn t050_flags_only_violators() {
     assert!(!all.contains("`TRACKWIDTH`"));
     assert!(!all.contains("`checkLimit`"));
     assert!(!all.contains("`GoodState`"));
+}
+
+#[test]
+fn t071_flags_case_collisions() {
+    // naming.m1prj has pairs differing only by case (e.g. brakePressure /
+    // BrakePressure, BrakeBias / brakeBias, TRACKWIDTH / trackWidth).
+    let msgs = t071_messages(&proj()).join("\n");
+    assert!(
+        msgs.contains("Root.Inputs.BrakePressure") && msgs.contains("Root.Inputs.brakePressure"),
+        "expected case-collision pair, got: {msgs}"
+    );
+    assert!(msgs.contains("differ only by case"));
+}
+
+#[test]
+fn t071_flags_library_shadow() {
+    // shadow.m1prj declares a channel named `Calculate` (a library object).
+    let msgs = t071_messages(&load("shadow.m1prj")).join("\n");
+    assert!(
+        msgs.contains("shadows the library object `Calculate`"),
+        "expected library-shadow warning, got: {msgs}"
+    );
+}
+
+#[test]
+fn t071_clean_project_has_none() {
+    assert!(
+        t071_messages(&load("clean.m1prj")).is_empty(),
+        "clean project must produce no T071"
+    );
 }
