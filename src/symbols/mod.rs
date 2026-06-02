@@ -57,7 +57,7 @@ pub struct Symbol {
     /// `BuiltIn.CAN.Signal`, `MoTeC Input.Sensor`, … — not just objects. `None`
     /// for symbols not sourced from a project/DBC `<Component>`. Lets the LSP
     /// reason about a component's class for class-aware structure checks and
-    /// completion (#47). See [`classname::valid_parent_classes`] for the schema
+    /// completion (#47). See [`crate::classname::valid_parent_classes`] for the schema
     /// of which parent classes a given child class is conventionally nested under.
     pub classname: Option<String>,
     /// 0-based line of this symbol's declaration in the `.m1prj` (the
