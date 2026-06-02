@@ -44,6 +44,62 @@ pub fn audit_project(project: &Project) -> Vec<TypeDiagnostic> {
             ));
         }
     }
+    out.extend(audit_name_collisions(project));
+    out
+}
+
+/// Project-wide name-case audit (T071):
+///   (a) two project symbols whose fully-qualified dotted paths are equal
+///       case-insensitively but differ in actual case — reported once per pair;
+///   (b) a project symbol whose leaf name case-insensitively matches a firmware
+///       library object name (`Calculate`, `CanComms`, …), which it would shadow.
+pub fn audit_name_collisions(project: &Project) -> Vec<TypeDiagnostic> {
+    use std::collections::HashMap;
+    let table = project.symbols();
+    let mut out = Vec::new();
+
+    // (a) case-insensitive path collisions. Group the distinct (case-preserving)
+    //     paths by their lower-cased form; any group with >1 distinct spelling is
+    //     a collision. Report each unordered pair once.
+    let mut by_lower: HashMap<String, Vec<&str>> = HashMap::new();
+    for sym in table.iter() {
+        let entry = by_lower.entry(sym.path.to_ascii_lowercase()).or_default();
+        if !entry.contains(&sym.path.as_str()) {
+            entry.push(sym.path.as_str());
+        }
+    }
+    for variants in by_lower.values() {
+        if variants.len() < 2 {
+            continue;
+        }
+        let mut sorted = variants.clone();
+        sorted.sort_unstable();
+        for i in 0..sorted.len() {
+            for j in (i + 1)..sorted.len() {
+                out.push(make_project(
+                    TypeCode::T071,
+                    Severity::Warning,
+                    format!(
+                        "symbol names `{}` and `{}` differ only by case",
+                        sorted[i], sorted[j]
+                    ),
+                ));
+            }
+        }
+    }
+
+    // (b) project symbol leaf shadowing a library object name.
+    let lib_names: Vec<&str> = crate::intrinsics::get().library_object_names().collect();
+    for sym in table.iter() {
+        let leaf = leaf_of(&sym.path);
+        if let Some(obj) = lib_names.iter().find(|n| n.eq_ignore_ascii_case(leaf)) {
+            out.push(make_project(
+                TypeCode::T071,
+                Severity::Warning,
+                format!("symbol `{}` shadows the library object `{obj}`", sym.path),
+            ));
+        }
+    }
     out
 }
 
