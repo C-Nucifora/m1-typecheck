@@ -65,6 +65,7 @@ pub fn augment(table: &mut SymbolTable, xml: &str, rel_filename: &str) -> Result
             path: name.to_string(),
             kind,
             value_type,
+            declared_type: None,
             unit: None,
             security: None,
             filename: Some(rel_filename.to_string()),

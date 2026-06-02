@@ -167,6 +167,40 @@ m1-typecheck --project Project.m1prj --audit-names
   `Warning` severity; the exception is **T070** (`Error`), which — like a syntax
   error — causes a non-zero exit.
 
+## `m1-cfg-export` — export the expected `.m1cfg` parameter list
+
+A second binary reuses the symbol model to generate the `.m1cfg` parameter list a
+project expects ([C-Nucifora/m1-tools#10](https://github.com/C-Nucifora/m1-tools/issues/10)).
+Use it to seed a new calibration file, as a diff target for drift, or — with
+`--missing-only` — as a CI check for parameters absent from the committed `.m1cfg`.
+
+```
+m1-cfg-export [--output <file>] [--format cfg|json|csv]
+              [--baseline <existing.m1cfg>] [--missing-only] <Project.m1prj>
+```
+
+```sh
+m1-cfg-export Project.m1prj                                  # full skeleton (real .m1cfg XML)
+m1-cfg-export Project.m1prj --format csv -o params.csv       # every parameter as a row
+m1-cfg-export Project.m1prj --missing-only --baseline parameters.m1cfg
+```
+
+- Output is the real MoTeC `.m1cfg` XML (`<Configuration><Group><Parameter><Cell
+  Type=… Unit=…>`), with names *un*prefixed (`Foo.Bar`, not `Root.Foo.Bar`), or
+  `json`/`csv` (which also carry the `.m1prj` `security`, not part of a `.m1cfg`).
+- A parameter's cell `Type` is the exact storage type the `.m1prj` declares
+  (`f32`/`u32`/`s16`/…), `enum` for any enum-typed parameter (including
+  package-qualified types like `MoTeC Types.Mode Enumeration`), or the type a
+  `--baseline`/auto-discovered `.m1cfg` back-resolves. Parameters with no type in
+  either source (e.g. the `*.Value` of an untyped reference that isn't yet
+  calibrated) are emitted with a flagged `Type=""` placeholder rather than a
+  guessed type.
+- `--baseline` is required by `--missing-only`; otherwise a sibling
+  `parameters.m1cfg` is auto-discovered (as the type checker does) purely to
+  enrich types.
+- Scope: exports `BuiltIn.Parameter` components. `BuiltIn.IOResourceConstant`
+  resource selections (which a real `.m1cfg` also lists) are not included yet.
+
 ## Environment variables
 
 - `M1_PROJECT` — path to `Project.m1prj` (overrides discovery; used by the corpus
