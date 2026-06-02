@@ -78,3 +78,24 @@ fn without_m1cfg_the_param_type_is_unknown() {
         "without a cfg the parameter type is Unknown — T030 should not fire, got:\n{out}"
     );
 }
+
+#[test]
+fn auto_discovers_ancestor_m1cfg_for_param_types() {
+    // Real layout: the cfg sits at the repo root while the project (and script)
+    // are nested several directories deeper. Auto-discovery must walk UP from the
+    // project's parent to find it — a sibling-only search would miss it.
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join("autoconfig_ancestor");
+    let project_dir = root.join("UQR-EV").join("01.00");
+    fs::create_dir_all(&project_dir).unwrap();
+    // cfg lives at the ancestor root, NOT in the project's own directory.
+    fs::write(root.join("parameters.m1cfg"), CONFIG).unwrap();
+    fs::write(project_dir.join("Project.m1prj"), PROJECT).unwrap();
+    let script = project_dir.join("Foo Update.m1scr");
+    fs::write(&script, SCRIPT).unwrap();
+
+    let out = run(&script);
+    assert!(
+        out.contains("T030"),
+        "expected T030 from the ancestor cfg-typed parameter, got:\n{out}"
+    );
+}

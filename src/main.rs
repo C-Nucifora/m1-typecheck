@@ -41,9 +41,11 @@ fn find_project(args: &Args) -> Option<PathBuf> {
 
 /// Locate the `parameters.m1cfg` that augments parameter symbols with concrete
 /// value types and units. Explicit `--config` (or `$M1_CONFIG`) wins; otherwise
-/// auto-discover the first `*.m1cfg` sibling of the project file — the same rule
-/// the language server uses, so CLI checks (and m1-ci) get the cfg's parameter
-/// types for free whenever one sits beside the project.
+/// auto-discover the first `*.m1cfg` by walking UP from the project file's parent
+/// directory through its ancestors (nearest wins), stopping at the filesystem
+/// root — mirroring `find_project`. Real projects keep `parameters.m1cfg` at the
+/// repository root while `Project.m1prj` is nested several directories deeper, so
+/// a sibling-only search would miss it.
 fn find_config(args: &Args, project_path: Option<&PathBuf>) -> Option<PathBuf> {
     if let Some(p) = &args.config {
         return Some(p.clone());
@@ -51,11 +53,19 @@ fn find_config(args: &Args, project_path: Option<&PathBuf>) -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("M1_CONFIG") {
         return Some(PathBuf::from(p));
     }
-    let root = project_path?.parent()?;
-    std::fs::read_dir(root).ok()?.flatten().find_map(|e| {
-        let p = e.path();
-        (p.extension().and_then(|x| x.to_str()) == Some("m1cfg")).then_some(p)
-    })
+    let mut dir = project_path?.parent()?;
+    loop {
+        let found = std::fs::read_dir(dir).ok().and_then(|entries| {
+            entries.flatten().find_map(|e| {
+                let p = e.path();
+                (p.extension().and_then(|x| x.to_str()) == Some("m1cfg")).then_some(p)
+            })
+        });
+        if found.is_some() {
+            return found;
+        }
+        dir = dir.parent()?;
+    }
 }
 
 fn main() {

@@ -56,10 +56,11 @@ typed symbols, which is what powers:
 - enum association of `enum`-typed cells (see below),
 - richer hover/completion in the language server (type + unit).
 
-It is **auto-discovered**: the first `*.m1cfg` sibling of the project file is
-loaded automatically (the CLI, the language server, and therefore m1-ci all do
-this), so a project that ships a `parameters.m1cfg` gets type-aware checking with
-no extra configuration. `--config` overrides the discovered file.
+It is **auto-discovered**: the first `*.m1cfg` found by searching the project
+file's directory and its ancestors (nearest wins) is loaded automatically (the
+CLI, the language server, and therefore m1-ci all do this), so a project that
+ships a `parameters.m1cfg` gets type-aware checking with no extra configuration.
+`--config` overrides the discovered file.
 
 `FuncUser`/`MethodUser` components carry a `Filename`, mapping each script to its
 **enclosing group** — the base for relative name resolution.
@@ -146,9 +147,10 @@ m1-typecheck --project Project.m1prj --audit-names
 - `--project` defaults to the nearest `Project.m1prj` upward from the first input
   file, or `$M1_PROJECT`. With no project found, runs in project-less mode (T001
   disabled).
-- `--config` defaults to the first `*.m1cfg` sibling of the project file (or
-  `$M1_CONFIG`); pass it explicitly to override. Without a cfg, parameters are
-  untyped (`Unknown`) and type-dependent rules stay silent for them.
+- `--config` defaults to the first `*.m1cfg` found by searching the project
+  file's directory and its ancestors (nearest wins), or `$M1_CONFIG`; pass it
+  explicitly to override. Without a cfg, parameters are untyped (`Unknown`) and
+  type-dependent rules stay silent for them.
 - `--audit-names` prints the project-name audit (T050) as
   `<project-path>: warning[T050]: <message>`; requires a loaded project.
 - Output: `path:line:col: severity[T0xx]: message`. Syntax errors print first.
