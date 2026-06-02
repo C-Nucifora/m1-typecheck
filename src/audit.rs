@@ -45,6 +45,54 @@ pub fn audit_project(project: &Project) -> Vec<TypeDiagnostic> {
         }
     }
     out.extend(audit_name_collisions(project));
+    out.extend(audit_classname_structure(project));
+    out
+}
+
+/// Project-wide component-class structure audit (T010): a child component whose
+/// `Classname` is only valid under a specific parent class but whose actual
+/// parent has a different class. Driven by [`crate::classname`], which is
+/// deliberately conservative — only classes with an unambiguous parent invariant
+/// (the CAN frame hierarchy) are constrained, so well-formed projects never flag.
+pub fn audit_classname_structure(project: &Project) -> Vec<TypeDiagnostic> {
+    use std::collections::HashMap;
+    let table = project.symbols();
+    let mut out = Vec::new();
+
+    // path -> classname, so a child can look up its parent's class.
+    let class_by_path: HashMap<&str, &str> = table
+        .iter()
+        .filter_map(|s| Some((s.path.as_str(), s.classname.as_deref()?)))
+        .collect();
+
+    for sym in table.iter() {
+        let Some(child_class) = sym.classname.as_deref() else {
+            continue;
+        };
+        // Parent path = the symbol path with its last dotted segment removed.
+        let Some((parent_path, _)) = sym.path.rsplit_once('.') else {
+            continue; // top-level (e.g. `Root`): no parent to constrain against.
+        };
+        let Some(&parent_class) = class_by_path.get(parent_path) else {
+            continue; // parent isn't a known component; nothing to check.
+        };
+        if let Some(allowed) = crate::classname::parent_violation(child_class, parent_class) {
+            out.push(make_project(
+                TypeCode::T010,
+                Severity::Warning,
+                format!(
+                    "component `{}` has class `{child_class}` but its parent `{parent_path}` \
+                     has class `{parent_class}` — expected parent class {}",
+                    sym.path,
+                    allowed
+                        .iter()
+                        .map(|c| format!("`{c}`"))
+                        .collect::<Vec<_>>()
+                        .join(" or "),
+                ),
+            ));
+        }
+    }
     out
 }
 
