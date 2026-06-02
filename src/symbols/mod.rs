@@ -32,6 +32,10 @@ pub struct Symbol {
     pub kind: SymbolKind,
     pub value_type: ValueType,
     pub unit: Option<String>,
+    /// Security / access level for this symbol, from the `.m1prj`
+    /// `<Props Security="…">` (e.g. `Tune`, `Calibration`, `Master Calibration`,
+    /// `Resource`). `None` when the project declares none. Surfaced in hover.
+    pub security: Option<String>,
     pub filename: Option<String>,
     /// Enum type this symbol's value belongs to, if known (set during .m1cfg
     /// back-resolution). When set, the typer reports `ValueType::Enum(_)`.
