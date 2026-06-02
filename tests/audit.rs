@@ -92,3 +92,36 @@ fn t071_clean_project_has_none() {
         "clean project must produce no T071"
     );
 }
+
+fn t010_messages(p: &Project) -> Vec<String> {
+    p.audit()
+        .iter()
+        .filter(|d| d.code == TypeCode::T010)
+        .map(|d| d.inner.message.clone())
+        .collect()
+}
+
+#[test]
+fn t010_flags_can_signal_under_wrong_parent() {
+    // classname_structure.m1prj nests one signal correctly (under a message) and
+    // one incorrectly (directly under a group compound). Only the latter flags.
+    let msgs = t010_messages(&load("classname_structure.m1prj")).join("\n");
+    assert!(
+        msgs.contains("Root.Loose.Rpm") && msgs.contains("expected parent class"),
+        "expected a T010 for the misplaced CAN signal, got: {msgs}"
+    );
+    assert!(
+        !msgs.contains("Root.Comms.Status.Speed"),
+        "the correctly-nested signal must not flag: {msgs}"
+    );
+}
+
+#[test]
+fn t010_clean_project_has_none() {
+    // The naming fixture has no CAN components, so the conservative schema is
+    // silent — proving well-formed projects never see a T010.
+    assert!(
+        t010_messages(&proj()).is_empty(),
+        "project without constrained classes must produce no T010"
+    );
+}

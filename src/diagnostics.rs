@@ -7,6 +7,7 @@ pub enum TypeCode {
     T002, // float-equality
     T003, // int-float-mixing
     T004, // signed-unsigned-comparison
+    T010, // invalid-component-parent (project audit; child class under a disallowed parent class)
     T020, // enum-non-member
     T021, // enum-numeric-comparison
     T030, // assignment-type-mismatch
@@ -29,6 +30,7 @@ impl TypeCode {
             TypeCode::T002 => "T002",
             TypeCode::T003 => "T003",
             TypeCode::T004 => "T004",
+            TypeCode::T010 => "T010",
             TypeCode::T020 => "T020",
             TypeCode::T021 => "T021",
             TypeCode::T030 => "T030",
@@ -55,6 +57,7 @@ impl TypeCode {
             TypeCode::T002 => "float-equality",
             TypeCode::T003 => "int-float-mixing",
             TypeCode::T004 => "signed-unsigned-comparison",
+            TypeCode::T010 => "invalid-component-parent",
             TypeCode::T020 => "enum-non-member",
             TypeCode::T021 => "enum-numeric-comparison",
             TypeCode::T030 => "assignment-type-mismatch",
@@ -78,8 +81,8 @@ impl TypeCode {
     pub fn all_codes() -> &'static [TypeCode] {
         use TypeCode::*;
         &[
-            T001, T002, T003, T004, T020, T021, T030, T031, T040, T041, T042, T050, T060, T061,
-            T062, T070, T071,
+            T001, T002, T003, T004, T010, T020, T021, T030, T031, T040, T041, T042, T050, T060,
+            T061, T062, T070, T071,
         ]
     }
 }
@@ -151,6 +154,6 @@ mod tests {
             );
         }
         // Catalogue size tracks the enum (bump both together).
-        assert_eq!(codes.len(), 17);
+        assert_eq!(codes.len(), 18);
     }
 }
