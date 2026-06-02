@@ -31,6 +31,14 @@ pub fn augment(table: &mut SymbolTable, xml: &str) -> Result<(), ConfigError> {
         let Some(cell) = param.children().find(|c| c.has_tag_name("Cell")) else {
             continue;
         };
+        // Real MoTeC `.m1cfg` exports name parameters WITHOUT the implicit `Root.`
+        // group prefix the symbol table keys use (cfg `Foo.Bar` vs symbol
+        // `Root.Foo.Bar`). Resolve to the actual symbol path so the cfg's types and
+        // units are applied; without this every entry of a real export misses and
+        // the whole cfg is silently dropped. An already-qualified name still matches.
+        let Some(path) = resolve_path(table, name) else {
+            continue;
+        };
         let type_attr = cell.attribute("Type").unwrap_or("");
         let unit = cell.attribute("Unit").map(str::to_string);
 
@@ -40,10 +48,10 @@ pub fn augment(table: &mut SymbolTable, xml: &str) -> Result<(), ConfigError> {
             let candidates = table.enums_with_member(member);
             if candidates.len() == 1 {
                 let id = candidates[0];
-                table.set_enum_assoc(name, id);
+                table.set_enum_assoc(&path, id);
             }
             // zero or many -> leave Unknown (silent), but still record the unit.
-            if let Some(sym) = table.get_mut(name)
+            if let Some(sym) = table.get_mut(&path)
                 && sym.unit.is_none()
             {
                 sym.unit = unit;
@@ -52,7 +60,7 @@ pub fn augment(table: &mut SymbolTable, xml: &str) -> Result<(), ConfigError> {
         }
 
         let vt = cell_type(type_attr);
-        if let Some(sym) = table.get_mut(name) {
+        if let Some(sym) = table.get_mut(&path) {
             sym.value_type = vt;
             // Only override the unit when the cfg cell actually carries one, so a
             // unit already populated from the `.m1prj` `<Default Unit>` (#75) is
@@ -63,4 +71,14 @@ pub fn augment(table: &mut SymbolTable, xml: &str) -> Result<(), ConfigError> {
         }
     }
     Ok(())
+}
+
+/// Resolve a `.m1cfg` parameter name to an actual symbol path: the name verbatim,
+/// else with the implicit `Root.` group prefix that real exports omit.
+fn resolve_path(table: &SymbolTable, name: &str) -> Option<String> {
+    if table.get(name).is_some() {
+        return Some(name.to_string());
+    }
+    let rooted = format!("Root.{name}");
+    table.get(&rooted).is_some().then_some(rooted)
 }
