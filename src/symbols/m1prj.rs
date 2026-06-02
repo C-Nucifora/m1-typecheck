@@ -211,6 +211,10 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                     path: name.to_string(),
                     kind,
                     value_type,
+                    declared_type: props
+                        .and_then(|p| p.attribute("Type"))
+                        .filter(|t| !t.is_empty())
+                        .map(str::to_string),
                     unit,
                     security,
                     filename,

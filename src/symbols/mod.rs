@@ -31,6 +31,13 @@ pub struct Symbol {
     pub path: String,
     pub kind: SymbolKind,
     pub value_type: ValueType,
+    /// The raw storage type declared on the `.m1prj` `<Props Type="…">`, verbatim
+    /// — a primitive (`f32`, `u32`, `s16`, …) or an enum reference (`::This.<Enum>`,
+    /// `MoTeC Types.<Enum>`, `::Hardware.<…>`). `None` when the project declares no
+    /// type. Unlike [`Symbol::value_type`], this is *not* lost for package-qualified
+    /// enum types the model can't resolve to a specific [`EnumId`] — it preserves what
+    /// the project actually wrote, which `.m1cfg` export needs.
+    pub declared_type: Option<String>,
     pub unit: Option<String>,
     /// Security / access level for this symbol, from the `.m1prj`
     /// `<Props Security="…">` (e.g. `Tune`, `Calibration`, `Master Calibration`,
