@@ -25,19 +25,14 @@ pub struct Registry {
 }
 
 impl Registry {
-    pub fn default_v1() -> Self {
-        Registry {
-            rules: vec![
-                Box::new(t001_unresolved::Rule),
-                Box::new(t002_float_eq::Rule),
-                Box::new(t003_int_float_mix::Rule),
-                Box::new(t060_stateful_conditional::Rule),
-                Box::new(t061_integrated_only::Rule),
-                Box::new(t062_deprecated_overload::Rule),
-            ],
-        }
+    pub fn rules(&self) -> &[Box<dyn Rule>] {
+        &self.rules
     }
-    pub fn default_v2() -> Self {
+}
+
+impl Default for Registry {
+    /// The active rule set used by `check_script`.
+    fn default() -> Self {
         Registry {
             rules: vec![
                 Box::new(t001_unresolved::Rule),
@@ -52,9 +47,6 @@ impl Registry {
                 Box::new(t062_deprecated_overload::Rule),
             ],
         }
-    }
-    pub fn rules(&self) -> &[Box<dyn Rule>] {
-        &self.rules
     }
 }
 
@@ -127,7 +119,7 @@ fn run(project: Option<&Project>, file_name: Option<&str>, source: &str) -> Chec
         group,
         project,
     };
-    let registry = Registry::default_v2();
+    let registry = Registry::default();
     let mut diagnostics = Vec::new();
     walk(cst.root(), &registry, &scope, &mut diagnostics);
     crate::flow::single_assignment(cst.root(), &scope, &mut diagnostics);

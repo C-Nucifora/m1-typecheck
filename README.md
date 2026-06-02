@@ -85,9 +85,8 @@ v2 builds a live **enum domain model** on top of the v1 symbol table:
   `<EnumTypeName>.<Member>` (when the head names an enum that declares the member)
   and for any enum-associated symbol.
 
-This unlocks four new rules (added to the new `Registry::default_v2()`, which is
-now the default for `check_script`; `default_v1()` is kept for callers that want
-to pin the v1 rule set):
+This unlocks four new rules, added to the default rule set
+(`Registry::default()`) that `check_script` runs:
 
 | Code | Severity | Rule |
 |------|----------|------|
