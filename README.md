@@ -115,6 +115,7 @@ This unlocks four new rules, added to the default rule set
 | T030 | Warning | **assignment-type-mismatch** — `target = value` where the target is a Channel/Parameter with a known type and the value's known type is incompatible. |
 | T031 | Warning | **unresolved-assignment-target** — the target of a plain `=` assignment is a project-rooted path that does not resolve (e.g. `Root.Foo.Missing = 1`). Distinct from T001 because a write target is not a read; compound assignments (`+=`, …) read the target first and stay T001. |
 | T040 | Warning | **channel-multiple-assignment** — a Channel assigned more than once on a single code path (control-flow aware: mutually-exclusive `if`/`else` arms are not a conflict). Implemented as a whole-tree pass in `flow.rs`, not a node-at-a-time rule. |
+| T070 | Error | **when-is-exhaustive** — a `when (subject) { is (…) … }` over an enum-typed subject that does not cover every enumerator (`or` groups enumerators within one arm). One of the remaining §6 compile-time checks M1 Build enforces. An arm naming a non-member label is treated as a catch-all (the `when` is then exhaustive); a non-enum subject is skipped silently. |
 
 Every v2 rule keeps the v1 invariant: it fires only when every type/enum it needs
 is **known**, and stays silent under `Unknown` — so the m1-example corpus stays free of
@@ -130,6 +131,13 @@ diagnostics at the project level (no source line/col). It is **off by default**:
 the example project massively violates these conventions, so running it as part of
 the per-script CI flow would be pure noise. The corpus gate records only a baseline
 count for it.
+
+The same audit also emits **T071 name-case-collision** (Warning, the other
+remaining §6 compile-time check): (a) any two project symbols whose fully-qualified
+dotted paths are equal case-insensitively but differ in actual case (reported once
+per colliding pair), and (b) any project symbol whose leaf name case-insensitively
+matches a firmware library object name (`Calculate`, `CanComms`, …), which it would
+shadow. Both flow through `Project::audit()` / `--audit-names` alongside T050.
 
 ## CLI usage
 
@@ -149,11 +157,12 @@ m1-typecheck --project Project.m1prj --audit-names
 - `--config` defaults to the first `*.m1cfg` sibling of the project file (or
   `$M1_CONFIG`); pass it explicitly to override. Without a cfg, parameters are
   untyped (`Unknown`) and type-dependent rules stay silent for them.
-- `--audit-names` prints the project-name audit (T050) as
-  `<project-path>: warning[T050]: <message>`; requires a loaded project.
+- `--audit-names` prints the project-name audit (T050 and T071) as
+  `<project-path>: warning[T0xx]: <message>`; requires a loaded project.
 - Output: `path:line:col: severity[T0xx]: message`. Syntax errors print first.
-- Exit codes: `0` no errors, `1` ≥1 error, `2` invocation error. All v2 rules are
-  `Warning` severity, so they never by themselves cause a non-zero exit.
+- Exit codes: `0` no errors, `1` ≥1 error, `2` invocation error. Most v2 rules are
+  `Warning` severity; the exception is **T070** (`Error`), which — like a syntax
+  error — causes a non-zero exit.
 
 ## Environment variables
 

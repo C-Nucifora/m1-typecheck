@@ -73,6 +73,46 @@ fn t030_no_flag_unknown_target() {
     assert!(!codes(&p, "driveMode = 1.0;\n").contains(&TypeCode::T030));
 }
 
+// ---- T070 when-is-exhaustive --------------------------------------------
+// `SwitchMode.Value` is enum `Switch State` with members {Off, On}.
+
+#[test]
+fn t070_flags_missing_enumerator() {
+    let p = proj();
+    let src = "when (SwitchMode.Value) {\nis (Off) {\n}\n}\n";
+    assert!(codes(&p, src).contains(&TypeCode::T070));
+}
+
+#[test]
+fn t070_no_flag_when_all_covered() {
+    let p = proj();
+    let src = "when (SwitchMode.Value) {\nis (Off) {\n}\nis (On) {\n}\n}\n";
+    assert!(!codes(&p, src).contains(&TypeCode::T070));
+}
+
+#[test]
+fn t070_no_flag_when_all_covered_via_or() {
+    let p = proj();
+    let src = "when (SwitchMode.Value) {\nis (Off or On) {\n}\n}\n";
+    assert!(!codes(&p, src).contains(&TypeCode::T070));
+}
+
+#[test]
+fn t070_no_flag_non_enum_subject() {
+    let p = proj();
+    // `gain` is an f32 channel, not an enum -> rule stays silent.
+    let src = "when (gain) {\nis (Off) {\n}\n}\n";
+    assert!(!codes(&p, src).contains(&TypeCode::T070));
+}
+
+#[test]
+fn t070_no_flag_with_catch_all_arm() {
+    let p = proj();
+    // An arm naming a non-member label acts as a default/catch-all -> exhaustive.
+    let src = "when (SwitchMode.Value) {\nis (Off) {\n}\nis (Anything) {\n}\n}\n";
+    assert!(!codes(&p, src).contains(&TypeCode::T070));
+}
+
 // NOTE (deviation from plan): the `LHS is (Member)` clause that the plan's
 // Trigger 2 targeted is NOT valid syntax in the tree-sitter-m1 grammar — `is`
 // always parses as an ERROR node, and the runner short-circuits on syntax
