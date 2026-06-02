@@ -94,6 +94,7 @@ This unlocks four new rules, added to the default rule set
 | T021 | Warning | **enum-numeric-comparison** — a comparison with one *known* `Enum` operand and the other *known* numeric. |
 | T004 | Warning | **signed-unsigned-comparison** — an ordering comparison (`<` `>` `<=` `>=`) mixing a known `Unsigned` operand with a known signed `Integer`, where the result can flip on wraparound. Narrow by design: ordering only, and literal operands are allowed. |
 | T030 | Warning | **assignment-type-mismatch** — `target = value` where the target is a Channel/Parameter with a known type and the value's known type is incompatible. |
+| T031 | Warning | **unresolved-assignment-target** — the target of a plain `=` assignment is a project-rooted path that does not resolve (e.g. `Root.Foo.Missing = 1`). Distinct from T001 because a write target is not a read; compound assignments (`+=`, …) read the target first and stay T001. |
 | T040 | Warning | **channel-multiple-assignment** — a Channel assigned more than once on a single code path (control-flow aware: mutually-exclusive `if`/`else` arms are not a conflict). Implemented as a whole-tree pass in `flow.rs`, not a node-at-a-time rule. |
 
 Every v2 rule keeps the v1 invariant: it fires only when every type/enum it needs

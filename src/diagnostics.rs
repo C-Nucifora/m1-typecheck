@@ -10,6 +10,7 @@ pub enum TypeCode {
     T020, // enum-non-member
     T021, // enum-numeric-comparison
     T030, // assignment-type-mismatch
+    T031, // unresolved-assignment-target
     T040, // channel-multiple-assignment
     T050, // symbol-name-convention (project audit)
     T060, // stateful-conditional
@@ -27,6 +28,7 @@ impl TypeCode {
             TypeCode::T020 => "T020",
             TypeCode::T021 => "T021",
             TypeCode::T030 => "T030",
+            TypeCode::T031 => "T031",
             TypeCode::T040 => "T040",
             TypeCode::T050 => "T050",
             TypeCode::T060 => "T060",
