@@ -73,6 +73,18 @@ pub fn augment(table: &mut SymbolTable, xml: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
+/// The parameter names a `.m1cfg` declares, as written there (unprefixed, e.g.
+/// `Foo.Bar`). Used to flag project parameters that have no cfg entry (T041).
+pub fn parameter_names(xml: &str) -> Result<Vec<String>, ConfigError> {
+    let doc = roxmltree::Document::parse(xml).map_err(ConfigError::Xml)?;
+    Ok(doc
+        .descendants()
+        .filter(|n| n.has_tag_name("Parameter"))
+        .filter_map(|n| n.attribute("Name"))
+        .map(str::to_string)
+        .collect())
+}
+
 /// Resolve a `.m1cfg` parameter name to an actual symbol path: the name verbatim,
 /// else with the implicit `Root.` group prefix that real exports omit.
 fn resolve_path(table: &SymbolTable, name: &str) -> Option<String> {

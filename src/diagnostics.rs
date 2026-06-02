@@ -12,6 +12,7 @@ pub enum TypeCode {
     T030, // assignment-type-mismatch
     T031, // unresolved-assignment-target
     T040, // channel-multiple-assignment
+    T041, // missing-cfg-parameter (project audit; in .m1prj, absent from .m1cfg)
     T050, // symbol-name-convention (project audit)
     T060, // stateful-conditional
     T061, // integrated-only-call
@@ -32,6 +33,7 @@ impl TypeCode {
             TypeCode::T030 => "T030",
             TypeCode::T031 => "T031",
             TypeCode::T040 => "T040",
+            TypeCode::T041 => "T041",
             TypeCode::T050 => "T050",
             TypeCode::T060 => "T060",
             TypeCode::T061 => "T061",

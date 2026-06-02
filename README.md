@@ -160,6 +160,12 @@ m1-typecheck --project Project.m1prj --audit-names
   file's directory and its ancestors (nearest wins), or `$M1_CONFIG`; pass it
   explicitly to override. Without a cfg, parameters are untyped (`Unknown`) and
   type-dependent rules stay silent for them.
+- When both a project **and** a `.m1cfg` are loaded, the run also emits **T041**
+  (`missing-cfg-parameter`) once per `BuiltIn.Parameter` that the `.m1prj`
+  declares but the `.m1cfg` omits — M1-Build falls back to its default value for
+  those. Warning severity, so it annotates without failing the build (unless the
+  caller opts into fail-on-warning); this is what surfaces calibration-coverage
+  gaps in CI. (The same set is what `m1-cfg-export --missing-only` prints.)
 - `--audit-names` prints the project-name audit (T050 and T071) as
   `<project-path>: warning[T0xx]: <message>`; requires a loaded project.
 - Output: `path:line:col: severity[T0xx]: message`. Syntax errors print first.

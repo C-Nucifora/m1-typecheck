@@ -1,5 +1,7 @@
 //! The loaded project: symbol table + enum types + opaque roots + file->group.
-use crate::symbols::{SymbolTable, m1cfg, m1dbc, m1prj};
+use crate::diagnostics::{TypeCode, TypeDiagnostic, make_project};
+use crate::symbols::{SymbolKind, SymbolTable, m1cfg, m1dbc, m1prj};
+use m1_core::Severity;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -24,6 +26,10 @@ pub struct Project {
     table: SymbolTable,
     opaque_roots: HashSet<String>,
     file_to_group: HashMap<String, String>,
+    /// The parameter symbol paths a loaded `.m1cfg` declares (qualified to the
+    /// symbol-table keys, e.g. `Root.Foo.Bar`). `None` when no cfg was loaded —
+    /// the missing-parameter audit (T041) is then skipped.
+    cfg_params: Option<HashSet<String>>,
 }
 
 #[derive(Debug)]
@@ -52,13 +58,50 @@ impl Project {
             table: parsed.table,
             opaque_roots,
             file_to_group: parsed.file_to_group,
+            cfg_params: None,
         })
     }
 
     pub fn with_config(mut self, m1cfg_path: &Path) -> Result<Project, LoadError> {
         let xml = std::fs::read_to_string(m1cfg_path).map_err(LoadError::Io)?;
         m1cfg::augment(&mut self.table, &xml).map_err(|e| LoadError::Parse(e.to_string()))?;
+        // Record which parameters the cfg declares (qualified to symbol keys) so
+        // `missing_cfg_parameters` can flag project parameters absent from it.
+        let names = m1cfg::parameter_names(&xml).map_err(|e| LoadError::Parse(e.to_string()))?;
+        self.cfg_params = Some(
+            names
+                .iter()
+                .map(|n| m1_workspace::qualify_root(n).into_owned())
+                .collect(),
+        );
         Ok(self)
+    }
+
+    /// Project-level audit (T041): every `BuiltIn.Parameter` declared in the
+    /// `.m1prj` that has no entry in the loaded `.m1cfg` — M1-Build will fall back
+    /// to its default value. Empty when no cfg is loaded (nothing to compare).
+    pub fn missing_cfg_parameters(&self) -> Vec<TypeDiagnostic> {
+        let Some(cfg_params) = &self.cfg_params else {
+            return Vec::new();
+        };
+        let mut out: Vec<TypeDiagnostic> = self
+            .table
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Parameter && !cfg_params.contains(&s.path))
+            .map(|s| {
+                make_project(
+                    TypeCode::T041,
+                    Severity::Warning,
+                    format!(
+                        "parameter `{}` is declared in the project but has no entry in the .m1cfg (will use its default value)",
+                        s.path
+                    ),
+                )
+            })
+            .collect();
+        // Deterministic order for stable CI output.
+        out.sort_by(|a, b| a.inner.message.cmp(&b.inner.message));
+        out
     }
 
     /// Merge a `.m1dbc`'s CAN objects (DBC/Message/Signal) into the symbol
@@ -88,5 +131,59 @@ impl Project {
     /// Audit the project's own symbol names (T050).
     pub fn audit(&self) -> Vec<crate::diagnostics::TypeDiagnostic> {
         crate::audit::audit_project(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::diagnostics::TypeCode;
+
+    fn write_temp(name: &str, content: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!("m1tc_{}_{}", std::process::id(), name));
+        std::fs::write(&p, content).unwrap();
+        p
+    }
+
+    #[test]
+    fn missing_cfg_parameters_flags_only_uncovered_params() {
+        let prj = write_temp(
+            "Project.m1prj",
+            "<?xml version=\"1.0\"?>\n<Project>\n\
+             <Component Classname=\"BuiltIn.Parameter\" Name=\"Root.A.Covered\"><Props Type=\"u32\"/></Component>\n\
+             <Component Classname=\"BuiltIn.Parameter\" Name=\"Root.A.Missing\"><Props Type=\"u32\"/></Component>\n\
+             <Component Classname=\"BuiltIn.Channel\" Name=\"Root.A.Chan\"><Props Type=\"u32\"/></Component>\n\
+             </Project>",
+        );
+        // A real `.m1cfg` lists parameters with the `Root.` prefix stripped.
+        let cfg = write_temp(
+            "parameters.m1cfg",
+            "<?xml version=\"1.0\"?>\n<Configuration>\n <Group Name=\"\">\n\
+             <Parameter Name=\"A.Covered\"><Cell Type=\"u32\"><![CDATA[1]]></Cell></Parameter>\n\
+             </Group>\n</Configuration>",
+        );
+        let project = Project::load(&prj).unwrap().with_config(&cfg).unwrap();
+        let diags = project.missing_cfg_parameters();
+        // Only `Root.A.Missing` is flagged: `Covered` is in the cfg, `Chan` is a
+        // channel (not a parameter).
+        assert_eq!(diags.len(), 1, "exactly one missing parameter");
+        assert_eq!(diags[0].code, TypeCode::T041);
+        assert!(diags[0].inner.message.contains("Root.A.Missing"));
+        let _ = std::fs::remove_file(&prj);
+        let _ = std::fs::remove_file(&cfg);
+    }
+
+    #[test]
+    fn no_cfg_means_no_missing_param_diagnostics() {
+        let prj = write_temp(
+            "Project_nocfg.m1prj",
+            "<?xml version=\"1.0\"?>\n<Project>\n\
+             <Component Classname=\"BuiltIn.Parameter\" Name=\"Root.A.X\"><Props Type=\"u32\"/></Component>\n\
+             </Project>",
+        );
+        // Without a loaded cfg there is nothing to compare against.
+        let project = Project::load(&prj).unwrap();
+        assert!(project.missing_cfg_parameters().is_empty());
+        let _ = std::fs::remove_file(&prj);
     }
 }
