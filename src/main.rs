@@ -119,6 +119,25 @@ fn main() {
         }
     }
 
+    // Project-level audit: parameters declared in the .m1prj but missing from the
+    // loaded .m1cfg (T041). Emitted on every run that has a project + cfg so CI
+    // validates calibration coverage. Warning severity — annotates without failing
+    // the build unless the caller opts into fail-on-warning.
+    if let Some(p) = &project {
+        let path_label = project_path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<project>".into());
+        for d in p.missing_cfg_parameters() {
+            println!(
+                "{}: warning[{}]: {}",
+                path_label,
+                d.code.as_str(),
+                d.inner.message
+            );
+        }
+    }
+
     if args.audit_names {
         match &project {
             Some(p) => {
