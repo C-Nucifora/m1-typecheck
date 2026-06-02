@@ -166,7 +166,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 [[package]]
 name = "m1-core"
 version = "0.2.0"
-source = "git+https://github.com/C-Nucifora/m1-core.git?branch=main#ed7c9f4ea4f9ae53eb6e77ddd524513ed483ec20"
+source = "git+https://github.com/C-Nucifora/m1-core.git?branch=main#750b00802a7c5c11d2cf4c8e328addde103e795f"
 dependencies = [
  "tree-sitter",
  "tree-sitter-m1",
@@ -326,9 +326,9 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter"
-version = "0.25.10"
+version = "0.26.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78f873475d258561b06f1c595d93308a7ed124d9977cb26b148c2084a4a3cc87"
+checksum = "4dab76d0b724ba557954125188cf0633a1ca43199ced82d95c7b9c32cc3de1f3"
 dependencies = [
  "cc",
  "regex",
@@ -347,7 +347,7 @@ checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
 [[package]]
 name = "tree-sitter-m1"
 version = "0.2.0"
-source = "git+https://github.com/C-Nucifora/m1-core.git?branch=main#ed7c9f4ea4f9ae53eb6e77ddd524513ed483ec20"
+source = "git+https://github.com/C-Nucifora/tree-sitter-m1.git?branch=main#f5e531243b79add09aa46bc3a3bdf30408acfc48"
 dependencies = [
  "cc",
  "tree-sitter-language",
