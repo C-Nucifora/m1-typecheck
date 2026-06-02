@@ -1,6 +1,6 @@
 [package]
 name = "m1-typecheck"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 description = "Symbol model and type checker for the MoTeC M1 script language"
