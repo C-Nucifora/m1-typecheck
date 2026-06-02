@@ -491,7 +491,11 @@ mod tests {
 </Project>"#;
         let parsed = parse(xml).unwrap();
         assert_eq!(
-            parsed.table.get("Root.Engine.Control").unwrap().call_rate_hz,
+            parsed
+                .table
+                .get("Root.Engine.Control")
+                .unwrap()
+                .call_rate_hz,
             Some(100.0)
         );
         assert_eq!(
