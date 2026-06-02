@@ -1,4 +1,4 @@
-//! Enum data types declared in <DataTypes>.
+//! Enum data types declared in `DataTypes`.
 pub type EnumId = usize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
