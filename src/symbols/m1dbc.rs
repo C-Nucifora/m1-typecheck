@@ -51,14 +51,21 @@ pub fn augment(table: &mut SymbolTable, xml: &str, rel_filename: &str) -> Result
         let Some(kind) = classify(classname) else {
             continue;
         };
+        let props = node.children().find(|c| c.has_tag_name("Props"));
         let value_type = if kind == SymbolKind::Channel {
-            node.children()
-                .find(|c| c.has_tag_name("Props"))
+            props
                 .and_then(|p| p.attribute("Type"))
                 .and_then(primitive_type)
                 .unwrap_or(ValueType::Unknown)
         } else {
             ValueType::Unknown
+        };
+        // A signal's physical value range, derived from its bit Length + Type
+        // (raw range) scaled by Multiplier/Offset. Used by T042.
+        let dbc_range = if kind == SymbolKind::Channel {
+            props.and_then(signal_range)
+        } else {
+            None
         };
         let class = (kind == SymbolKind::Object).then(|| classname.to_string());
         table.push(Symbol {
@@ -72,9 +79,42 @@ pub fn augment(table: &mut SymbolTable, xml: &str, rel_filename: &str) -> Result
             enum_assoc: None,
             class,
             def_line: None,
+            dbc_range,
         });
     }
     Ok(())
+}
+
+/// Derive a CAN signal's physical `(min, max)` range from its `.m1dbc` `<Props>`:
+/// the raw range from `Length` + `Type` (unsigned `0..2^n-1`, signed
+/// `-2^(n-1)..2^(n-1)-1`, `bool` `0..1`), scaled by `Multiplier` (default 1) and
+/// shifted by `Offset` (default 0). `None` for float signals (`f32`/`f64` —
+/// unbounded for this check) or a missing/zero `Length`.
+fn signal_range(props: roxmltree::Node<'_, '_>) -> Option<(f64, f64)> {
+    let ty = props.attribute("Type")?;
+    let length: i32 = props.attribute("Length")?.parse().ok()?;
+    if length <= 0 {
+        return None;
+    }
+    let mult: f64 = props
+        .attribute("Multiplier")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1.0);
+    let offset: f64 = props
+        .attribute("Offset")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0.0);
+    let (raw_min, raw_max) = match ty {
+        "bool" => (0.0, 1.0),
+        t if t.starts_with('u') => (0.0, 2f64.powi(length) - 1.0),
+        t if t.starts_with('s') => {
+            let half = 2f64.powi(length - 1);
+            (-half, half - 1.0)
+        }
+        _ => return None, // f32/f64 — no bounded integer range
+    };
+    let (a, b) = (raw_min * mult + offset, raw_max * mult + offset);
+    Some((a.min(b), a.max(b)))
 }
 
 #[cfg(test)]

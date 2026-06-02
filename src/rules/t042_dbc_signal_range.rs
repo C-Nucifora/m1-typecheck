@@ -1,0 +1,110 @@
+//! T042 — dbc-signal-range
+//!
+//! Flags a **literal** numeric value assigned to a CAN signal when it falls
+//! outside the signal's physical range (derived from the `.m1dbc`
+//! `Length`/`Type`/`Multiplier`/`Offset`). Only fires on literal right-hand
+//! sides — a computed expression (`a + b`, a channel read) is left alone, since
+//! its value is unknown at check time. Naturally silent without a project (no
+//! DBC signal symbols exist, so nothing resolves to one).
+
+use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
+use crate::resolve::{Resolution, Scope, resolve};
+use crate::typer::path_text;
+use m1_core::{Kind, Node, Severity};
+
+pub struct Rule;
+
+impl super::Rule for Rule {
+    fn check_node(&self, node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>) {
+        if node.kind() != Kind::AssignmentStatement {
+            return;
+        }
+        // Plain `=` only (not `+=` etc., whose result depends on the prior value).
+        if !node.children().iter().any(|c| c.kind() == Kind::Assign) {
+            return;
+        }
+        let kids = node.named_children();
+        let (Some(target), Some(value)) = (
+            kids.iter().find(|c| is_expr(c.kind())),
+            kids.iter().rev().find(|c| is_expr(c.kind())),
+        ) else {
+            return;
+        };
+        if std::ptr::eq(target, value) {
+            return; // single child; nothing assigned
+        }
+        // Only a literal numeric RHS — skip computed expressions.
+        let Some(lit) = literal_number(value) else {
+            return;
+        };
+        // Target must resolve to a CAN signal that carries a range.
+        let Resolution::Symbol(sym) = resolve(&path_text(*target), scope) else {
+            return;
+        };
+        let Some((min, max)) = sym.dbc_range else {
+            return;
+        };
+        if lit < min || lit > max {
+            out.push(make(
+                TypeCode::T042,
+                node,
+                Severity::Warning,
+                format!(
+                    "value {lit} assigned to CAN signal `{}` is outside its range [{min}, {max}]",
+                    sym.path
+                ),
+            ));
+        }
+    }
+}
+
+fn is_expr(k: Kind) -> bool {
+    matches!(
+        k,
+        Kind::Identifier
+            | Kind::MemberExpression
+            | Kind::CallExpression
+            | Kind::UnaryExpression
+            | Kind::BinaryExpression
+            | Kind::TernaryExpression
+            | Kind::ParenthesizedExpression
+            | Kind::Number
+    )
+}
+
+/// The value of a literal numeric expression (`5`, `1.5`, `0xFF`, `-3`, `(7)`),
+/// or `None` for anything computed (identifiers, arithmetic, calls).
+fn literal_number(node: &Node) -> Option<f64> {
+    match node.kind() {
+        Kind::Number => parse_number(node.text()),
+        Kind::ParenthesizedExpression => node
+            .named_children()
+            .iter()
+            .find(|c| is_expr(c.kind()))
+            .and_then(literal_number),
+        Kind::UnaryExpression => {
+            let operand = node
+                .named_children()
+                .into_iter()
+                .find(|c| is_expr(c.kind()))?;
+            let v = literal_number(&operand)?;
+            let op = node.text().trim_start();
+            if op.starts_with('-') {
+                Some(-v)
+            } else if op.starts_with('+') {
+                Some(v)
+            } else {
+                None // `not`, etc. — not a numeric literal
+            }
+        }
+        _ => None,
+    }
+}
+
+fn parse_number(text: &str) -> Option<f64> {
+    let t = text.trim();
+    if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+        return i64::from_str_radix(hex, 16).ok().map(|n| n as f64);
+    }
+    t.parse::<f64>().ok()
+}

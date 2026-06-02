@@ -63,6 +63,21 @@ fn main() {
                     process::exit(2);
                 });
             }
+            // Auto-load `.m1dbc` files under the project directory so CAN signals
+            // resolve and the T042 range check applies. Sorted for stable output.
+            if let Some(root) = path.parent() {
+                for dbc in m1_workspace::find_dbc_files(root) {
+                    let rel = dbc
+                        .strip_prefix(root)
+                        .unwrap_or(&dbc)
+                        .to_string_lossy()
+                        .into_owned();
+                    p = p.with_dbc(&dbc, &rel).unwrap_or_else(|e| {
+                        eprintln!("m1-typecheck: dbc {}: {e}", dbc.display());
+                        process::exit(2);
+                    });
+                }
+            }
             p
         }
         Err(e) => {

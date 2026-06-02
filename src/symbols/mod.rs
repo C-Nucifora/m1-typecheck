@@ -54,6 +54,11 @@ pub struct Symbol {
     /// `<Component>` element), for goto-definition. `None` for symbols not
     /// sourced from the project file (e.g. DBC signals).
     pub def_line: Option<u32>,
+    /// For a `BuiltIn.CAN.Signal`, its `(min, max)` *physical* value range,
+    /// derived from the `.m1dbc` `Length`/`Type` (raw range) scaled by
+    /// `Multiplier`/`Offset`. `None` for non-signals and float signals (whose
+    /// range is unbounded for this check). Powers the T042 range check.
+    pub dbc_range: Option<(f64, f64)>,
 }
 
 #[derive(Debug, Default)]

@@ -12,6 +12,7 @@ pub mod t004_signed_unsigned_cmp;
 pub mod t020_enum_member;
 pub mod t021_enum_numeric_cmp;
 pub mod t030_assign_mismatch;
+pub mod t042_dbc_signal_range;
 pub mod t060_stateful_conditional;
 pub mod t061_integrated_only;
 pub mod t062_deprecated_overload;
@@ -43,6 +44,7 @@ impl Default for Registry {
                 Box::new(t020_enum_member::Rule),
                 Box::new(t021_enum_numeric_cmp::Rule),
                 Box::new(t030_assign_mismatch::Rule),
+                Box::new(t042_dbc_signal_range::Rule),
                 Box::new(t060_stateful_conditional::Rule),
                 Box::new(t061_integrated_only::Rule),
                 Box::new(t062_deprecated_overload::Rule),

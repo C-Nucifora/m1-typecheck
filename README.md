@@ -166,6 +166,11 @@ m1-typecheck --project Project.m1prj --audit-names
   those. Warning severity, so it annotates without failing the build (unless the
   caller opts into fail-on-warning); this is what surfaces calibration-coverage
   gaps in CI. (The same set is what `m1-cfg-export --missing-only` prints.)
+- `.m1dbc` files under the project directory are auto-loaded, so CAN signals
+  resolve. **T042** (`dbc-signal-range`) then flags a **literal** value assigned
+  to a signal that falls outside its physical range (derived from the signal's
+  `Length`/`Type` raw range scaled by `Multiplier`/`Offset`). Computed RHS values
+  are left alone (unknown at check time).
 - `--audit-names` prints the project-name audit (T050 and T071) as
   `<project-path>: warning[T0xx]: <message>`; requires a loaded project.
 - Output: `path:line:col: severity[T0xx]: message`. Syntax errors print first.

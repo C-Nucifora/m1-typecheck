@@ -221,6 +221,7 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                     enum_assoc,
                     class,
                     def_line,
+                    dbc_range: None,
                 });
             }
             _ => {}
