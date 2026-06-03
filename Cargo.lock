@@ -165,8 +165,8 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "m1-core"
-version = "0.3.1"
-source = "git+https://github.com/C-Nucifora/m1-core.git?tag=v0.3.1#d1435a3633132a175a58a495ab415898ba8cf807"
+version = "0.4.0"
+source = "git+https://github.com/C-Nucifora/m1-core.git?tag=v0.4.0#95653cc52108aeddb4596a32cc93cd030d3ea9d6"
 dependencies = [
  "tree-sitter",
  "tree-sitter-m1",
@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "m1-typecheck"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "clap",
  "m1-core",
@@ -352,8 +352,8 @@ checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
 
 [[package]]
 name = "tree-sitter-m1"
-version = "0.3.0"
-source = "git+https://github.com/C-Nucifora/tree-sitter-m1.git?tag=v0.3.0#59560be1f0fe9217aa0949d4cce2202900265edb"
+version = "0.4.0"
+source = "git+https://github.com/C-Nucifora/tree-sitter-m1.git?tag=v0.4.0#a0f0cc897260ca15c86f3ee72ae8593c259c39c7"
 dependencies = [
  "cc",
  "tree-sitter-language",
