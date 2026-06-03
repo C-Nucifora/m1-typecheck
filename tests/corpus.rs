@@ -58,3 +58,21 @@ fn audits_project_names_without_panicking() {
     // No assertion on the exact count: the example project intentionally violates
     // the conventions. This guards only against a panic / API regression.
 }
+
+#[test]
+fn sbg_gyro_unit_is_the_base_unit_degrees_per_second() {
+    // `Root.Vehicle.SBG.IMU.Gyro.Z` is declared `<Props Qty="rad/s">` with a
+    // display unit of rpm/deg/s. Its stored/base unit is `deg/s` (Angle uses
+    // degrees, not radians) — NOT the display unit. Guards the real-corpus path
+    // for the quantity→base-unit fix.
+    let Some(proj_path) = project_path() else {
+        eprintln!("project absent; skipping");
+        return;
+    };
+    let project = Project::load(&proj_path).expect("load project");
+    let sym = project
+        .symbols()
+        .get("Root.Vehicle.SBG.IMU.Gyro.Z")
+        .expect("SBG gyro Z channel present in corpus");
+    assert_eq!(sym.unit.as_deref(), Some("deg/s"));
+}
