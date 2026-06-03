@@ -35,6 +35,12 @@ pub struct Overload {
     pub stateful: bool,
     #[serde(default)]
     pub deprecated: bool,
+    /// Calibration-only: valid only inside M1 Tune *calibration methods*, never
+    /// in ECU `.m1scr` scripts. The manual's `Math.*`, `UI.*` and the calibration
+    /// `System.*` functions are calibration-only. Not offered in ECU-script
+    /// completion; surfaced (labelled) in hover.
+    #[serde(default, rename = "calibrationOnly")]
+    pub calibration_only: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,7 +79,9 @@ pub struct Intrinsics {
     pub version: u32,
     #[serde(default, rename = "dataTypes")]
     pub data_types: Vec<String>,
-    /// object name -> { doc, functions } (the 13 firmware library objects).
+    /// object name -> { doc, functions }: the 13 ECU-script library objects plus
+    /// the calibration-only objects (`Math`, `UI`). Calibration-only functions
+    /// carry `calibration_only` and must not be offered in ECU `.m1scr` scripts.
     #[serde(default)]
     pub library: HashMap<String, LibraryObject>,
     /// Methods available on project objects (AsInteger/Set/Validate/Lookup/…).
@@ -99,7 +107,7 @@ pub fn get() -> &'static Intrinsics {
 }
 
 impl Intrinsics {
-    /// `Some(&'static name)` if `name` is one of the 13 library objects.
+    /// `Some(&'static name)` if `name` is one of the library objects.
     pub fn library_object_name(&'static self, name: &str) -> Option<&'static str> {
         self.library.get_key_value(name).map(|(k, _)| k.as_str())
     }
@@ -140,9 +148,10 @@ mod tests {
     #[test]
     fn loads_and_has_the_library() {
         let i = get();
-        assert_eq!(i.library.len(), 13, "13 firmware library objects");
+        // 13 ECU library objects + 2 calibration-only objects (Math, UI).
+        assert_eq!(i.library.len(), 15, "15 library objects");
         let total: usize = i.library.values().map(|o| o.functions.len()).sum();
-        assert_eq!(total, 128, "128 library overloads");
+        assert_eq!(total, 151, "151 library overloads");
         assert!(i.library_object("Calculate").is_some());
         assert!(i.library_object("CanComms").is_some());
         assert!(i.library_object("NotAnObject").is_none());
@@ -179,5 +188,33 @@ mod tests {
         let i = get();
         assert!(!i.object_method("AsInteger").is_empty());
         assert!(!i.object_method("Lookup").is_empty());
+    }
+
+    #[test]
+    fn calibration_only_functions_are_present_and_flagged() {
+        let i = get();
+        // Calibration Maths / UI functions exist and are flagged calibration-only.
+        let sqrt = i.library_overloads("Math", "Sqrt");
+        assert!(!sqrt.is_empty(), "Math.Sqrt exists");
+        assert!(sqrt[0].calibration_only, "Math.Sqrt is calibration-only");
+        assert_eq!(sqrt[0].returns, "FloatingPoint");
+
+        let isnan = i.library_overloads("Math", "IsNaN");
+        assert!(!isnan.is_empty() && isnan[0].calibration_only);
+        assert_eq!(isnan[0].returns, "Boolean");
+
+        let prompt = i.library_overloads("UI", "PromptOK");
+        assert!(!prompt.is_empty() && prompt[0].calibration_only);
+
+        // System carries both ECU and calibration functions; StrCat is calibration-only.
+        let strcat = i.library_overloads("System", "StrCat");
+        assert!(!strcat.is_empty() && strcat[0].calibration_only);
+
+        // ECU library functions are NOT calibration-only.
+        let abs = i.library_overloads("Calculate", "Absolute");
+        assert!(
+            !abs[0].calibration_only,
+            "Calculate.Absolute is ECU, not calibration"
+        );
     }
 }

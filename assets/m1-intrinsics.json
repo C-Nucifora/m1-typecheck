@@ -2390,6 +2390,381 @@
           "doc": "True if tune software is connected to the ECU.",
           "stateful": false,
           "deprecated": false
+        },
+        {
+          "name": "Debug",
+          "returns": "Void",
+          "params": [
+            {
+              "name": "msg",
+              "type": "String",
+              "doc": ""
+            }
+          ],
+          "doc": "Write a message to the ECU system log (calibration methods).",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "StrCat",
+          "returns": "String",
+          "params": [
+            {
+              "name": "Argument1",
+              "type": "String",
+              "doc": ""
+            },
+            {
+              "name": "Argument2",
+              "type": "String",
+              "doc": ""
+            }
+          ],
+          "doc": "Join two strings together (calibration methods).",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        }
+      ]
+    },
+    "Math": {
+      "doc": "Calibration maths functions. Usable only within M1 Tune calibration methods, not in ECU scripts.",
+      "functions": [
+        {
+          "name": "Abs",
+          "returns": "Integer|FloatingPoint",
+          "params": [
+            {
+              "name": "Argument",
+              "type": "Integer|FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Absolute value of argument.",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "Acos",
+          "returns": "FloatingPoint",
+          "params": [
+            {
+              "name": "Argument",
+              "type": "FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Arccosine, in radians.",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "Asin",
+          "returns": "FloatingPoint",
+          "params": [
+            {
+              "name": "Argument",
+              "type": "FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Arcsine, in radians.",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "Atan",
+          "returns": "FloatingPoint",
+          "params": [
+            {
+              "name": "Argument",
+              "type": "FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Arctangent, in radians.",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "Cos",
+          "returns": "FloatingPoint",
+          "params": [
+            {
+              "name": "Argument",
+              "type": "FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Cosine, in radians.",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "Cosh",
+          "returns": "FloatingPoint",
+          "params": [
+            {
+              "name": "Argument",
+              "type": "FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Hyperbolic cosine, in radians.",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "Exp",
+          "returns": "FloatingPoint",
+          "params": [
+            {
+              "name": "Argument",
+              "type": "FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Exponential (natural e).",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "Exp10",
+          "returns": "FloatingPoint",
+          "params": [
+            {
+              "name": "Argument",
+              "type": "FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Exponential (base 10).",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "IsNaN",
+          "returns": "Boolean",
+          "params": [
+            {
+              "name": "Argument",
+              "type": "FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Test whether the argument is not a number.",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "Log",
+          "returns": "FloatingPoint",
+          "params": [
+            {
+              "name": "Argument",
+              "type": "FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Logarithm (natural base).",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "Log10",
+          "returns": "FloatingPoint",
+          "params": [
+            {
+              "name": "Argument",
+              "type": "FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Logarithm (base 10).",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "Max",
+          "returns": "Integer|FloatingPoint",
+          "params": [
+            {
+              "name": "Argument1",
+              "type": "Integer|FloatingPoint",
+              "doc": ""
+            },
+            {
+              "name": "Argument2",
+              "type": "Integer|FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Greater of two arguments.",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "Min",
+          "returns": "Integer|FloatingPoint",
+          "params": [
+            {
+              "name": "Argument1",
+              "type": "Integer|FloatingPoint",
+              "doc": ""
+            },
+            {
+              "name": "Argument2",
+              "type": "Integer|FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Lesser of two arguments.",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "Sgn",
+          "returns": "Integer",
+          "params": [
+            {
+              "name": "Argument",
+              "type": "Integer|FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Sign of the argument (-1, 0 or +1).",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "Sin",
+          "returns": "FloatingPoint",
+          "params": [
+            {
+              "name": "Argument",
+              "type": "FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Sine, in radians.",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "Sinh",
+          "returns": "FloatingPoint",
+          "params": [
+            {
+              "name": "Argument",
+              "type": "FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Hyperbolic sine, in radians.",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "Sqr",
+          "returns": "Integer|FloatingPoint",
+          "params": [
+            {
+              "name": "Argument",
+              "type": "Integer|FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Square of argument.",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "Sqrt",
+          "returns": "FloatingPoint",
+          "params": [
+            {
+              "name": "Argument",
+              "type": "FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Square root of argument.",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "Tan",
+          "returns": "FloatingPoint",
+          "params": [
+            {
+              "name": "Argument",
+              "type": "FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Tangent, in radians.",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        },
+        {
+          "name": "Tanh",
+          "returns": "FloatingPoint",
+          "params": [
+            {
+              "name": "Argument",
+              "type": "FloatingPoint",
+              "doc": ""
+            }
+          ],
+          "doc": "Hyperbolic tangent, in radians.",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
+        }
+      ]
+    },
+    "UI": {
+      "doc": "Calibration UI functions. Usable only within M1 Tune calibration methods.",
+      "functions": [
+        {
+          "name": "PromptOK",
+          "returns": "Void",
+          "params": [
+            {
+              "name": "title",
+              "type": "String",
+              "doc": ""
+            },
+            {
+              "name": "message",
+              "type": "String",
+              "doc": ""
+            }
+          ],
+          "doc": "Display a dialog box with the given title and message.",
+          "stateful": false,
+          "deprecated": false,
+          "calibrationOnly": true
         }
       ]
     }
