@@ -10,6 +10,7 @@ pub mod rules;
 pub mod symbols;
 pub mod typer;
 pub mod types;
+pub mod units;
 
 pub use diagnostics::{CheckResult, TypeCode, TypeDiagnostic};
 pub use project::Project;

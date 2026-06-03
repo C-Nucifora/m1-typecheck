@@ -211,17 +211,16 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                 } else {
                     None
                 };
-                // Display unit (#75): `<Props><Locale><Default Unit="rpm"/></Locale></Props>`.
-                // Skip `$(…)` template expressions (derived locale references like
-                // `$(Parent.Value:Locale.Default.Unit)`) — those are not a unit a
-                // reader wants shown. A `.m1cfg` may later refine this for tunable
-                // parameters; that path no longer clobbers a unit set here.
+                // Authoritative unit: the *base unit* of the object's quantity.
+                // `<Props Qty="…">` records the quantity as an SI unit string
+                // (`rad/s`, `K`, `Pa`, …); the stored/base unit is that with the
+                // manual's two exceptions applied (Angle→degrees, Temperature→
+                // Celsius). The `<Locale><Default Unit>` is only the *display*
+                // unit (`rpm`, `kPa`) and is deliberately NOT used here. A `$(…)`
+                // template `Qty` is an inherited reference, not a literal unit.
                 let unit = props
-                    .and_then(|p| p.children().find(|c| c.has_tag_name("Locale")))
-                    .and_then(|l| l.children().find(|c| c.has_tag_name("Default")))
-                    .and_then(|d| d.attribute("Unit"))
-                    .filter(|u| !u.starts_with("$("))
-                    .map(str::to_string);
+                    .and_then(|p| p.attribute("Qty"))
+                    .and_then(crate::units::base_unit_of_qty);
                 // Security / access level (#77): `<Props Security="Tune">`.
                 let security = props
                     .and_then(|p| p.attribute("Security"))
@@ -429,32 +428,31 @@ mod tests {
     }
 
     #[test]
-    fn channel_unit_comes_from_locale_default() {
-        // Display unit lives at Props > Locale > Default[@Unit] (#75). A `$(…)`
-        // template expression is not a real unit and is skipped; a channel with
-        // no Locale/Default has no unit.
+    fn channel_unit_is_the_quantity_base_unit_not_the_display_unit() {
+        // The authoritative unit is the *base unit* of the object's quantity
+        // (`Props@Qty`, an SI unit string), NOT the `<Locale><Default Unit>`
+        // display unit. Per the manual, base units are SI except Angle (degrees)
+        // and Temperature (Celsius), so `rad/s` is stored as `deg/s` regardless
+        // of a `rpm` display unit. A channel with no quantity is unitless.
         let xml = r#"<?xml version="1.0"?>
 <Project>
   <Component Classname="BuiltIn.Channel" Name="Root.Motor Speed">
     <Props Qty="rad/s" Security="Tune"><Locale><Default Unit="rpm"/></Locale></Props>
   </Component>
-  <Component Classname="BuiltIn.Channel" Name="Root.Derived">
-    <Props Qty="rad/s"><Locale><Default Unit="$(Parent.Value:Locale.Default.Unit)"/></Locale></Props>
+  <Component Classname="BuiltIn.Channel" Name="Root.Coolant Temp">
+    <Props Qty="K"><Locale><Default Unit="C"/></Locale></Props>
   </Component>
-  <Component Classname="BuiltIn.Channel" Name="Root.NoUnit"><Props Qty="V"/></Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.Battery">
+    <Props Qty="V"/>
+  </Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.NoQty"><Props Security="Tune"/></Component>
 </Project>"#;
         let parsed = parse(xml).unwrap();
-        assert_eq!(
-            parsed
-                .table
-                .get("Root.Motor Speed")
-                .unwrap()
-                .unit
-                .as_deref(),
-            Some("rpm")
-        );
-        assert_eq!(parsed.table.get("Root.Derived").unwrap().unit, None);
-        assert_eq!(parsed.table.get("Root.NoUnit").unwrap().unit, None);
+        let unit = |p: &str| parsed.table.get(p).unwrap().unit.clone();
+        assert_eq!(unit("Root.Motor Speed").as_deref(), Some("deg/s"));
+        assert_eq!(unit("Root.Coolant Temp").as_deref(), Some("C"));
+        assert_eq!(unit("Root.Battery").as_deref(), Some("V"));
+        assert_eq!(unit("Root.NoQty"), None);
     }
 
     #[test]

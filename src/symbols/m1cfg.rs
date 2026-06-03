@@ -62,10 +62,10 @@ pub fn augment(table: &mut SymbolTable, xml: &str) -> Result<(), ConfigError> {
         let vt = cell_type(type_attr);
         if let Some(sym) = table.get_mut(&path) {
             sym.value_type = vt;
-            // Only override the unit when the cfg cell actually carries one, so a
-            // unit already populated from the `.m1prj` `<Default Unit>` (#75) is
-            // not wiped to `None` for a parameter the cfg lists without a unit.
-            if unit.is_some() {
+            // The authoritative unit is the quantity's base unit set from the
+            // `.m1prj` `<Props Qty>`. A cfg cell unit may be a display unit, so it
+            // only *fills* a missing unit — it never overrides the base unit.
+            if sym.unit.is_none() && unit.is_some() {
                 sym.unit = unit;
             }
         }
@@ -220,5 +220,36 @@ mod tests {
             }
         );
         assert_eq!(meta.output_unit.as_deref(), Some("N.m"));
+    }
+
+    #[test]
+    fn cfg_does_not_override_authoritative_quantity_base_unit() {
+        // The base unit derived from `Props@Qty` is authoritative. A `.m1cfg`
+        // cell unit (which may be a display unit) must NOT clobber it; it only
+        // fills in a unit when the symbol has none.
+        let prj = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.Channel" Name="Root.Boost.Value">
+    <Props Qty="rad/s"/>
+  </Component>
+</Project>"#;
+        let mut table = m1prj::parse(prj).unwrap().table;
+        assert_eq!(
+            table.get("Root.Boost.Value").unwrap().unit.as_deref(),
+            Some("deg/s"),
+            "base unit from Qty before cfg"
+        );
+
+        let cfg = r#"<?xml version="1.0"?>
+<Configuration>
+  <Parameter Name="Boost.Value"><Cell Type="f32" Unit="rpm">0</Cell></Parameter>
+</Configuration>"#;
+        augment(&mut table, cfg).unwrap();
+
+        assert_eq!(
+            table.get("Root.Boost.Value").unwrap().unit.as_deref(),
+            Some("deg/s"),
+            "cfg display unit `rpm` must not override authoritative base unit `deg/s`"
+        );
     }
 }
