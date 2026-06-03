@@ -30,12 +30,68 @@ fn root_segment(path: &str) -> &str {
     }
 }
 
+/// Rewrite a `Parent[.Parent…].rest` reference, made from inside `group`, into
+/// the absolute candidate path it denotes. Each leading `Parent` walks one level
+/// up the group tree. Returns `None` if it is not a `Parent` reference or walks
+/// above the root.
+fn parent_target(path: &str, group: &str) -> Option<String> {
+    let mut rest = path;
+    let mut levels = 0usize;
+    loop {
+        if rest == "Parent" {
+            levels += 1;
+            rest = "";
+            break;
+        }
+        match rest.strip_prefix("Parent.") {
+            Some(r) => {
+                rest = r;
+                levels += 1;
+            }
+            None => break,
+        }
+    }
+    if levels == 0 {
+        return None;
+    }
+    let mut base = group.to_string();
+    for _ in 0..levels {
+        let i = base.rfind('.')?;
+        base.truncate(i);
+    }
+    Some(if rest.is_empty() {
+        base
+    } else {
+        format!("{base}.{rest}")
+    })
+}
+
 pub fn resolve<'p>(path: &str, scope: &Scope<'p>) -> Resolution<'p> {
     // 1. Local (single segment).
     if !path.contains('.')
         && let Some(&t) = scope.locals.get(path)
     {
         return Resolution::Local(t);
+    }
+
+    // 1b. Special reference keywords (manual "Keywords"). `In`/`Out` are the
+    //     function input-argument / return-value objects — function-local and
+    //     never in the project table, so always opaque (never flagged). `Parent`
+    //     is a relative reference: walk the enclosing group up one level per
+    //     `Parent`, then resolve the remainder. A `Parent` that resolves is a real
+    //     symbol; one that doesn't stays opaque (conservative — never a miss).
+    match root_segment(path) {
+        "In" | "Out" => return Resolution::Opaque,
+        "Parent" => {
+            if let (Some(project), Some(group)) = (scope.project, scope.group.as_ref())
+                && let Some(target) = parent_target(path, group)
+                && let Some(sym) = project.symbols().get(&target)
+            {
+                return Resolution::Symbol(sym);
+            }
+            return Resolution::Opaque;
+        }
+        _ => {}
     }
 
     // 2. Built-in library intrinsics (firmware objects: Calculate, CanComms, …).
@@ -156,6 +212,47 @@ fn symbol_exists(path: &str, scope: &Scope, table: &crate::symbols::SymbolTable)
         }
     }
     false
+}
+
+#[cfg(test)]
+mod parent_tests {
+    use super::parent_target;
+
+    #[test]
+    fn one_parent_resolves_against_the_enclosing_group_tree() {
+        // A function in `Root.Inputs.Calculations` referencing `Parent.Result A`
+        // means the parent group `Root.Inputs`'s `Result A` (manual example).
+        assert_eq!(
+            parent_target("Parent.Result A", "Root.Inputs.Calculations").as_deref(),
+            Some("Root.Inputs.Result A")
+        );
+    }
+
+    #[test]
+    fn chained_parents_walk_up_multiple_levels() {
+        assert_eq!(
+            parent_target("Parent.Parent.Value", "Root.Inputs.Calculations").as_deref(),
+            Some("Root.Value")
+        );
+    }
+
+    #[test]
+    fn parent_alone_denotes_the_parent_group() {
+        assert_eq!(
+            parent_target("Parent", "Root.Inputs.Calculations").as_deref(),
+            Some("Root.Inputs")
+        );
+    }
+
+    #[test]
+    fn walking_above_root_is_none() {
+        assert_eq!(parent_target("Parent.Parent.X", "Root.A"), None);
+    }
+
+    #[test]
+    fn a_non_parent_path_is_none() {
+        assert_eq!(parent_target("Result A", "Root.Inputs"), None);
+    }
 }
 
 #[cfg(test)]
