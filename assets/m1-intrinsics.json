@@ -2392,21 +2392,6 @@
           "deprecated": false
         },
         {
-          "name": "Debug",
-          "returns": "Void",
-          "params": [
-            {
-              "name": "msg",
-              "type": "String",
-              "doc": ""
-            }
-          ],
-          "doc": "Write a message to the ECU system log (calibration methods).",
-          "stateful": false,
-          "deprecated": false,
-          "calibrationOnly": true
-        },
-        {
           "name": "StrCat",
           "returns": "String",
           "params": [
