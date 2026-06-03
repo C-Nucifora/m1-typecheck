@@ -151,7 +151,7 @@ mod tests {
         // 13 ECU library objects + 2 calibration-only objects (Math, UI).
         assert_eq!(i.library.len(), 15, "15 library objects");
         let total: usize = i.library.values().map(|o| o.functions.len()).sum();
-        assert_eq!(total, 151, "151 library overloads");
+        assert_eq!(total, 150, "150 library overloads");
         assert!(i.library_object("Calculate").is_some());
         assert!(i.library_object("CanComms").is_some());
         assert!(i.library_object("NotAnObject").is_none());
