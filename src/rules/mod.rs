@@ -190,7 +190,13 @@ pub fn run_with(
     let mut diagnostics = Vec::new();
     walk(cst.root(), registry, &scope, &mut diagnostics);
     crate::flow::single_assignment(cst.root(), &scope, &mut diagnostics);
-    suppress_allowed(source, &cst, &mut diagnostics);
+
+    // Parse `@m1:` annotations once and drive both consumers: the invalid-value
+    // (NaN/Inf) provenance analysis (T080, #78) reads the finiteness sinks /
+    // sources, then `@allow` suppression filters the final diagnostic set.
+    let anns = m1_core::annotations(&cst, &m1_core::Registry::seed());
+    crate::invalid_value::check(cst.root(), &scope, &anns, &mut diagnostics);
+    suppress_allowed(&anns, source, &mut diagnostics);
     CheckResult {
         diagnostics,
         syntax_errors,
@@ -208,8 +214,11 @@ pub fn run_with(
 ///
 /// Parsing uses the seed registry so annotations owned by other tools are not
 /// treated as unknown here.
-fn suppress_allowed(source: &str, cst: &m1_core::Cst, diagnostics: &mut Vec<TypeDiagnostic>) {
-    let anns = m1_core::annotations(cst, &m1_core::Registry::seed());
+fn suppress_allowed(
+    anns: &m1_core::Annotations,
+    source: &str,
+    diagnostics: &mut Vec<TypeDiagnostic>,
+) {
     let spans: Vec<(u32, u32, &m1_core::Annotation)> = anns
         .all()
         .iter()

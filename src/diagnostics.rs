@@ -23,6 +23,7 @@ pub enum TypeCode {
     T064, // wrong-argument-count (opt-in)
     T070, // when-is-exhaustive
     T071, // name-case-collision (project audit)
+    T080, // invalid-value-reaches-finite-sink (NaN/Inf provenance; @requires-finite/@safety-critical)
 }
 
 impl TypeCode {
@@ -48,6 +49,7 @@ impl TypeCode {
             TypeCode::T064 => "T064",
             TypeCode::T070 => "T070",
             TypeCode::T071 => "T071",
+            TypeCode::T080 => "T080",
         }
     }
 
@@ -77,6 +79,7 @@ impl TypeCode {
             TypeCode::T064 => "wrong-argument-count",
             TypeCode::T070 => "when-is-exhaustive",
             TypeCode::T071 => "name-case-collision",
+            TypeCode::T080 => "invalid-value-reaches-finite-sink",
         }
     }
 
@@ -88,7 +91,7 @@ impl TypeCode {
         use TypeCode::*;
         &[
             T001, T002, T003, T004, T010, T020, T021, T030, T031, T040, T041, T042, T050, T060,
-            T061, T062, T063, T064, T070, T071,
+            T061, T062, T063, T064, T070, T071, T080,
         ]
     }
 }
@@ -160,6 +163,6 @@ mod tests {
             );
         }
         // Catalogue size tracks the enum (bump both together).
-        assert_eq!(codes.len(), 20);
+        assert_eq!(codes.len(), 21);
     }
 }
