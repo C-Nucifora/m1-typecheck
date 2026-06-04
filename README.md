@@ -118,10 +118,46 @@ This unlocks four new rules, added to the default rule set
 | T031 | Warning | **unresolved-assignment-target** — the target of a plain `=` assignment is a project-rooted path that does not resolve (e.g. `Root.Foo.Missing = 1`). Distinct from T001 because a write target is not a read; compound assignments (`+=`, …) read the target first and stay T001. |
 | T040 | Warning | **channel-multiple-assignment** — a Channel assigned more than once on a single code path (control-flow aware: mutually-exclusive `if`/`else` arms are not a conflict). Implemented as a whole-tree pass in `flow.rs`, not a node-at-a-time rule. |
 | T070 | Error | **when-is-exhaustive** — a `when (subject) { is (…) … }` over an enum-typed subject that does not cover every enumerator (`or` groups enumerators within one arm). One of the remaining §6 compile-time checks M1 Build enforces. An arm naming a non-member label is treated as a catch-all (the `when` is then exhaustive); a non-enum subject is skipped silently. |
+| T080 | Error / Warning | **invalid-value-reaches-finite-sink** — NaN/Inf provenance tracing (see below). Fires only for a value marked `@m1:requires-finite` / `@m1:safety-critical`; otherwise silent. |
 
 Every v2 rule keeps the v1 invariant: it fires only when every type/enum it needs
 is **known**, and stays silent under `Unknown` — so the m1-example corpus stays free of
 spurious diagnostics.
+
+### T080 invalid-value (NaN/Inf) provenance tracing
+
+M1 floats are IEEE 754 binary32 with **no "no-data" sentinel**, so an invalid
+result is a genuine NaN/±Inf that propagates silently (or, scaled to an int for
+CAN/logging, reads as an extreme "legitimate" value). The type lattice can't see
+this. **T080** tracks a *can-be-invalid* bit and flags an unsanitised invalid
+value reaching a finiteness sink.
+
+It is **annotation-driven** (zero-noise unless opted in):
+
+```m1
+// @m1:source(volatile)         <- a sensor channel that can drop out → NaN
+Gyro Z = Sbg.Read();
+
+// @m1:safety-critical          <- this value MUST stay finite (error if not)
+Front Axle Torque = Yaw Moment / Track Width;   // T080: division can be NaN/Inf
+```
+
+- **Sources** (can-be-invalid): division, domain math (`Calculate.FastSquareRoot`,
+  `Math.Log`, …), explicit `Calculate.Infinity()`, and reads of an
+  `@m1:source`/`@m1:external` channel.
+- **Sanitiser** (clears the bit): an assignment annotated `@m1:sanitizes` /
+  `@m1:clears`. Note `Math.IsNaN()` is **calibration-only** per the Development
+  Manual, so it cannot guard an ECU script. **Clamps do _not_ sanitise** —
+  `Limit.Range`/`Calculate.Min`/`Calculate.Max` pass NaN straight through (NaN
+  defeats min/max).
+- **Latching escalation:** a tainted value reaching a stateful function
+  (`Filter.*`/`Integral.*`/`Derivative.*`) is escalated to an **error** — the
+  filter state stays poisoned after the input recovers.
+
+Severity: `@m1:safety-critical` → error (fails the build); `@m1:requires-finite`
+→ warning, escalated to error when latched. Because m1-typecheck exits non-zero
+on any error, this **is** the CI gate — no separate wiring. This pass is
+intra-script; cross-script `Out`→`In` propagation is a planned follow-up.
 
 ### T050 project-name audit (opt-in)
 
