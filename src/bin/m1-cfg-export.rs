@@ -183,8 +183,8 @@ fn cfg_type_from_value(vt: ValueType) -> Option<&'static str> {
 
 /// Parameter names declared in an existing `.m1cfg` (as written there — unprefixed).
 fn read_param_names(cfg: &Path) -> Result<BTreeSet<String>, String> {
-    let xml = m1_typecheck::decode::read_motec_xml(cfg)
-        .map_err(|e| format!("reading {}: {e}", cfg.display()))?;
+    let xml =
+        m1_workspace::read_motec_xml(cfg).map_err(|e| format!("reading {}: {e}", cfg.display()))?;
     let doc = roxmltree::Document::parse(&xml)
         .map_err(|e| format!("invalid .m1cfg XML in {}: {e}", cfg.display()))?;
     Ok(doc
