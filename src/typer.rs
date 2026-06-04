@@ -24,7 +24,7 @@ pub fn type_of_source_expr(src: &str, scope: &Scope) -> ValueType {
     }
 }
 
-fn is_expr(k: Kind) -> bool {
+pub fn is_expr(k: Kind) -> bool {
     matches!(
         k,
         Kind::Identifier

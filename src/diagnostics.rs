@@ -20,6 +20,7 @@ pub enum TypeCode {
     T061, // integrated-only-call
     T062, // deprecated-overload
     T063, // calibration-only-call
+    T064, // wrong-argument-count (opt-in)
     T070, // when-is-exhaustive
     T071, // name-case-collision (project audit)
 }
@@ -44,6 +45,7 @@ impl TypeCode {
             TypeCode::T061 => "T061",
             TypeCode::T062 => "T062",
             TypeCode::T063 => "T063",
+            TypeCode::T064 => "T064",
             TypeCode::T070 => "T070",
             TypeCode::T071 => "T071",
         }
@@ -72,6 +74,7 @@ impl TypeCode {
             TypeCode::T061 => "integrated-only-call",
             TypeCode::T062 => "deprecated-overload",
             TypeCode::T063 => "calibration-only-call",
+            TypeCode::T064 => "wrong-argument-count",
             TypeCode::T070 => "when-is-exhaustive",
             TypeCode::T071 => "name-case-collision",
         }
@@ -85,7 +88,7 @@ impl TypeCode {
         use TypeCode::*;
         &[
             T001, T002, T003, T004, T010, T020, T021, T030, T031, T040, T041, T042, T050, T060,
-            T061, T062, T063, T070, T071,
+            T061, T062, T063, T064, T070, T071,
         ]
     }
 }
@@ -157,6 +160,6 @@ mod tests {
             );
         }
         // Catalogue size tracks the enum (bump both together).
-        assert_eq!(codes.len(), 19);
+        assert_eq!(codes.len(), 20);
     }
 }

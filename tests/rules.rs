@@ -21,6 +21,39 @@ fn t002_no_false_positive_on_integers() {
 }
 
 #[test]
+fn t002_fires_through_a_derived_local_chain() {
+    // #89(a): a local initialised from another local must inherit its type
+    // (declaration-order threading), so comparing two float-derived locals flags
+    // T002 exactly as comparing two float literals does.
+    let derived = "local a = 1.5; local b = a; local c = a; if (b == c) { }\n";
+    let direct = "local b = 1.5; local c = 2.5; if (b == c) { }\n";
+    assert!(
+        codes(direct).contains(&TypeCode::T002),
+        "baseline: literal float equality should flag T002"
+    );
+    assert!(
+        codes(derived).contains(&TypeCode::T002),
+        "derived-local float equality must now flag T002 too, got {:?}",
+        codes(derived)
+    );
+}
+
+#[test]
+fn forward_local_reference_stays_unknown() {
+    // A forward reference (a local initialised from one declared LATER) must not
+    // resolve — only backward references are typed. Here `b = c` precedes `c`'s
+    // float declaration, so `b` stays Unknown. Compared against an integer literal,
+    // an Unknown `b` yields no T002; a (wrongly) Float `b` would. The comparison
+    // uses only `b` and an int literal so the later float `c` can't itself trip it.
+    let src = "local b = c; local c = 1.5; if (b == 5) { }\n";
+    assert!(
+        !codes(src).contains(&TypeCode::T002),
+        "forward reference must stay Unknown (no T002 from `b`), got {:?}",
+        codes(src)
+    );
+}
+
+#[test]
 fn t003_allows_int_float_widening_in_arithmetic() {
     // M1 Build implicitly widens the integer to float; this is not flagged (#17).
     assert!(
