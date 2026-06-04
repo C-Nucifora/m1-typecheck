@@ -150,6 +150,25 @@ conservative — only classes with an unambiguous nesting invariant are constrai
 well-formed projects never flag. Every component's raw `Classname` is stored on
 `Symbol::classname`, ready for richer class-aware checks and completion.
 
+## Suppressing a diagnostic — `// @m1:allow(...)`
+
+A `// @m1:allow(T0xx, …)` annotation (the toolchain annotation framework,
+m1-core#33) suppresses the listed checks on the construct it attaches to; a bare
+`// @m1:allow` suppresses every check there.
+
+```m1
+local b = 1.5;
+local c = 2.5;
+// @m1:allow(T002)
+if (b == c) { }            // T002 (float ==) not reported here
+```
+
+It attaches **leading** (the next statement, stacking on consecutive lines) or
+**trailing** (a statement it follows on the same line); suppression is
+line-scoped to the target construct. Project-level findings (T041/T042, not tied
+to a source construct) are **not** suppressible this way — quiet those with
+`--ignore` / the `[diagnostics]` config instead.
+
 ## CLI usage
 
 ```
