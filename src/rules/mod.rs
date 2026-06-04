@@ -190,10 +190,61 @@ pub fn run_with(
     let mut diagnostics = Vec::new();
     walk(cst.root(), registry, &scope, &mut diagnostics);
     crate::flow::single_assignment(cst.root(), &scope, &mut diagnostics);
+    suppress_allowed(source, &cst, &mut diagnostics);
     CheckResult {
         diagnostics,
         syntax_errors,
     }
+}
+
+/// Drop diagnostics suppressed by an `// @m1:allow(T0xx, …)` annotation
+/// (m1-core#33). `@allow(T002)` suppresses only the listed codes; a bare
+/// `@allow` suppresses every code on its target construct. Suppression is
+/// line-scoped to the annotated construct.
+///
+/// Project-level diagnostics (T041/T042 — zero byte range, not tied to a source
+/// construct) are **not** suppressible this way; quiet those with `--ignore` /
+/// the `[diagnostics]` config instead.
+///
+/// Parsing uses the seed registry so annotations owned by other tools are not
+/// treated as unknown here.
+fn suppress_allowed(source: &str, cst: &m1_core::Cst, diagnostics: &mut Vec<TypeDiagnostic>) {
+    let anns = m1_core::annotations(cst, &m1_core::Registry::seed());
+    let spans: Vec<(u32, u32, &m1_core::Annotation)> = anns
+        .all()
+        .iter()
+        .filter(|a| a.kind == "allow")
+        .filter_map(|a| {
+            let t = a.target_byte_range.as_ref()?;
+            Some((
+                byte_line(source, t.start),
+                byte_line(source, t.end.saturating_sub(1)),
+                a,
+            ))
+        })
+        .collect();
+    if spans.is_empty() {
+        return;
+    }
+    diagnostics.retain(|d| {
+        if d.inner.byte_range.is_empty() {
+            return true; // project-level diagnostic; not @allow-suppressible
+        }
+        let line = d.inner.range.start.line;
+        let code = d.code.as_str();
+        !spans.iter().any(|(start, end, a)| {
+            line >= *start && line <= *end && (a.args.is_empty() || a.has_positional(code))
+        })
+    });
+}
+
+/// 0-based line number of `byte` within `source` (count of preceding newlines).
+fn byte_line(source: &str, byte: usize) -> u32 {
+    let b = byte.min(source.len());
+    source.as_bytes()[..b]
+        .iter()
+        .filter(|&&c| c == b'\n')
+        .count() as u32
 }
 
 fn walk(node: Node, registry: &Registry, scope: &Scope, out: &mut Vec<TypeDiagnostic>) {
@@ -218,5 +269,32 @@ mod tests {
             "expected no diagnostics, got {:?}",
             r.diagnostics
         );
+    }
+
+    fn has(r: &CheckResult, code: &str) -> bool {
+        r.diagnostics.iter().any(|d| d.code.as_str() == code)
+    }
+
+    #[test]
+    fn allow_annotation_suppresses_listed_type_code() {
+        // `local b = 1.5; local c = 2.5; if (b == c)` fires T002 (float ==).
+        let dirty = "local b = 1.5;\nlocal c = 2.5;\nif (b == c) { }\n";
+        assert!(has(&check_script_no_project(dirty), "T002"));
+
+        let allowed = "local b = 1.5;\nlocal c = 2.5;\n// @m1:allow(T002)\nif (b == c) { }\n";
+        assert!(!has(&check_script_no_project(allowed), "T002"));
+    }
+
+    #[test]
+    fn allow_annotation_does_not_suppress_other_codes() {
+        // Allow an unrelated code; T002 must still fire.
+        let src = "local b = 1.5;\nlocal c = 2.5;\n// @m1:allow(T030)\nif (b == c) { }\n";
+        assert!(has(&check_script_no_project(src), "T002"));
+    }
+
+    #[test]
+    fn bare_allow_suppresses_every_code_on_target() {
+        let src = "local b = 1.5;\nlocal c = 2.5;\n// @m1:allow\nif (b == c) { }\n";
+        assert!(!has(&check_script_no_project(src), "T002"));
     }
 }
