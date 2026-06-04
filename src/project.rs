@@ -50,7 +50,17 @@ impl std::error::Error for LoadError {}
 impl Project {
     pub fn load(m1prj_path: &Path) -> Result<Project, LoadError> {
         let xml = std::fs::read_to_string(m1prj_path).map_err(LoadError::Io)?;
-        let parsed = m1prj::parse(&xml).map_err(|e| LoadError::Parse(e.to_string()))?;
+        Self::from_xml(&xml)
+    }
+
+    /// Build a project from `.m1prj` XML already in memory, without reading from
+    /// disk. Used to rebuild the model from edited-but-unsaved project text (e.g.
+    /// the LSP refreshing its symbol table immediately after a rename, before the
+    /// client has written the file back). `.m1cfg`/`.m1dbc` augmentation, which is
+    /// disk-sourced and unchanged by such edits, is applied separately via
+    /// [`Project::with_config`] / [`Project::with_dbc`].
+    pub fn from_xml(xml: &str) -> Result<Project, LoadError> {
+        let parsed = m1prj::parse(xml).map_err(|e| LoadError::Parse(e.to_string()))?;
         let mut opaque_roots: HashSet<String> =
             STATIC_OPAQUE_ROOTS.iter().map(|s| s.to_string()).collect();
         opaque_roots.extend(parsed.module_roots);
@@ -143,6 +153,21 @@ mod tests {
         let p = std::env::temp_dir().join(format!("m1tc_{}_{}", std::process::id(), name));
         std::fs::write(&p, content).unwrap();
         p
+    }
+
+    #[test]
+    fn from_xml_builds_a_project_from_in_memory_text() {
+        // The LSP rebuilds the project model from the post-rename `.m1prj` text
+        // (which the client hasn't written to disk yet), so a string constructor
+        // must produce the same symbol table `load` would.
+        let xml = "<?xml version=\"1.0\"?>\n<Project>\n\
+             <Component Classname=\"BuiltIn.GroupCompound\" Name=\"Root.Engine\"/>\n\
+             <Component Classname=\"BuiltIn.Channel\" Name=\"Root.Engine.Speed\"><Props Type=\"f32\"/></Component>\n\
+             </Project>";
+        let project = Project::from_xml(xml).unwrap();
+        assert!(project.symbols().get("Root.Engine.Speed").is_some());
+        // Static opaque roots are still applied (parity with `load`).
+        assert!(project.is_opaque_root("Calculate"));
     }
 
     #[test]
