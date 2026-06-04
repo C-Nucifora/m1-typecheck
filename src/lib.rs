@@ -1,6 +1,7 @@
 //! m1-typecheck: symbol model + name resolution + basic type checking for .m1scr.
 pub mod audit;
 pub mod classname;
+pub mod decode;
 pub mod diagnostics;
 pub mod flow;
 pub mod intrinsics;

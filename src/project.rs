@@ -49,7 +49,7 @@ impl std::error::Error for LoadError {}
 
 impl Project {
     pub fn load(m1prj_path: &Path) -> Result<Project, LoadError> {
-        let xml = std::fs::read_to_string(m1prj_path).map_err(LoadError::Io)?;
+        let xml = crate::decode::read_motec_xml(m1prj_path).map_err(LoadError::Io)?;
         Self::from_xml(&xml)
     }
 
@@ -73,7 +73,7 @@ impl Project {
     }
 
     pub fn with_config(mut self, m1cfg_path: &Path) -> Result<Project, LoadError> {
-        let xml = std::fs::read_to_string(m1cfg_path).map_err(LoadError::Io)?;
+        let xml = crate::decode::read_motec_xml(m1cfg_path).map_err(LoadError::Io)?;
         m1cfg::augment(&mut self.table, &xml).map_err(|e| LoadError::Parse(e.to_string()))?;
         // Record which parameters the cfg declares (qualified to symbol keys) so
         // `missing_cfg_parameters` can flag project parameters absent from it.
@@ -118,10 +118,19 @@ impl Project {
     /// table. `rel_filename` is the `.m1dbc` path relative to the project root
     /// (stored on each symbol for goto). May be called once per DBC file.
     pub fn with_dbc(mut self, dbc_path: &Path, rel_filename: &str) -> Result<Project, LoadError> {
-        let xml = std::fs::read_to_string(dbc_path).map_err(LoadError::Io)?;
+        self.augment_dbc(dbc_path, rel_filename)?;
+        Ok(self)
+    }
+
+    /// Merge a `.m1dbc` in place. Same as [`Project::with_dbc`] but borrows
+    /// instead of consuming, so a caller can keep the partially-built project if
+    /// one DBC fails — a single malformed CAN file should degrade gracefully
+    /// (skip that DBC), not blank the whole model.
+    pub fn augment_dbc(&mut self, dbc_path: &Path, rel_filename: &str) -> Result<(), LoadError> {
+        let xml = crate::decode::read_motec_xml(dbc_path).map_err(LoadError::Io)?;
         m1dbc::augment(&mut self.table, &xml, rel_filename)
             .map_err(|e| LoadError::Parse(e.to_string()))?;
-        Ok(self)
+        Ok(())
     }
 
     pub fn symbols(&self) -> &SymbolTable {
@@ -209,6 +218,44 @@ mod tests {
         // Without a loaded cfg there is nothing to compare against.
         let project = Project::load(&prj).unwrap();
         assert!(project.missing_cfg_parameters().is_empty());
+        let _ = std::fs::remove_file(&prj);
+    }
+
+    fn write_temp_bytes(name: &str, content: &[u8]) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!("m1tc_{}_{}", std::process::id(), name));
+        std::fs::write(&p, content).unwrap();
+        p
+    }
+
+    #[test]
+    fn with_dbc_decodes_windows_1252_units() {
+        // MoTeC writes `.m1dbc` as Windows-1252: a yaw-rate unit `°/s` stores the
+        // degree sign as the single byte 0xB0, which is invalid UTF-8. The model
+        // must still load (and keep the unit), not fail the whole build — this is
+        // the AV-M1 `Datalogger.m1dbc` regression.
+        let mut dbc = b"<?xml version=\"1.0\"?>\n<DBC>\n <ComponentStream>\n  <List>\n   \
+            <Component Classname=\"BuiltIn.CAN.DBC\" Name=\"Bus\"/>\n   \
+            <Component Classname=\"BuiltIn.CAN.Message\" Name=\"Bus.Imu\"><Props CANId=\"100\" DLC=\"8\"/></Component>\n   \
+            <Component Classname=\"BuiltIn.CAN.Signal\" Name=\"Bus.Imu.Yaw Rate\"><Props Type=\"s32\" Qty=\""
+            .to_vec();
+        dbc.push(0xB0); // ° in Windows-1252
+        dbc.extend_from_slice(
+            b"/s\" StartBit=\"0\" Length=\"16\"/></Component>\n  </List>\n </ComponentStream>\n</DBC>",
+        );
+        let dbc_path = write_temp_bytes("Bus.m1dbc", &dbc);
+        let prj = write_temp("dbc_Project.m1prj", "<?xml version=\"1.0\"?>\n<Project/>");
+
+        let project = Project::load(&prj)
+            .unwrap()
+            .with_dbc(&dbc_path, "dbc/Bus.m1dbc")
+            .expect("a Windows-1252 DBC must load, not abort the model build");
+
+        let sig = project
+            .symbols()
+            .get("Bus.Imu.Yaw Rate")
+            .expect("signal resolves despite the 1252 byte");
+        assert_eq!(sig.unit.as_deref(), Some("°/s"));
+        let _ = std::fs::remove_file(&dbc_path);
         let _ = std::fs::remove_file(&prj);
     }
 }

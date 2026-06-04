@@ -72,10 +72,11 @@ fn main() {
                         .unwrap_or(&dbc)
                         .to_string_lossy()
                         .into_owned();
-                    p = p.with_dbc(&dbc, &rel).unwrap_or_else(|e| {
-                        eprintln!("m1-typecheck: dbc {}: {e}", dbc.display());
-                        process::exit(2);
-                    });
+                    // A malformed/unreadable DBC must not blank the whole model:
+                    // warn and skip just that file, keeping every other symbol.
+                    if let Err(e) = p.augment_dbc(&dbc, &rel) {
+                        eprintln!("m1-typecheck: dbc {} skipped: {e}", dbc.display());
+                    }
                 }
             }
             p
