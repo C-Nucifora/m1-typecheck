@@ -191,7 +191,9 @@ fn main() {
     }
 
     for file in &args.files {
-        let src = match std::fs::read_to_string(file) {
+        // Read tolerantly: MoTeC `.m1scr` sources may carry Windows-1252 bytes
+        // (e.g. `°` in a unit comment), which strict UTF-8 would reject (#86).
+        let src = match m1_workspace::read_text(file) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("m1-typecheck: {}: {e}", file.display());

@@ -49,7 +49,7 @@ impl std::error::Error for LoadError {}
 
 impl Project {
     pub fn load(m1prj_path: &Path) -> Result<Project, LoadError> {
-        let xml = crate::decode::read_motec_xml(m1prj_path).map_err(LoadError::Io)?;
+        let xml = m1_workspace::read_motec_xml(m1prj_path).map_err(LoadError::Io)?;
         Self::from_xml(&xml)
     }
 
@@ -73,7 +73,7 @@ impl Project {
     }
 
     pub fn with_config(mut self, m1cfg_path: &Path) -> Result<Project, LoadError> {
-        let xml = crate::decode::read_motec_xml(m1cfg_path).map_err(LoadError::Io)?;
+        let xml = m1_workspace::read_motec_xml(m1cfg_path).map_err(LoadError::Io)?;
         m1cfg::augment(&mut self.table, &xml).map_err(|e| LoadError::Parse(e.to_string()))?;
         // Record which parameters the cfg declares (qualified to symbol keys) so
         // `missing_cfg_parameters` can flag project parameters absent from it.
@@ -127,7 +127,7 @@ impl Project {
     /// one DBC fails — a single malformed CAN file should degrade gracefully
     /// (skip that DBC), not blank the whole model.
     pub fn augment_dbc(&mut self, dbc_path: &Path, rel_filename: &str) -> Result<(), LoadError> {
-        let xml = crate::decode::read_motec_xml(dbc_path).map_err(LoadError::Io)?;
+        let xml = m1_workspace::read_motec_xml(dbc_path).map_err(LoadError::Io)?;
         m1dbc::augment(&mut self.table, &xml, rel_filename)
             .map_err(|e| LoadError::Parse(e.to_string()))?;
         Ok(())
