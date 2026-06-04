@@ -1,8 +1,10 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use m1_core::Severity;
+use m1_typecheck::diagnostics::{TypeCode, TypeDiagnostic};
+use m1_typecheck::filter::DiagFilter;
 use m1_typecheck::project::Project;
-use m1_typecheck::rules::{check_script, check_script_no_project};
-use std::path::PathBuf;
+use m1_typecheck::rules::check_script_with;
+use std::path::{Path, PathBuf};
 use std::process;
 
 #[derive(Parser, Debug)]
@@ -19,6 +21,51 @@ struct Args {
     /// Audit the project's own symbol names against the naming conventions (T050).
     #[arg(long)]
     audit_names: bool,
+    /// Run only these T-codes (comma-separated, e.g. `T002,T030`).
+    #[arg(long, value_delimiter = ',')]
+    select: Option<Vec<String>>,
+    /// Suppress these T-codes (comma-separated, e.g. `T041`).
+    #[arg(long, value_delimiter = ',')]
+    ignore: Option<Vec<String>>,
+    /// Output format.
+    #[arg(long, value_enum, default_value_t = Format::Human)]
+    format: Format,
+    /// Print the T-code catalogue (honours --format json) and exit.
+    #[arg(long)]
+    rules: bool,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+enum Format {
+    Human,
+    Json,
+}
+
+/// Print the T-code catalogue (the single source of truth tools enumerate),
+/// mirroring `m1-lint --rules`. JSON: `{"version":1,"rules":[{code,name},…]}`.
+fn print_rules(format: Format) {
+    match format {
+        Format::Json => {
+            let mut out = String::from("{\"version\":1,\"rules\":[");
+            for (i, code) in TypeCode::all_codes().iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                out.push_str(&format!(
+                    "{{\"code\":{},\"name\":{}}}",
+                    json_str(code.as_str()),
+                    json_str(code.name())
+                ));
+            }
+            out.push_str("]}");
+            println!("{out}");
+        }
+        Format::Human => {
+            for code in TypeCode::all_codes() {
+                println!("{}  {}", code.as_str(), code.name());
+            }
+        }
+    }
 }
 
 fn find_project(args: &Args) -> Option<PathBuf> {
@@ -51,10 +98,49 @@ fn find_config(args: &Args, project_path: Option<&PathBuf>) -> Option<PathBuf> {
 
 fn main() {
     let args = Args::parse();
+
+    // `--rules` prints the catalogue and exits, before any project work.
+    if args.rules {
+        print_rules(args.format);
+        return;
+    }
+
     let mut had_error = false;
 
     let project_path = find_project(&args);
     let config_path = find_config(&args, project_path.as_ref());
+
+    // Cross-source T-code filter: nearest `m1-tools.toml` `[diagnostics]` overlaid
+    // by explicit --select/--ignore (the LSP applies the same `[diagnostics]`
+    // semantics). Discovered from the project's dir, else the first file's dir.
+    let filter_root = project_path
+        .as_ref()
+        .and_then(|p| p.parent())
+        .or_else(|| args.files.first().and_then(|f| f.parent()))
+        .map(Path::to_path_buf);
+    let filter = DiagFilter::resolve(
+        filter_root.as_deref(),
+        args.select.clone(),
+        args.ignore.clone(),
+    );
+
+    // Opt-in rules (e.g. T064) run only when explicitly selected. A code is
+    // "enabled" if it is opt-in AND named in the resolved `select` set.
+    let enabled_opt_in: std::collections::HashSet<String> =
+        m1_typecheck::rules::Registry::opt_in_codes()
+            .iter()
+            .map(|c| c.as_str().to_string())
+            .filter(|c| filter.select.contains(c))
+            .collect();
+
+    // In JSON mode diagnostics are buffered and rendered as one document at the
+    // end; human mode prints as it goes.
+    let json = args.format == Format::Json;
+    let mut json_files: Vec<JsonFile> = Vec::new();
+    let mut json_project: Vec<TypeDiagnostic> = Vec::new();
+    // Track whether any `.m1dbc` was discovered so a project that loads but finds
+    // none can announce that T042 is skipped (mirroring the cfg/project notes).
+    let mut dbc_found = false;
     let project = project_path.clone().map(|path| match Project::load(&path) {
         Ok(mut p) => {
             if let Some(cfg) = &config_path {
@@ -67,6 +153,7 @@ fn main() {
             // resolve and the T042 range check applies. Sorted for stable output.
             if let Some(root) = path.parent() {
                 for dbc in m1_workspace::find_dbc_files(root) {
+                    dbc_found = true;
                     let rel = dbc
                         .strip_prefix(root)
                         .unwrap_or(&dbc)
@@ -88,6 +175,19 @@ fn main() {
     });
     if project.is_none() {
         eprintln!("m1-typecheck: no project found; running in project-less mode (T001 disabled)");
+    } else {
+        // A project loaded but no cfg/dbc was discovered: the cfg/dbc-dependent
+        // audits (T041 calibration-coverage, T042 dbc-signal-range) then quietly
+        // produce nothing. Announce the degraded run so CI green isn't mistaken
+        // for "all clean" — mirrors the project-less note above (#87).
+        if config_path.is_none() {
+            eprintln!(
+                "m1-typecheck: note: no parameters.m1cfg found; T041 (calibration-coverage) skipped"
+            );
+        }
+        if !dbc_found {
+            eprintln!("m1-typecheck: note: no .m1dbc found; T042 (dbc-signal-range) skipped");
+        }
     }
 
     for file in &args.files {
@@ -99,39 +199,53 @@ fn main() {
                 continue;
             }
         };
-        let result = match &project {
-            Some(p) => check_script(p, file, &src),
-            None => check_script_no_project(&src),
-        };
+        let result = check_script_with(
+            &enabled_opt_in,
+            project.as_ref(),
+            Some(file.as_path()),
+            &src,
+        );
+        // Syntax errors are not T-coded and always fail the run; the filter only
+        // governs the T-code diagnostics.
         for d in &result.syntax_errors {
-            println!(
-                "{}:{}:{}: error[syntax]: {}",
-                file.display(),
-                d.range.start.line + 1,
-                d.range.start.column + 1,
-                d.message
-            );
             had_error = true;
+            if !json {
+                println!(
+                    "{}:{}:{}: error[syntax]: {}",
+                    file.display(),
+                    d.range.start.line + 1,
+                    d.range.start.column + 1,
+                    d.message
+                );
+            }
         }
-        for d in &result.diagnostics {
-            let sev = match d.inner.severity {
-                Severity::Error => {
-                    had_error = true;
-                    "error"
-                }
-                Severity::Warning => "warning",
-                Severity::Info => "info",
-                Severity::Hint => "hint",
-            };
-            println!(
-                "{}:{}:{}: {}[{}]: {}",
-                file.display(),
-                d.inner.range.start.line + 1,
-                d.inner.range.start.column + 1,
-                sev,
-                d.code.as_str(),
-                d.inner.message
-            );
+        let kept: Vec<&TypeDiagnostic> = result
+            .diagnostics
+            .iter()
+            .filter(|d| filter.allows(d.code.as_str()))
+            .collect();
+        for d in &kept {
+            if d.inner.severity == Severity::Error {
+                had_error = true;
+            }
+            if !json {
+                println!(
+                    "{}:{}:{}: {}[{}]: {}",
+                    file.display(),
+                    d.inner.range.start.line + 1,
+                    d.inner.range.start.column + 1,
+                    severity_str(d.inner.severity),
+                    d.code.as_str(),
+                    d.inner.message
+                );
+            }
+        }
+        if json {
+            json_files.push(JsonFile {
+                path: file.display().to_string(),
+                syntax_errors: result.syntax_errors,
+                diagnostics: kept.into_iter().cloned().collect(),
+            });
         }
     }
 
@@ -145,12 +259,19 @@ fn main() {
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| "<project>".into());
         for d in p.missing_cfg_parameters() {
-            println!(
-                "{}: warning[{}]: {}",
-                path_label,
-                d.code.as_str(),
-                d.inner.message
-            );
+            if !filter.allows(d.code.as_str()) {
+                continue;
+            }
+            if json {
+                json_project.push(d);
+            } else {
+                println!(
+                    "{}: warning[{}]: {}",
+                    path_label,
+                    d.code.as_str(),
+                    d.inner.message
+                );
+            }
         }
     }
 
@@ -162,25 +283,156 @@ fn main() {
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|| "<project>".into());
                 for d in p.audit() {
-                    println!(
-                        "{}: {}[{}]: {}",
-                        path_label,
-                        match d.inner.severity {
-                            Severity::Error => "error",
-                            Severity::Warning => "warning",
-                            Severity::Info => "info",
-                            Severity::Hint => "hint",
-                        },
-                        d.code.as_str(),
-                        d.inner.message
-                    );
+                    if !filter.allows(d.code.as_str()) {
+                        continue;
+                    }
+                    if json {
+                        json_project.push(d);
+                    } else {
+                        println!(
+                            "{}: {}[{}]: {}",
+                            path_label,
+                            severity_str(d.inner.severity),
+                            d.code.as_str(),
+                            d.inner.message
+                        );
+                    }
                 }
             }
             None => eprintln!("m1-typecheck: --audit-names needs a project; skipping"),
         }
     }
 
+    if json {
+        let label = project_path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<project>".into());
+        println!("{}", render_json(&json_files, &json_project, &label));
+    }
+
     if had_error {
         process::exit(1);
     }
+}
+
+fn severity_str(s: Severity) -> &'static str {
+    match s {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+        Severity::Info => "info",
+        Severity::Hint => "hint",
+    }
+}
+
+/// One file's buffered diagnostics for the JSON document.
+struct JsonFile {
+    path: String,
+    syntax_errors: Vec<m1_core::Diagnostic>,
+    diagnostics: Vec<TypeDiagnostic>,
+}
+
+/// Minimal JSON escaping for a string value (incl. control chars).
+fn json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn range_json(range: &m1_core::Range, byte: &std::ops::Range<usize>) -> String {
+    format!(
+        ",\"range\":{{\"start\":{{\"line\":{},\"column\":{}}},\"end\":{{\"line\":{},\"column\":{}}}}},\"byte_range\":{{\"start\":{},\"end\":{}}}",
+        range.start.line,
+        range.start.column,
+        range.end.line,
+        range.end.column,
+        byte.start,
+        byte.end
+    )
+}
+
+/// Machine-parsable diagnostics document, shaped like `m1-lint --format json`:
+/// `{"version":1,"files":[{path,syntax_errors,diagnostics}],"project":[…],"summary":{…}}`.
+fn render_json(files: &[JsonFile], project: &[TypeDiagnostic], project_label: &str) -> String {
+    let mut errors = 0usize;
+    let mut warnings = 0usize;
+    let mut out = String::from("{\"version\":1,\"files\":[");
+    for (fi, f) in files.iter().enumerate() {
+        if fi > 0 {
+            out.push(',');
+        }
+        out.push_str("{\"path\":");
+        out.push_str(&json_str(&f.path));
+        out.push_str(",\"syntax_errors\":[");
+        for (i, d) in f.syntax_errors.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            errors += 1;
+            out.push_str("{\"code\":\"syntax\",\"severity\":");
+            out.push_str(&json_str(severity_str(d.severity)));
+            out.push_str(",\"message\":");
+            out.push_str(&json_str(&d.message));
+            out.push_str(&range_json(&d.range, &d.byte_range));
+            out.push('}');
+        }
+        out.push_str("],\"diagnostics\":[");
+        for (i, d) in f.diagnostics.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            match d.inner.severity {
+                Severity::Error => errors += 1,
+                Severity::Warning => warnings += 1,
+                _ => {}
+            }
+            out.push_str(&diag_json(d));
+        }
+        out.push_str("]}");
+    }
+    out.push_str("],\"project\":[");
+    for (i, d) in project.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        match d.inner.severity {
+            Severity::Error => errors += 1,
+            Severity::Warning => warnings += 1,
+            _ => {}
+        }
+        out.push_str(&diag_json(d));
+    }
+    out.push_str("],\"project_path\":");
+    out.push_str(&json_str(project_label));
+    out.push_str(&format!(
+        ",\"summary\":{{\"errors\":{errors},\"warnings\":{warnings},\"files\":{}}}}}",
+        files.len()
+    ));
+    out
+}
+
+fn diag_json(d: &TypeDiagnostic) -> String {
+    let mut out = String::from("{\"code\":");
+    out.push_str(&json_str(d.code.as_str()));
+    out.push_str(",\"name\":");
+    out.push_str(&json_str(d.code.name()));
+    out.push_str(",\"severity\":");
+    out.push_str(&json_str(severity_str(d.inner.severity)));
+    out.push_str(",\"message\":");
+    out.push_str(&json_str(&d.inner.message));
+    out.push_str(&range_json(&d.inner.range, &d.inner.byte_range));
+    out.push('}');
+    out
 }

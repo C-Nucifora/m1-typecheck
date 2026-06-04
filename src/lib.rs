@@ -3,6 +3,7 @@ pub mod audit;
 pub mod classname;
 pub mod decode;
 pub mod diagnostics;
+pub mod filter;
 pub mod flow;
 pub mod intrinsics;
 pub mod project;

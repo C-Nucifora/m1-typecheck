@@ -154,12 +154,17 @@ well-formed projects never flag. Every component's raw `Classname` is stored on
 
 ```
 m1-typecheck [--project <Project.m1prj>] [--config <parameters.m1cfg>]
-             [--audit-names] <file.m1scr>...
+             [--audit-names] [--select <CODES>] [--ignore <CODES>]
+             [--format human|json] [--rules] <file.m1scr>...
 ```
 
 ```sh
 m1-typecheck --project Project.m1prj --config parameters.m1cfg Scripts/*.m1scr
 m1-typecheck --project Project.m1prj --audit-names
+m1-typecheck --ignore T041 Scripts/*.m1scr        # silence the cfg-coverage audit
+m1-typecheck --format json Scripts/*.m1scr        # machine-parsable diagnostics
+m1-typecheck --select T064 Scripts/*.m1scr        # opt into wrong-argument-count
+m1-typecheck --rules                              # list every T-code
 ```
 
 - `--project` defaults to the nearest `Project.m1prj` upward from the first input
@@ -182,6 +187,24 @@ m1-typecheck --project Project.m1prj --audit-names
   are left alone (unknown at check time).
 - `--audit-names` prints the project-name audit (T050 and T071) as
   `<project-path>: warning[T0xx]: <message>`; requires a loaded project.
+- When a project loads but **no** `parameters.m1cfg` (or no `.m1dbc`) is
+  discovered, a `note:` line on stderr announces that **T041** (calibration
+  coverage) / **T042** (dbc-signal-range) are skipped — so a degraded CI run is
+  visible rather than silently green, mirroring the project-less mode note.
+- `--select <CODES>` / `--ignore <CODES>` (comma-separated T-codes) filter the
+  reported diagnostics, applying the same `[diagnostics]` semantics as the unified
+  `m1-tools.toml` the editors read (the nearest `m1-tools.toml` `[diagnostics]`
+  `ignore`/`select` is honoured too; explicit flags override the file). A non-empty
+  `--select` runs only the listed codes; `--ignore` drops the listed codes.
+- `--rules` prints the T-code catalogue (with `--format json`, as JSON) and exits.
+- `--format json` emits one machine-parsable document
+  (`{"version":1,"files":[…],"project":[…],"summary":{…}}`) instead of the human
+  lines; syntax errors and project audits are included.
+- Opt-in rule **T064** (`wrong-argument-count`) — flags a call to a fully-modelled
+  library method whose argument count matches none of that method's overload
+  arities (union-aware; e.g. `Change.By` accepts 2 or 3). Off by default; enable
+  with `--select T064` (or `[diagnostics] select`). It never flags unknown members
+  (valid firmware absent from the intrinsics export stays opaque, never reported).
 - Output: `path:line:col: severity[T0xx]: message`. Syntax errors print first.
 - Exit codes: `0` no errors, `1` ≥1 error, `2` invocation error. Most v2 rules are
   `Warning` severity; the exception is **T070** (`Error`), which — like a syntax
