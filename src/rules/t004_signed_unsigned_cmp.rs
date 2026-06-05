@@ -41,7 +41,10 @@ impl super::Rule for Rule {
             return;
         };
         // Allow literal operands: the compiler knows their sign at compile time.
-        if l.kind() == Kind::Number || r.kind() == Kind::Number {
+        // This sees through a leading unary `-`/`+` (`-5`) and parentheses (`(5)`),
+        // which wrap the literal in a Unary/Parenthesized node but are still
+        // compile-time-known (#96).
+        if is_numeric_literal(l) || is_numeric_literal(r) {
             return;
         }
         let (lt, rt) = (type_of(*l, scope), type_of(*r, scope));
@@ -56,6 +59,31 @@ impl super::Rule for Rule {
             ));
         }
     }
+}
+
+/// Whether `node` is a compile-time-known numeric literal, seeing through a
+/// leading unary `-`/`+` and any parentheses (`5`, `-5`, `(5)`, `-(5)`). A
+/// `not`/`!` unary or any other operand is not a numeric literal.
+fn is_numeric_literal(node: &Node) -> bool {
+    match node.kind() {
+        Kind::Number => true,
+        Kind::ParenthesizedExpression => operand(*node).is_some_and(|c| is_numeric_literal(&c)),
+        Kind::UnaryExpression => {
+            let is_sign = node
+                .children()
+                .iter()
+                .any(|c| matches!(c.kind(), Kind::Minus | Kind::Plus));
+            is_sign && operand(*node).is_some_and(|c| is_numeric_literal(&c))
+        }
+        _ => false,
+    }
+}
+
+/// The sole expression operand wrapped by a unary/parenthesized node.
+fn operand(node: Node) -> Option<Node> {
+    node.named_children()
+        .into_iter()
+        .find(|c| is_expr(c.kind()))
 }
 
 fn signed_unsigned(lt: ValueType, rt: ValueType) -> bool {
@@ -120,6 +148,26 @@ mod tests {
         // unsigned vs integer *literal* — sign known at compile time, no warning.
         let out = diags("local x = u < 5;\n", &[("u", ValueType::Unsigned)]);
         assert!(out.is_empty(), "literal operand should be allowed: {out:?}");
+    }
+
+    #[test]
+    fn allows_negative_and_parenthesized_literal_operands() {
+        // #96: a negative literal (`-5`, a UnaryExpression) and a parenthesized
+        // literal (`(5)`, a ParenthesizedExpression) are still compile-time-known
+        // literals, so they must be exempt exactly like a bare `5` is.
+        for src in [
+            "local x = u < -5;\n",
+            "local x = -5 < u;\n",
+            "local x = u < (5);\n",
+            "local x = u < (-5);\n",
+            "local x = u < -(5);\n",
+        ] {
+            let out = diags(src, &[("u", ValueType::Unsigned)]);
+            assert!(
+                out.is_empty(),
+                "literal operand `{src}` should be allowed, got {out:?}"
+            );
+        }
     }
 
     #[test]

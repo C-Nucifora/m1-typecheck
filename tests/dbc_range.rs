@@ -67,6 +67,34 @@ fn flags_negative_literal_below_range() {
 }
 
 #[test]
+fn flags_hex_literal_beyond_i64_range() {
+    // #97: a hex constant past i64::MAX used to parse as None and skip the range
+    // check entirely. A [0,255] signal must still flag these grossly-out-of-range
+    // writes. `0x100` (256) is the in-i64 baseline; the wide ones are the fix.
+    let p = project_with_signal();
+    assert_eq!(t042_count(&p, "Bus.Msg.Sig = 0x100;\n"), 1, "0x100 (256)");
+    assert_eq!(
+        t042_count(&p, "Bus.Msg.Sig = 0xFFFFFFFFFFFFFFFF;\n"),
+        1,
+        "u64::MAX hex must still be flagged"
+    );
+    assert_eq!(
+        t042_count(&p, "Bus.Msg.Sig = 0x8000000000000000;\n"),
+        1,
+        "top-bit-set hex must be a large positive, not a wrapped negative"
+    );
+}
+
+#[test]
+fn accepts_in_range_hex_literal() {
+    // A hex literal that lands inside [0,255] must not be flagged.
+    assert_eq!(
+        t042_count(&project_with_signal(), "Bus.Msg.Sig = 0xFF;\n"),
+        0
+    );
+}
+
+#[test]
 fn ignores_computed_rhs() {
     // Not a literal — value is unknown at check time, so no range check.
     assert_eq!(

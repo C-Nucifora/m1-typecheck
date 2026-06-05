@@ -104,7 +104,31 @@ fn literal_number(node: &Node) -> Option<f64> {
 fn parse_number(text: &str) -> Option<f64> {
     let t = text.trim();
     if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
-        return i64::from_str_radix(hex, 16).ok().map(|n| n as f64);
+        return parse_hex(hex);
     }
     t.parse::<f64>().ok()
+}
+
+/// Magnitude of a hex literal as `f64`. M1 hex constants are unsigned bit
+/// patterns, so parse as `u64` (not the old signed `i64`, which both rejected
+/// any value above `i64::MAX` — skipping the range check, #97 — and mis-signed a
+/// top-bit-set value). Falls back to `u128` and finally to a digit-by-digit `f64`
+/// accumulation so even a hex constant wider than 128 bits still yields a (large)
+/// magnitude that feeds the range check rather than being dropped.
+fn parse_hex(hex: &str) -> Option<f64> {
+    if hex.is_empty() {
+        return None;
+    }
+    if let Ok(n) = u64::from_str_radix(hex, 16) {
+        return Some(n as f64);
+    }
+    if let Ok(n) = u128::from_str_radix(hex, 16) {
+        return Some(n as f64);
+    }
+    let mut acc = 0.0_f64;
+    for c in hex.chars() {
+        let d = c.to_digit(16)?;
+        acc = acc * 16.0 + d as f64;
+    }
+    Some(acc)
 }

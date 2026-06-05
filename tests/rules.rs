@@ -99,3 +99,38 @@ fn t003_no_flag_compound_assign_pure_float() {
 fn t003_no_flag_compound_assign_pure_int() {
     assert!(!codes("local iX = 1;\niX += 2;\n").contains(&TypeCode::T003));
 }
+
+#[test]
+fn deeply_nested_valid_input_yields_t090_and_does_not_abort() {
+    // #94: a syntactically-valid but very deeply nested expression used to drive
+    // the recursive analysis walkers past the stack limit and SIGABRT the process.
+    // The depth guard must short-circuit to a single T090 diagnostic and return
+    // cleanly — the fact that this test returns at all proves there was no abort.
+    let depth = 40_000;
+    let src = format!("local x = {}1{};\n", "(".repeat(depth), ")".repeat(depth));
+    let result = check_script_no_project(&src);
+    assert!(
+        result.syntax_errors.is_empty(),
+        "balanced parens parse cleanly; got {:?}",
+        result.syntax_errors
+    );
+    let got: Vec<_> = result.diagnostics.iter().map(|d| d.code).collect();
+    assert_eq!(
+        got,
+        vec![TypeCode::T090],
+        "expected exactly one T090 (too-deep) diagnostic, got {got:?}"
+    );
+}
+
+#[test]
+fn moderately_nested_valid_input_is_analyzed_normally() {
+    // A nesting depth well under the cap is analysed as usual (no T090, normal
+    // diagnostics still run) — the guard must not fire on ordinary code.
+    let src = "local x = ((((1 + 2))));\n";
+    let result = check_script_no_project(src);
+    assert!(
+        !result.diagnostics.iter().any(|d| d.code == TypeCode::T090),
+        "ordinary nesting must not trip the depth guard: {:?}",
+        result.diagnostics
+    );
+}

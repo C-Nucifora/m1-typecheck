@@ -109,8 +109,39 @@ fn type_from_owner_class(path: &str, classname_by_path: &HashMap<String, String>
     }
 }
 
+/// Byte offsets of every line start in `xml` (offset 0, then each byte after a
+/// `\n`), kept sorted. `line_at` binary-searches this to map a byte offset to its
+/// 0-based source line in O(log N), so per-component line lookup is amortized O(1)
+/// over the whole parse — replacing roxmltree's `text_pos_at`, which rescans from
+/// byte 0 on every call and is documented "very expensive, use only for errors"
+/// (its per-component use made parsing O(N^2), #95).
+struct LineIndex {
+    starts: Vec<usize>,
+}
+
+impl LineIndex {
+    fn new(xml: &str) -> Self {
+        let mut starts = vec![0usize];
+        starts.extend(
+            xml.bytes()
+                .enumerate()
+                .filter(|&(_, b)| b == b'\n')
+                .map(|(i, _)| i + 1),
+        );
+        LineIndex { starts }
+    }
+
+    /// 0-based source line containing byte offset `pos`.
+    fn line_at(&self, pos: usize) -> usize {
+        // partition_point yields the count of line-starts <= pos; subtract one for
+        // the 0-based line number (there is always the offset-0 entry, so it's >=1).
+        self.starts.partition_point(|&s| s <= pos) - 1
+    }
+}
+
 pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
     let doc = roxmltree::Document::parse(xml).map_err(ParseError::Xml)?;
+    let line_index = LineIndex::new(xml);
     let mut table = SymbolTable::default();
     let mut file_to_group = HashMap::new();
     let mut module_roots = HashSet::new();
@@ -230,7 +261,7 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                 let call_rate_hz = props
                     .and_then(|p| p.attribute("SelectedTrigger"))
                     .and_then(event_rate_hz);
-                let def_line = Some(doc.text_pos_at(node.range().start).row.saturating_sub(1));
+                let def_line = Some(line_index.line_at(node.range().start) as u32);
                 table.push(Symbol {
                     path: name.to_string(),
                     kind,
