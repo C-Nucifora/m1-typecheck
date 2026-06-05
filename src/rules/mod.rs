@@ -1,5 +1,5 @@
 //! Rule trait, registry, and the single-walk runner.
-use crate::diagnostics::{CheckResult, TypeDiagnostic};
+use crate::diagnostics::{CheckResult, TypeDiagnostic, make};
 use crate::project::Project;
 use crate::resolve::Scope;
 use m1_core::Node;
@@ -175,6 +175,30 @@ pub fn run_with(
     if !syntax_errors.is_empty() {
         return CheckResult {
             diagnostics: vec![],
+            syntax_errors,
+        };
+    }
+    // The analysis walkers below (`collect_locals`, `walk`, `flow`, `invalid_value`)
+    // recurse over the CST proportional to its nesting depth. A syntactically-valid
+    // but pathologically deep expression (tens of thousands of nested parens, a long
+    // `a+a+…` chain, …) would overflow the stack and SIGABRT the process. m1-core's
+    // `max_depth()` is computed iteratively, so we can probe the depth safely and, if
+    // it exceeds the cap that recursion can handle, emit one diagnostic and skip the
+    // deep analysis rather than recurse into a crash (#94).
+    if cst.root().max_depth() > m1_core::MAX_RECURSION_DEPTH {
+        let mut diagnostics = vec![make(
+            crate::diagnostics::TypeCode::T090,
+            &cst.root(),
+            m1_core::Severity::Warning,
+            "expression nesting too deep to analyze; this file's type checks were \
+             skipped to avoid a stack overflow — reduce the nesting depth"
+                .into(),
+        )];
+        // `@allow(T090)` / a bare `@allow` can still silence it.
+        let anns = m1_core::annotations(&cst, &m1_core::Registry::seed());
+        suppress_allowed(&anns, source, &mut diagnostics);
+        return CheckResult {
+            diagnostics,
             syntax_errors,
         };
     }
