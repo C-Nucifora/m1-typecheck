@@ -6,7 +6,6 @@
 //! the listed ones — so `m1-typecheck` filters identically whether invoked from CI
 //! or the editor. Explicit `--select`/`--ignore` flags overlay (replace) whatever
 //! the file specifies, matching m1-lint's flag-over-config precedence.
-use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -45,13 +44,12 @@ impl DiagFilter {
     ) -> DiagFilter {
         let mut f = DiagFilter::default();
         if let Some(s) = start
-            && let Some(text) = discover(s, "m1-tools.toml")
-            && let Ok(raw) = toml::from_str::<Raw>(&text)
+            && let Some(tc) = m1_workspace::config::M1ToolsConfig::discover(s)
         {
-            if let Some(ig) = raw.diagnostics.ignore {
+            if let Some(ig) = tc.diagnostics.ignore {
                 f.ignore = ig.into_iter().collect();
             }
-            if let Some(se) = raw.diagnostics.select {
+            if let Some(se) = tc.diagnostics.select {
                 f.select = se.into_iter().collect();
             }
         }
@@ -63,32 +61,6 @@ impl DiagFilter {
         }
         f
     }
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-struct Raw {
-    diagnostics: RawDiag,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-struct RawDiag {
-    ignore: Option<Vec<String>>,
-    select: Option<Vec<String>>,
-}
-
-/// Walk up from `start` looking for a file named `name`; return its contents.
-fn discover(start: &Path, name: &str) -> Option<String> {
-    let mut dir = Some(start);
-    while let Some(d) = dir {
-        let candidate = d.join(name);
-        if candidate.is_file() {
-            return std::fs::read_to_string(&candidate).ok();
-        }
-        dir = d.parent();
-    }
-    None
 }
 
 #[cfg(test)]
