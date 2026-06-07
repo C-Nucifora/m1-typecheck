@@ -86,27 +86,85 @@ fn event_rate_hz(trigger: &str) -> Option<f64> {
 /// type for that package class; classes whose output is genuinely indeterminate
 /// (`MoTeC Comms.CAN Bus`, `BuiltIn.Reference`, the odd built-ins) stay
 /// `Unknown` — no worse than before.
-fn type_from_owner_class(path: &str, classname_by_path: &HashMap<String, String>) -> ValueType {
-    let Some(parent) = parent_group(path) else {
-        return ValueType::Unknown;
-    };
-    let Some(class) = classname_by_path.get(&parent) else {
-        return ValueType::Unknown;
-    };
-    match class.as_str() {
+/// The known output [`ValueType`] for a package class, or `None` when the class
+/// doesn't determine one (a group, a CAN/comms container, an unmapped class) —
+/// in which case the ancestor walk stops and falls back to the leaf name.
+fn class_value_type(class: &str) -> Option<ValueType> {
+    match class {
         // Physical-measurement sensors and float-producing IO methods.
         // `MoTeC Input.*` = temperature/acceleration/pressure/…; `ratio` =
         // dimensionless; `abs` = magnitude of a signal — all FloatingPoint.
-        c if c.starts_with("MoTeC Input.") => ValueType::Float,
-        "_IOMethod.ratio" | "_IOMethod.abs" => ValueType::Float,
+        c if c.starts_with("MoTeC Input.") => Some(ValueType::Float),
+        "_IOMethod.ratio" | "_IOMethod.abs" => Some(ValueType::Float),
         // A switched output is on/off.
-        "MoTeC Output.Switched Output" => ValueType::Boolean,
+        "MoTeC Output.Switched Output" => Some(ValueType::Boolean),
         // A table's auto-created `.Value` output is always a floating-point
         // quantity — the interpolated result is real-valued regardless of the
         // table's tune (#25, case 1).
-        "BuiltIn.Table" | "BuiltIn.CalibrationTable" => ValueType::Float,
-        _ => ValueType::Unknown,
+        "BuiltIn.Table" | "BuiltIn.CalibrationTable" => Some(ValueType::Float),
+        _ => None,
     }
+}
+
+/// Leaf names whose final word is an unambiguous physical quantity (always a
+/// measured `FloatingPoint`). Deliberately conservative — only words that are
+/// never an enum/integer *state* — so this heuristic can't introduce false
+/// type-mismatch diagnostics on real code (#103).
+const FLOAT_QUANTITY_WORDS: &[&str] = &[
+    "Voltage",
+    "Current",
+    "Temperature",
+    "Pressure",
+    "Frequency",
+    "Power",
+    "Torque",
+    "Force",
+    "Acceleration",
+    "Velocity",
+    "Resistance",
+    "Energy",
+    "Humidity",
+    "Inductance",
+    "Capacitance",
+];
+
+/// Infer `FloatingPoint` from a channel's leaf name when its last space-separated
+/// word is an unambiguous physical quantity; otherwise `Unknown`.
+fn type_from_leaf_name(path: &str) -> ValueType {
+    let leaf = path.rsplit('.').next().unwrap_or(path);
+    let last_word = leaf.rsplit(' ').next().unwrap_or(leaf);
+    if FLOAT_QUANTITY_WORDS
+        .iter()
+        .any(|q| q.eq_ignore_ascii_case(last_word))
+    {
+        ValueType::Float
+    } else {
+        ValueType::Unknown
+    }
+}
+
+/// Derive an untyped channel's value type from the class of the object that owns
+/// it. Walks up through any intervening *sub-channel* ancestors (`.Value`,
+/// `.Filtered`, …) to the nearest owning object class, so a sub-channel inherits
+/// its object's type rather than stopping at its immediate channel parent (#103,
+/// extending #25). The walk does NOT cross a GroupCompound (groups regroup
+/// heterogeneous children — crossing would mis-type). When the class doesn't
+/// determine a type, falls back to a conservative leaf-name quantity heuristic.
+fn type_from_owner_class(path: &str, classname_by_path: &HashMap<String, String>) -> ValueType {
+    let mut cur = parent_group(path);
+    while let Some(p) = cur {
+        match classname_by_path.get(&p).map(String::as_str) {
+            // A sub-channel link in the chain: keep walking up to the object.
+            Some(c) if c.starts_with("BuiltIn.Channel") || c == "BuiltIn.CalibrationChannel" => {
+                cur = parent_group(&p);
+            }
+            // The owning object's class decides (or stops the walk).
+            Some(c) => return class_value_type(c).unwrap_or_else(|| type_from_leaf_name(path)),
+            // No component at this ancestor path — fall back to the leaf name.
+            None => return type_from_leaf_name(path),
+        }
+    }
+    type_from_leaf_name(path)
 }
 
 /// Byte offsets of every line start in `xml` (offset 0, then each byte after a
@@ -664,6 +722,78 @@ mod tests {
             parsed.table.get("Root.Tbl.Out").unwrap().value_type,
             ValueType::Float,
             "table output channel should be Float (#25 case 1)"
+        );
+    }
+
+    #[test]
+    fn owner_class_walks_through_subchannels_to_the_owning_object() {
+        // #103: a sub-channel chain (`.Value.Filtered`) under a typed object must
+        // inherit the object's type, not stop at its immediate (channel) parent.
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="MoTeC Input.Temperature" Name="Root.Coolant"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.Coolant.Value"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.Coolant.Value.Filtered"/>
+</Project>"#;
+        let parsed = parse(xml).unwrap();
+        assert_eq!(
+            parsed
+                .table
+                .get("Root.Coolant.Value.Filtered")
+                .unwrap()
+                .value_type,
+            ValueType::Float,
+            "a sub-channel of a MoTeC Input object's .Value should still be Float"
+        );
+    }
+
+    #[test]
+    fn owner_class_does_not_cross_a_group_boundary() {
+        // A channel under a GroupCompound that is itself under a sensor must NOT
+        // inherit the sensor's type — groups regroup heterogeneous children, so
+        // crossing them would mis-type (e.g. a diagnostic status). Stays Unknown.
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="MoTeC Input.Temperature" Name="Root.Coolant"/>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root.Coolant.Diagnostics"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.Coolant.Diagnostics.Status"/>
+</Project>"#;
+        let parsed = parse(xml).unwrap();
+        assert_eq!(
+            parsed
+                .table
+                .get("Root.Coolant.Diagnostics.Status")
+                .unwrap()
+                .value_type,
+            ValueType::Unknown,
+            "must not inherit a sensor's type across a GroupCompound"
+        );
+    }
+
+    #[test]
+    fn leaf_name_fallback_types_physical_quantities_as_float() {
+        // #103: when class-based inference yields Unknown, a leaf naming an
+        // unambiguous physical quantity (Voltage/Current/…) is a measured Float.
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root.Acc"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.Acc.Battery Voltage"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.Acc.Drive Mode"/>
+</Project>"#;
+        let parsed = parse(xml).unwrap();
+        assert_eq!(
+            parsed
+                .table
+                .get("Root.Acc.Battery Voltage")
+                .unwrap()
+                .value_type,
+            ValueType::Float,
+            "a `… Voltage` channel should be inferred Float"
+        );
+        assert_eq!(
+            parsed.table.get("Root.Acc.Drive Mode").unwrap().value_type,
+            ValueType::Unknown,
+            "`… Mode` is not a physical quantity — stays Unknown (no false Float)"
         );
     }
 }
