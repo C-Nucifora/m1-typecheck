@@ -21,6 +21,13 @@ impl super::Rule for Rule {
                 return;
             }
         }
+        // The `state` of a `when…is (State)` clause is always an *enumerator* of
+        // the subject's enum (which may be a firmware enum whose members we don't
+        // model), never a project reference — its membership is T020/T070's job,
+        // not an unresolved-reference miss.
+        if in_is_clause_state(node) {
+            return;
+        }
         if !matches!(resolve(node.text(), scope), Resolution::Unresolved) {
             return;
         }
@@ -47,6 +54,21 @@ impl super::Rule for Rule {
             ));
         }
     }
+}
+
+/// True when `node` sits in the `state` position of a `when…is (State)` clause
+/// (walking up we reach the `IsClause` before entering its body `Block`). Such
+/// names are enumerators, not project references.
+fn in_is_clause_state(node: &Node) -> bool {
+    let mut cur = *node;
+    while let Some(p) = cur.parent() {
+        match p.kind() {
+            Kind::IsClause => return true,
+            Kind::Block => return false, // inside the is-clause body, not its state
+            _ => cur = p,
+        }
+    }
+    false
 }
 
 /// True when `node` is the `target` of a plain `=` assignment (a pure write).

@@ -98,6 +98,15 @@ fn collect_locals(root: Node) -> std::collections::HashMap<String, crate::types:
     use m1_core::Field;
     let mut locals: std::collections::HashMap<String, ValueType> = std::collections::HashMap::new();
     fn walk(n: Node, locals: &mut std::collections::HashMap<String, ValueType>) {
+        // `expand (VAR = start to end) { … }` introduces a compile-time loop
+        // variable `VAR` (an integer counter), referenced in the body as
+        // `$(VAR)`. It is function-local, not a project symbol, so register it as
+        // a local to keep it out of unresolved-reference checks (#109).
+        if n.kind() == m1_core::Kind::ExpandStatement
+            && let Some(var) = n.child_by_field(Field::Variable)
+        {
+            locals.insert(var.text().to_string(), ValueType::Integer);
+        }
         if n.kind() == m1_core::Kind::LocalDeclaration
             && let Some(name_node) = n.child_by_field(Field::Name)
         {

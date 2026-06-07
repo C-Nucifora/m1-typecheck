@@ -151,14 +151,33 @@ pub fn resolve<'p>(path: &str, scope: &Scope<'p>) -> Resolution<'p> {
         return Resolution::Opaque;
     }
 
-    // 5. Opaque vs unresolved: only flag when the root is a known PROJECT group.
+    // 5. Opaque vs unresolved.
+    //
+    // Bare anchor keywords (`This`/`Library`/`Root`) and boolean literals are not
+    // project references — they have no symbol-table entry but must never be
+    // flagged as a miss.
+    if !path.contains('.') && matches!(path, "This" | "Library" | "Root" | "True" | "False") {
+        return Resolution::Opaque;
+    }
+    // A dotted path is flagged only when its root is a known PROJECT group (so a
+    // typo under a firmware/opaque root stays silent). A *bare single-segment*
+    // name, however, reached here only after failing local, library, absolute,
+    // and group-relative lookup — when we actually had a group to resolve
+    // against (`scope.group`), that is a genuine miss (a typo or deleted
+    // channel), previously lost as Opaque (#109).
     let root = root_segment(path);
     let root_is_project_group = table
         .get(&format!("Root.{root}"))
         .map(|s| matches!(s.kind, crate::symbols::SymbolKind::Group))
         .unwrap_or(false)
         || root == "Root";
-    if root_is_project_group {
+    // A bare enumerator (an enum member referenced without its type prefix, as
+    // in `when…is (Idle)` or assigning an enum channel `= Off`) is resolved by
+    // context, not a miss.
+    let is_bare_enumerator = !path.contains('.') && !table.enums_with_member(path).is_empty();
+    let bare_single_segment_miss =
+        !path.contains('.') && scope.group.is_some() && !is_bare_enumerator;
+    if root_is_project_group || bare_single_segment_miss {
         Resolution::Unresolved
     } else {
         Resolution::Opaque

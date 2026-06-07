@@ -65,3 +65,87 @@ fn no_flag_for_known_symbol_or_library() {
     assert!(!c.contains(&TypeCode::T001));
     assert!(!c.contains(&TypeCode::T031));
 }
+
+#[test]
+fn bare_single_segment_unknown_read_is_t001() {
+    let p = proj();
+    // "WidgetCount" is not a local, not a library object, not a project symbol,
+    // and not a group-relative channel of Root.Foo — a bare typo. In *read*
+    // position it is a genuine unresolved reference (#109).
+    let c = codes(&p, "Foo Update.m1scr", "local x = WidgetCount;\n");
+    assert!(c.contains(&TypeCode::T001), "expected T001, got {c:?}");
+}
+
+#[test]
+fn bare_single_segment_unknown_write_is_t031() {
+    let p = proj();
+    // Same bare miss as a plain assignment *target* → T031, not T001 (#109/#19).
+    let c = codes(&p, "Foo Update.m1scr", "WidgetCount = 42;\n");
+    assert!(c.contains(&TypeCode::T031), "expected T031, got {c:?}");
+    assert!(
+        !c.contains(&TypeCode::T001),
+        "should not be T001, got {c:?}"
+    );
+}
+
+#[test]
+fn bare_single_segment_known_group_relative_not_flagged() {
+    let p = proj();
+    // "Speed" IS a group-relative channel (Root.Foo.Speed) — must stay silent.
+    let c = codes(&p, "Foo Update.m1scr", "local x = Speed;\n");
+    assert!(!c.contains(&TypeCode::T001), "false positive, got {c:?}");
+    assert!(!c.contains(&TypeCode::T031));
+}
+
+#[test]
+fn bare_reserved_keyword_not_flagged() {
+    let p = proj();
+    // Bare anchor keywords are not project references — they must not be flagged
+    // unresolved even though they have no symbol-table entry.
+    for kw in ["This", "Library", "Root"] {
+        let c = codes(&p, "Foo Update.m1scr", &format!("local x = {kw};\n"));
+        assert!(
+            !c.contains(&TypeCode::T001),
+            "{kw} should not be T001, got {c:?}"
+        );
+    }
+}
+
+#[test]
+fn bare_enumerator_not_flagged() {
+    let p = proj();
+    // "Off"/"On" are members of the project's `Switch State` enum, referenced
+    // here bare (no type prefix) — valid enumerators, not unresolved (#109).
+    let c = codes(&p, "Foo Update.m1scr", "local x = On;\nlocal y = Off;\n");
+    assert!(!c.contains(&TypeCode::T001), "enumerator flagged: {c:?}");
+}
+
+#[test]
+fn expand_loop_variable_not_flagged() {
+    let p = proj();
+    // `expand (seg = 0 to 3) { … $(seg) … }` declares an integer loop variable;
+    // neither the declaration nor the `$(seg)` use is an unresolved reference.
+    let c = codes(
+        &p,
+        "Foo Update.m1scr",
+        "expand (seg = 0 to 3)\n{\n\tlocal x = $(seg);\n}\n",
+    );
+    assert!(!c.contains(&TypeCode::T001), "expand var flagged: {c:?}");
+}
+
+#[test]
+fn bare_typo_in_is_clause_state_not_flagged() {
+    let p = proj();
+    // The `state` of a `when…is (...)` clause is an enumerator (possibly of a
+    // firmware enum whose members aren't modelled), never a project reference —
+    // T001 must not fire there (membership is T020/T070's concern) (#109).
+    let c = codes(
+        &p,
+        "Foo Update.m1scr",
+        "when (Gain.Value)\n{\n\tis (SomeEnumerator)\n\t{\n\t}\n}\n",
+    );
+    assert!(
+        !c.contains(&TypeCode::T001),
+        "is-clause state flagged: {c:?}"
+    );
+}
