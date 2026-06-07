@@ -93,6 +93,14 @@ pub struct Symbol {
     /// Empty when neither the symbol nor any ancestor declares tags. Surfaced in
     /// hover and queryable via [`SymbolTable::symbols_with_tag`] (#170).
     pub tags: Vec<String>,
+    /// Inferred return type of a user `BuiltIn.FuncUser`/`MethodUser`, from the
+    /// concrete type its body assigns to `Out` (the manual's return-value object).
+    /// `Some` only when every `Out = <expr>` in the body agrees on one known type;
+    /// `None` when there is no `Out` assignment, the types disagree, or the symbol
+    /// is not a user function — never a guessed type. Populated by
+    /// [`crate::project::Project::infer_return_types`] and read by `type_of_call`
+    /// so user-function call sites participate in T030/T003/T004/T021 (#110).
+    pub return_type: Option<ValueType>,
     /// For a `BuiltIn.Table` symbol, its shape (input axes) and output unit, read
     /// from the `.m1cfg` `<Table>` (the `.m1prj` carries none). `None` for
     /// non-tables and when no `.m1cfg` is loaded. See [`TableMeta`].
@@ -217,6 +225,12 @@ impl SymbolTable {
     }
     pub fn enum_type(&self, id: EnumId) -> &EnumType {
         &self.enums[id]
+    }
+    /// Set a symbol's inferred return type (by path). No-op if absent (#110).
+    pub fn set_return_type(&mut self, path: &str, ty: ValueType) {
+        if let Some(&i) = self.by_path.get(path) {
+            self.symbols[i].return_type = Some(ty);
+        }
     }
     /// Associate a symbol (by path) with an enum type id. No-op if absent.
     pub fn set_enum_assoc(&mut self, path: &str, id: EnumId) {

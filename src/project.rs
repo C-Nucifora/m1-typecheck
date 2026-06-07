@@ -1,7 +1,10 @@
 //! The loaded project: symbol table + enum types + opaque roots + file->group.
 use crate::diagnostics::{TypeCode, TypeDiagnostic, make_project};
-use crate::symbols::{SymbolKind, SymbolTable, m1cfg, m1dbc, m1prj};
-use m1_core::Severity;
+use crate::resolve::Scope;
+use crate::symbols::{Symbol, SymbolKind, SymbolTable, m1cfg, m1dbc, m1prj};
+use crate::typer::{path_text, type_of};
+use crate::types::ValueType;
+use m1_core::{Field, Kind, Node, Severity};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -151,6 +154,85 @@ impl Project {
     pub fn audit(&self) -> Vec<crate::diagnostics::TypeDiagnostic> {
         crate::audit::audit_project(self)
     }
+
+    /// Infer user-function/method return types from their script bodies (#110).
+    ///
+    /// `scripts` pairs each script's file name (e.g. `"Engine.Update.m1scr"`) with
+    /// its source. For every script that backs a `Function`/`Method` symbol, type
+    /// each `Out = <expr>` right-hand side (the manual's return-value object); when
+    /// they all agree on one *known* type, store it as that symbol's `return_type`.
+    /// No `Out`, disagreeing types, a syntax error, or an Unknown result leaves the
+    /// type `None` — never a guess. Call this after the project (and any
+    /// `.m1cfg`/`.m1dbc`) is loaded and *before* checking callers, so user-function
+    /// call sites resolve to a concrete type in `type_of_call`.
+    ///
+    /// Two-phase to avoid a borrow conflict: phase 1 types the bodies against
+    /// `&self` (the in-progress table, where not-yet-inferred callees stay
+    /// Unknown — conservative); phase 2 writes the results back via `&mut self`.
+    pub fn infer_return_types(&mut self, scripts: &[(String, String)]) {
+        let mut inferred: Vec<(String, ValueType)> = Vec::new();
+        for (file_name, source) in scripts {
+            let Some(sym_path) = self.function_symbol_for_script(file_name) else {
+                continue;
+            };
+            let cst = m1_core::parse(source);
+            if !cst.syntax_diagnostics().is_empty() {
+                continue;
+            }
+            let group = self.group_for_script(file_name);
+            let scope = Scope {
+                locals: crate::rules::collect_locals(cst.root(), Some(self), group.as_deref()),
+                group: group.clone(),
+                project: Some(self),
+            };
+            if let Some(ty) = out_return_type(cst.root(), &scope) {
+                inferred.push((sym_path, ty));
+            }
+        }
+        for (path, ty) in inferred {
+            self.table.set_return_type(&path, ty);
+        }
+    }
+
+    /// The path of the `Function`/`Method` symbol backed by `file_name`: an
+    /// explicit `Filename=` match first, else the `Root.<stem>` path convention
+    /// real projects use (`Engine.Update.m1scr` → `Root.Engine.Update`).
+    fn function_symbol_for_script(&self, file_name: &str) -> Option<String> {
+        let is_fn = |s: &&Symbol| matches!(s.kind, SymbolKind::Function | SymbolKind::Method);
+        if let Some(s) = self
+            .table
+            .iter()
+            .find(|s| is_fn(s) && s.filename.as_deref() == Some(file_name))
+        {
+            return Some(s.path.clone());
+        }
+        let stem = file_name.strip_suffix(".m1scr")?;
+        let path = format!("Root.{stem}");
+        self.table.get(&path).filter(is_fn).map(|s| s.path.clone())
+    }
+}
+
+/// The concrete type all `Out = <expr>` assignments in a function body agree on,
+/// or `None` when there are none, they disagree, or any is Unknown (#110).
+fn out_return_type(root: Node, scope: &Scope) -> Option<ValueType> {
+    let mut types = Vec::new();
+    collect_out_types(root, scope, &mut types);
+    let first = *types.first()?;
+    (first.is_known() && types.iter().all(|t| *t == first)).then_some(first)
+}
+
+/// Push the type of each `Out = <expr>` right-hand side in `node` onto `out`.
+fn collect_out_types(node: Node, scope: &Scope, out: &mut Vec<ValueType>) {
+    if node.kind() == Kind::AssignmentStatement
+        && let Some(target) = node.child_by_field(Field::Target)
+        && path_text(target) == "Out"
+        && let Some(value) = node.child_by_field(Field::Value)
+    {
+        out.push(type_of(value, scope));
+    }
+    for c in node.children() {
+        collect_out_types(c, scope, out);
+    }
 }
 
 #[cfg(test)]
@@ -162,6 +244,83 @@ mod tests {
         let p = std::env::temp_dir().join(format!("m1tc_{}_{}", std::process::id(), name));
         std::fs::write(&p, content).unwrap();
         p
+    }
+
+    // #110: a user function's return type is inferred from its `Out = <expr>`
+    // body and stored on the symbol, so callers can be type-checked.
+    #[test]
+    fn infers_user_function_return_type_from_out_assignment() {
+        use crate::types::ValueType;
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root.Demo"/>
+  <Component Classname="BuiltIn.FuncUser" Name="Root.Demo.Compute"/>
+</Project>"#;
+        let mut project = Project::from_xml(xml).unwrap();
+        project
+            .infer_return_types(&[("Demo.Compute.m1scr".to_string(), "Out = 1.5;\n".to_string())]);
+        assert_eq!(
+            project
+                .symbols()
+                .get("Root.Demo.Compute")
+                .unwrap()
+                .return_type,
+            Some(ValueType::Float)
+        );
+    }
+
+    // #110: once a function's Float return is modelled, assigning its call result
+    // into an unsigned-integer channel is a T030 mismatch (the issue's repro).
+    #[test]
+    fn float_returning_call_into_integer_channel_flags_t030() {
+        use crate::rules::check_script;
+        use std::path::Path;
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root.Demo"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.Demo.Widget Count"><Props Type="u32"/></Component>
+  <Component Classname="BuiltIn.FuncUser" Name="Root.Demo.Compute"/>
+</Project>"#;
+        let mut project = Project::from_xml(xml).unwrap();
+        project
+            .infer_return_types(&[("Demo.Compute.m1scr".to_string(), "Out = 1.5;\n".to_string())]);
+        let caller = "local r = Demo.Compute();\nDemo.Widget Count = r;\n";
+        let result = check_script(&project, Path::new("Demo.Caller.m1scr"), caller);
+        assert!(
+            result.diagnostics.iter().any(|d| d.code == TypeCode::T030),
+            "expected T030, got {:?}",
+            result.diagnostics
+        );
+    }
+
+    // #110 (no-guess): a function with no `Out =` assignment leaves return_type
+    // None, and disagreeing `Out =` types also stay None (never a guessed type).
+    #[test]
+    fn return_type_none_without_consistent_out() {
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>
+  <Component Classname="BuiltIn.FuncUser" Name="Root.NoOut"/>
+  <Component Classname="BuiltIn.FuncUser" Name="Root.Mixed"/>
+</Project>"#;
+        let mut project = Project::from_xml(xml).unwrap();
+        project.infer_return_types(&[
+            ("NoOut.m1scr".to_string(), "local x = 1;\n".to_string()),
+            (
+                "Mixed.m1scr".to_string(),
+                "Out = 1.5;\nOut = 1;\n".to_string(),
+            ),
+        ]);
+        assert_eq!(
+            project.symbols().get("Root.NoOut").unwrap().return_type,
+            None
+        );
+        assert_eq!(
+            project.symbols().get("Root.Mixed").unwrap().return_type,
+            None
+        );
     }
 
     #[test]
