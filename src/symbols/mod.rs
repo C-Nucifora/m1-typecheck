@@ -192,6 +192,11 @@ impl SymbolTable {
             .map(|e| e.members.iter().any(|(m, _)| m == member))
             .unwrap_or(false)
     }
+    /// `true` when the enum's member list is not exhaustively known (a
+    /// firmware-supplied enum). Membership checks (T020) must skip open enums.
+    pub fn enum_is_open(&self, id: EnumId) -> bool {
+        self.enums.get(id).map(|e| e.open).unwrap_or(false)
+    }
     pub fn enum_type(&self, id: EnumId) -> &EnumType {
         &self.enums[id]
     }

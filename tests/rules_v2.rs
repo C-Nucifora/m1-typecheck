@@ -54,6 +54,27 @@ fn t021_no_flag_int_vs_int() {
 }
 
 #[test]
+fn t021_flags_firmware_enum_vs_integer() {
+    // `fwMode` is typed `MoTeC Types.Mode Enumeration` (a firmware enum). Even
+    // though its members are unknown, comparing the enum to a number is wrong
+    // regardless of members, so T021 still fires (#104).
+    let p = proj();
+    assert!(codes(&p, "if (fwMode eq 1) {\n}\n").contains(&TypeCode::T021));
+}
+
+#[test]
+fn t020_no_flag_on_open_firmware_enum_member() {
+    // A firmware enum's member list is not in the project, so any
+    // `Mode Enumeration.<X>` is a member we cannot disprove — T020 must NOT
+    // fire (it would be a false positive on valid firmware-enum usage) (#104).
+    let p = proj();
+    assert!(
+        !codes(&p, "fwMode = Mode Enumeration.Whatever;\n").contains(&TypeCode::T020),
+        "T020 must be suppressed for open (firmware) enums"
+    );
+}
+
+#[test]
 fn t030_flags_enum_member_into_wrong_enum() {
     let p = proj();
     // SwitchMode.Value is Switch State; assigning a Drive State member is a mismatch.

@@ -28,6 +28,9 @@ impl super::Rule for Rule {
         let path = path_text(*node);
         if let Some((head, member)) = path.rsplit_once('.')
             && let Some(id) = table.enum_by_name(head)
+            // Skip firmware-supplied (open) enums: their member list is not in
+            // the project, so an unlisted name is not provably a non-member.
+            && !table.enum_is_open(id)
             && !table.enum_has_member(id, member)
         {
             out.push(make(
