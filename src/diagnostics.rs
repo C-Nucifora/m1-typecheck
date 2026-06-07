@@ -24,6 +24,7 @@ pub enum TypeCode {
     T070, // when-is-exhaustive
     T071, // name-case-collision (project audit)
     T080, // invalid-value-reaches-finite-sink (NaN/Inf provenance; @requires-finite/@safety-critical)
+    T081, // nan-to-integer (a possibly NaN/Inf value is stored to an integer channel)
     T090, // expression-nesting-too-deep (analysis skipped to avoid a stack overflow)
 }
 
@@ -51,6 +52,7 @@ impl TypeCode {
             TypeCode::T070 => "T070",
             TypeCode::T071 => "T071",
             TypeCode::T080 => "T080",
+            TypeCode::T081 => "T081",
             TypeCode::T090 => "T090",
         }
     }
@@ -82,6 +84,7 @@ impl TypeCode {
             TypeCode::T070 => "when-is-exhaustive",
             TypeCode::T071 => "name-case-collision",
             TypeCode::T080 => "invalid-value-reaches-finite-sink",
+            TypeCode::T081 => "nan-to-integer",
             TypeCode::T090 => "expression-nesting-too-deep",
         }
     }
@@ -94,7 +97,7 @@ impl TypeCode {
         use TypeCode::*;
         &[
             T001, T002, T003, T004, T010, T020, T021, T030, T031, T040, T041, T042, T050, T060,
-            T061, T062, T063, T064, T070, T071, T080, T090,
+            T061, T062, T063, T064, T070, T071, T080, T081, T090,
         ]
     }
 }
@@ -166,6 +169,6 @@ mod tests {
             );
         }
         // Catalogue size tracks the enum (bump both together).
-        assert_eq!(codes.len(), 22);
+        assert_eq!(codes.len(), 23);
     }
 }
