@@ -16,9 +16,20 @@ pub struct Rule;
 
 impl super::Rule for Rule {
     fn check_node(&self, node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>) {
-        if node.kind() != Kind::AssignmentStatement {
-            return;
+        match node.kind() {
+            Kind::AssignmentStatement => self.check_assignment(node, scope, out),
+            // Most CAN signals are read-only inputs: scripts compare them rather
+            // than assign to them, so the assignment check above is unreachable for
+            // them. A guard literal outside the signal's physical range makes the
+            // comparison degenerate (always true/false) — a likely bug (#113).
+            Kind::BinaryExpression => self.check_comparison(node, scope, out),
+            _ => {}
         }
+    }
+}
+
+impl Rule {
+    fn check_assignment(&self, node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>) {
         // Plain `=` only (not `+=` etc., whose result depends on the prior value).
         if !node.children().iter().any(|c| c.kind() == Kind::Assign) {
             return;
@@ -37,11 +48,7 @@ impl super::Rule for Rule {
         let Some(lit) = literal_number(value) else {
             return;
         };
-        // Target must resolve to a CAN signal that carries a range.
-        let Resolution::Symbol(sym) = resolve(&path_text(*target), scope) else {
-            return;
-        };
-        let Some((min, max)) = sym.dbc_range else {
+        let Some((sym, min, max)) = signal_range(target, scope) else {
             return;
         };
         if lit < min || lit > max {
@@ -50,12 +57,70 @@ impl super::Rule for Rule {
                 node,
                 Severity::Warning,
                 format!(
-                    "value {lit} assigned to CAN signal `{}` is outside its range [{min}, {max}]",
-                    sym.path
+                    "value {lit} assigned to CAN signal `{sym}` is outside its range [{min}, {max}]"
                 ),
             ));
         }
     }
+
+    fn check_comparison(&self, node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>) {
+        if !node.children().iter().any(|c| is_comparison_op(c.kind())) {
+            return;
+        }
+        let operands: Vec<Node> = node
+            .named_children()
+            .into_iter()
+            .filter(|c| is_expr(c.kind()))
+            .collect();
+        let [lhs, rhs] = operands.as_slice() else {
+            return;
+        };
+        // Exactly one side is a literal and the other resolves to a ranged signal.
+        let (sig, lit) = match (literal_number(lhs), literal_number(rhs)) {
+            (None, Some(v)) => (lhs, v),
+            (Some(v), None) => (rhs, v),
+            _ => return,
+        };
+        let Some((sym, min, max)) = signal_range(sig, scope) else {
+            return;
+        };
+        if lit < min || lit > max {
+            out.push(make(
+                TypeCode::T042,
+                node,
+                Severity::Warning,
+                format!(
+                    "comparison threshold {lit} is outside CAN signal `{sym}`'s range [{min}, {max}] — the comparison is always true or false"
+                ),
+            ));
+        }
+    }
+}
+
+/// If `node` resolves to a CAN signal that carries a physical range, returns
+/// `(signal path, min, max)`.
+fn signal_range(node: &Node, scope: &Scope) -> Option<(String, f64, f64)> {
+    let Resolution::Symbol(sym) = resolve(&path_text(*node), scope) else {
+        return None;
+    };
+    let (min, max) = sym.dbc_range?;
+    Some((sym.path.clone(), min, max))
+}
+
+/// True for a numeric-comparison operator (`>`, `<`, `>=`, `<=`, `eq`, `neq`, and
+/// the C-style `==`/`!=` the grammar still parses).
+fn is_comparison_op(k: Kind) -> bool {
+    matches!(
+        k,
+        Kind::Gt
+            | Kind::GtEq
+            | Kind::Lt
+            | Kind::LtEq
+            | Kind::Eq
+            | Kind::Neq
+            | Kind::EqEq
+            | Kind::BangEq
+    )
 }
 
 fn is_expr(k: Kind) -> bool {
