@@ -1,74 +1,14 @@
-//! Parse Project.m1prj into a SymbolTable, enum types, and a file->group map.
-use super::{
+//! The `.m1prj` parse pass: walk the project XML and build the `SymbolTable`,
+//! enum types, file→group map, and module-root set.
+
+use super::type_inference::{type_from_leaf_name, type_from_owner_class};
+use super::{Parsed, parent_group};
+use crate::symbols::{
     EnumId, EnumType, Symbol, SymbolKind, SymbolTable, TableAxis, TableMeta, XmlParseError,
 };
 use crate::types::{ValueType, primitive_type};
 use m1_workspace::LineIndex;
 use std::collections::{HashMap, HashSet};
-
-pub struct Parsed {
-    pub table: SymbolTable,
-    pub file_to_group: HashMap<String, String>,
-    pub module_roots: HashSet<String>,
-}
-
-impl SymbolKind {
-    /// Classify a `.m1prj`/`.m1dbc` component `Classname` into a [`SymbolKind`].
-    ///
-    /// This is the canonical home of the classname → kind mapping. The free
-    /// function [`classify`] is a thin backward-compatible delegate kept so
-    /// existing call sites (and any external consumer) keep compiling.
-    pub fn from_classname(classname: &str) -> SymbolKind {
-        use SymbolKind::*;
-        if classname.starts_with("BuiltIn.Channel") || classname == "BuiltIn.CalibrationChannel" {
-            Channel
-        } else if classname.starts_with("BuiltIn.Parameter")
-            || classname == "BuiltIn.CalibrationParameter"
-            || classname == "BuiltIn.IOResourceParameter"
-        {
-            Parameter
-        } else if classname.starts_with("BuiltIn.Constant")
-            || classname == "BuiltIn.IOResourceConstant"
-        {
-            Constant
-        } else if classname.starts_with("BuiltIn.FuncUser")
-            || classname.starts_with("BuiltIn.CalFuncUser")
-            || classname.starts_with("BuiltIn.FuncGenerated")
-        {
-            Function
-        } else if classname == "BuiltIn.MethodUser" || classname == "BuiltIn.EventKernel" {
-            Method
-        } else if classname.starts_with("BuiltIn.Table") || classname == "BuiltIn.CalibrationTable"
-        {
-            Table
-        } else if classname == "BuiltIn.GroupCompound" {
-            Group
-        } else if classname == "BuiltIn.Reference" {
-            Reference
-        } else if !classname.starts_with("BuiltIn.") && !classname.is_empty() {
-            // Any non-`BuiltIn.*` component is an instance of a package-defined
-            // object class (e.g. "MoTeC Input.Sensor", "MoTeC Output.Switched
-            // Output", "_IOMethod.abs"). Its members are separate components whose
-            // path is prefixed by this object's path.
-            Object
-        } else {
-            Other
-        }
-    }
-}
-
-/// Backward-compatible delegate to [`SymbolKind::from_classname`]. Retained so
-/// existing `m1prj::classify(...)` call sites keep working.
-pub fn classify(classname: &str) -> SymbolKind {
-    SymbolKind::from_classname(classname)
-}
-
-/// Enclosing group path for a fully-qualified symbol path (drop the last segment,
-/// honouring space-containing segments — segments are split on '.').
-fn parent_group(path: &str) -> Option<String> {
-    let idx = path.rfind('.')?;
-    Some(path[..idx].to_string())
-}
 
 /// A `BuiltIn.Table`'s shape from its `.m1prj` `<Axis>` element: each of the
 /// `<X>` / `<Y>` / `<Z>` children contributes one axis whose breakpoint count is
@@ -150,92 +90,6 @@ fn log_rate_hz(raw: &str) -> Option<f64> {
         "HZ" => Some(n),               // already a rate
         _ => None,
     }
-}
-
-/// Derive an untyped channel's value type from the class of the object that
-/// owns it (its parent in the component tree). Each mapping is a known output
-/// type for that package class; classes whose output is genuinely indeterminate
-/// (`MoTeC Comms.CAN Bus`, `BuiltIn.Reference`, the odd built-ins) stay
-/// `Unknown` — no worse than before.
-/// The known output [`ValueType`] for a package class, or `None` when the class
-/// doesn't determine one (a group, a CAN/comms container, an unmapped class) —
-/// in which case the ancestor walk stops and falls back to the leaf name.
-fn class_value_type(class: &str) -> Option<ValueType> {
-    match class {
-        // Physical-measurement sensors and float-producing IO methods.
-        // `MoTeC Input.*` = temperature/acceleration/pressure/…; `ratio` =
-        // dimensionless; `abs` = magnitude of a signal — all FloatingPoint.
-        c if c.starts_with("MoTeC Input.") => Some(ValueType::Float),
-        "_IOMethod.ratio" | "_IOMethod.abs" => Some(ValueType::Float),
-        // A switched output is on/off.
-        "MoTeC Output.Switched Output" => Some(ValueType::Boolean),
-        // A table's auto-created `.Value` output is always a floating-point
-        // quantity — the interpolated result is real-valued regardless of the
-        // table's tune (#25, case 1).
-        "BuiltIn.Table" | "BuiltIn.CalibrationTable" => Some(ValueType::Float),
-        _ => None,
-    }
-}
-
-/// Leaf names whose final word is an unambiguous physical quantity (always a
-/// measured `FloatingPoint`). Deliberately conservative — only words that are
-/// never an enum/integer *state* — so this heuristic can't introduce false
-/// type-mismatch diagnostics on real code (#103).
-const FLOAT_QUANTITY_WORDS: &[&str] = &[
-    "Voltage",
-    "Current",
-    "Temperature",
-    "Pressure",
-    "Frequency",
-    "Power",
-    "Torque",
-    "Force",
-    "Acceleration",
-    "Velocity",
-    "Resistance",
-    "Energy",
-    "Humidity",
-    "Inductance",
-    "Capacitance",
-];
-
-/// Infer `FloatingPoint` from a channel's leaf name when its last space-separated
-/// word is an unambiguous physical quantity; otherwise `Unknown`.
-fn type_from_leaf_name(path: &str) -> ValueType {
-    let leaf = path.rsplit('.').next().unwrap_or(path);
-    let last_word = leaf.rsplit(' ').next().unwrap_or(leaf);
-    if FLOAT_QUANTITY_WORDS
-        .iter()
-        .any(|q| q.eq_ignore_ascii_case(last_word))
-    {
-        ValueType::Float
-    } else {
-        ValueType::Unknown
-    }
-}
-
-/// Derive an untyped channel's value type from the class of the object that owns
-/// it. Walks up through any intervening *sub-channel* ancestors (`.Value`,
-/// `.Filtered`, …) to the nearest owning object class, so a sub-channel inherits
-/// its object's type rather than stopping at its immediate channel parent (#103,
-/// extending #25). The walk does NOT cross a GroupCompound (groups regroup
-/// heterogeneous children — crossing would mis-type). When the class doesn't
-/// determine a type, falls back to a conservative leaf-name quantity heuristic.
-fn type_from_owner_class(path: &str, classname_by_path: &HashMap<String, String>) -> ValueType {
-    let mut cur = parent_group(path);
-    while let Some(p) = cur {
-        match classname_by_path.get(&p).map(String::as_str) {
-            // A sub-channel link in the chain: keep walking up to the object.
-            Some(c) if c.starts_with("BuiltIn.Channel") || c == "BuiltIn.CalibrationChannel" => {
-                cur = parent_group(&p);
-            }
-            // The owning object's class decides (or stops the walk).
-            Some(c) => return class_value_type(c).unwrap_or_else(|| type_from_leaf_name(path)),
-            // No component at this ancestor path — fall back to the leaf name.
-            None => return type_from_leaf_name(path),
-        }
-    }
-    type_from_leaf_name(path)
 }
 
 pub fn parse(xml: &str) -> Result<Parsed, XmlParseError> {
@@ -351,7 +205,7 @@ pub fn parse(xml: &str) -> Result<Parsed, XmlParseError> {
                 else {
                     continue;
                 };
-                let kind = classify(classname);
+                let kind = SymbolKind::from_classname(classname);
                 let filename = node.attribute("Filename").map(str::to_string);
                 if matches!(kind, SymbolKind::Function | SymbolKind::Method)
                     && let Some(g) = parent_group(name)
@@ -535,18 +389,6 @@ fn constant_value_type(value: &str) -> ValueType {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn classifies_package_objects_and_keeps_builtins() {
-        assert_eq!(classify("MoTeC Input.Sensor"), SymbolKind::Object);
-        assert_eq!(classify("MoTeC Output.Switched Output"), SymbolKind::Object);
-        assert_eq!(classify("_IOMethod.abs"), SymbolKind::Object);
-        // BuiltIn.* primitives are unchanged.
-        assert_eq!(classify("BuiltIn.Channel"), SymbolKind::Channel);
-        assert_eq!(classify("BuiltIn.MethodUser"), SymbolKind::Method);
-        // An unhandled BuiltIn.* stays Other, not Object.
-        assert_eq!(classify("BuiltIn.IOCharacteristic"), SymbolKind::Other);
-    }
 
     #[test]
     fn symbols_record_their_m1prj_definition_line() {
