@@ -38,8 +38,9 @@
 //! reuses this taint lattice over the project channel-writer index.
 
 use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
-use crate::resolve::Scope;
+use crate::resolve::{Resolution, Scope, resolve};
 use crate::typer::path_text;
+use crate::types::ValueType;
 use m1_core::{Annotations, Kind, Node, Severity};
 use std::collections::{HashMap, HashSet};
 
@@ -107,18 +108,42 @@ const STATEFUL_PREFIXES: &[&str] = &["Filter.", "Integral.", "Derivative."];
 ///
 /// `_scope` is unused intra-script but kept on the signature: the cross-script
 /// pass (P3) needs it to resolve `Out`→`In` channel references project-wide.
-pub fn check(root: Node, _scope: &Scope, anns: &Annotations, out: &mut Vec<TypeDiagnostic>) {
-    // Cheap exit: nothing to do unless a finiteness sink is present.
-    let has_sink = anns
-        .all()
-        .iter()
-        .any(|a| a.kind == "requires-finite" || a.kind == "safety-critical");
-    if !has_sink {
+pub fn check(root: Node, scope: &Scope, anns: &Annotations, out: &mut Vec<TypeDiagnostic>) {
+    // Cheap exit: a possibly-NaN value can only arise from a division (or a
+    // domain-restricted call / `@source`), and only matters if it can reach a
+    // sink — an annotated finiteness sink, or the implicit integer-conversion
+    // sink (#120). Skip when neither a taint source nor an annotation is present.
+    if anns.all().is_empty() && !contains_invalid_source(root) {
         return;
     }
     let sources = collect_sources(root, anns);
     let mut env: HashMap<String, Taint> = HashMap::new();
-    process(root, anns, &sources, &mut env, out);
+    process(root, scope, anns, &sources, &mut env, out);
+}
+
+/// True if the tree contains a potential NaN/Inf source the analysis cares about:
+/// a division/modulo, a domain-restricted math call, or `Calculate.Infinity()`.
+/// Used to skip the walk entirely on the (common) scripts that can't produce one.
+fn contains_invalid_source(root: Node) -> bool {
+    root.descendants().any(|n| match n.kind() {
+        Kind::BinaryExpression => n
+            .children()
+            .into_iter()
+            .any(|c| matches!(c.kind(), Kind::Slash | Kind::Percent)),
+        Kind::CallExpression => callee_path(n)
+            .map(|c| c == "Calculate.Infinity" || DOMAIN_FNS.contains(&c.as_str()))
+            .unwrap_or(false),
+        _ => false,
+    })
+}
+
+/// True if `path` resolves to an integer-typed channel/parameter — the target of
+/// an implicit NaN→garbage-integer conversion when a non-finite float is stored.
+fn is_integer_target(path: &str, scope: &Scope) -> bool {
+    matches!(
+        resolve(path, scope),
+        Resolution::Symbol(s) if matches!(s.value_type, ValueType::Integer | ValueType::Unsigned)
+    )
 }
 
 /// Names (`path_text`) declared an invalid-value source via `@source`/`@external`.
@@ -140,6 +165,7 @@ fn collect_sources(root: Node, anns: &Annotations) -> HashSet<String> {
 /// Walk statements in document order, threading the taint environment.
 fn process(
     node: Node,
+    scope: &Scope,
     anns: &Annotations,
     sources: &HashSet<String>,
     env: &mut HashMap<String, Taint>,
@@ -174,7 +200,8 @@ fn process(
 
                 // Sink check: does an unsanitised invalid value reach a value
                 // that must stay finite?
-                if let Some(base) = sink_severity(&here)
+                let annotated_sink = sink_severity(&here);
+                if let Some(base) = annotated_sink
                     && taint.invalid
                     && !taint.sanitised
                 {
@@ -187,11 +214,31 @@ fn process(
                     out.push(make(TypeCode::T080, &at, severity, message(&taint)));
                 }
 
+                // Implicit integer-conversion sink (#120): storing a possibly
+                // NaN/Inf float into an integer-typed channel reinterprets the
+                // float bit pattern as a garbage (often huge) integer. Flag it
+                // even without an annotation — but not twice if T080 already fired.
+                if annotated_sink.is_none()
+                    && taint.invalid
+                    && !taint.sanitised
+                    && stmt.kind() == Kind::AssignmentStatement
+                    && let Some(target) = &name
+                    && is_integer_target(target, scope)
+                {
+                    let at = value.unwrap_or(stmt);
+                    out.push(make(
+                        TypeCode::T081,
+                        &at,
+                        Severity::Warning,
+                        nan_int_message(&taint, target),
+                    ));
+                }
+
                 if let Some(name) = name {
                     env.insert(name, taint);
                 }
             }
-            _ => process(stmt, anns, sources, env, out),
+            _ => process(stmt, scope, anns, sources, env, out),
         }
     }
 }
@@ -206,6 +253,17 @@ fn sink_severity(here: &[&m1_core::Annotation]) -> Option<Severity> {
     } else {
         None
     }
+}
+
+fn nan_int_message(t: &Taint, target: &str) -> String {
+    let mut m = format!(
+        "a possibly NaN/Inf value is stored to integer channel `{target}` — a non-finite float converts to a garbage (often huge) integer"
+    );
+    if let Some(why) = &t.why {
+        m.push_str(&format!("; the value can be invalid via {why}"));
+    }
+    m.push_str(" — guard the divisor or clamp to a finite range before storing");
+    m
 }
 
 fn message(t: &Taint) -> String {
