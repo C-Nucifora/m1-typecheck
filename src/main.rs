@@ -107,6 +107,22 @@ fn main() {
 
     let mut had_error = false;
 
+    // Reject unknown T-codes in --select/--ignore up front (a silent typo used to
+    // disable nothing) (#111).
+    let known: std::collections::HashSet<&str> =
+        TypeCode::all_codes().iter().map(|c| c.as_str()).collect();
+    for code in args
+        .select
+        .iter()
+        .flatten()
+        .chain(args.ignore.iter().flatten())
+    {
+        if !known.contains(code.as_str()) {
+            eprintln!("m1-typecheck: unknown diagnostic code `{code}` (see --rules)");
+            std::process::exit(2);
+        }
+    }
+
     let project_path = find_project(&args);
     let config_path = find_config(&args, project_path.as_ref());
 
