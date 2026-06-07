@@ -170,3 +170,25 @@ fn no_cfg_note_when_cfg_present() {
         "cfg note must be absent when a cfg is present, got:\n{e}"
     );
 }
+
+#[test]
+fn unknown_filter_code_is_rejected() {
+    // #111: a bogus --ignore/--select code must be rejected, not silently
+    // accepted (which hid typos that disabled nothing).
+    let o = run(&["--ignore", "NOTACODE"]);
+    assert_ne!(
+        o.status.code(),
+        Some(0),
+        "an unknown --ignore code must exit non-zero; stderr:\n{}",
+        err_of(&o)
+    );
+    let e = err_of(&o).to_lowercase();
+    assert!(
+        e.contains("notacode") || e.contains("unknown"),
+        "stderr should name the bad code:\n{}",
+        err_of(&o)
+    );
+    // A valid code is still accepted (no spurious rejection).
+    let ok = run(&["--ignore", "T041"]);
+    assert_eq!(ok.status.code(), Some(0), "a valid code must be accepted");
+}
