@@ -1,6 +1,9 @@
 //! Parse Project.m1prj into a SymbolTable, enum types, and a file->group map.
-use super::{EnumId, EnumType, Symbol, SymbolKind, SymbolTable, TableAxis, TableMeta};
+use super::{
+    EnumId, EnumType, Symbol, SymbolKind, SymbolTable, TableAxis, TableMeta, XmlParseError,
+};
 use crate::types::{ValueType, primitive_type};
+use m1_workspace::LineIndex;
 use std::collections::{HashMap, HashSet};
 
 pub struct Parsed {
@@ -9,53 +12,55 @@ pub struct Parsed {
     pub module_roots: HashSet<String>,
 }
 
-#[derive(Debug)]
-pub enum ParseError {
-    Xml(roxmltree::Error),
-}
-impl std::fmt::Display for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ParseError::Xml(e) => write!(f, "invalid .m1prj XML: {e}"),
+impl SymbolKind {
+    /// Classify a `.m1prj`/`.m1dbc` component `Classname` into a [`SymbolKind`].
+    ///
+    /// This is the canonical home of the classname → kind mapping. The free
+    /// function [`classify`] is a thin backward-compatible delegate kept so
+    /// existing call sites (and any external consumer) keep compiling.
+    pub fn from_classname(classname: &str) -> SymbolKind {
+        use SymbolKind::*;
+        if classname.starts_with("BuiltIn.Channel") || classname == "BuiltIn.CalibrationChannel" {
+            Channel
+        } else if classname.starts_with("BuiltIn.Parameter")
+            || classname == "BuiltIn.CalibrationParameter"
+            || classname == "BuiltIn.IOResourceParameter"
+        {
+            Parameter
+        } else if classname.starts_with("BuiltIn.Constant")
+            || classname == "BuiltIn.IOResourceConstant"
+        {
+            Constant
+        } else if classname.starts_with("BuiltIn.FuncUser")
+            || classname.starts_with("BuiltIn.CalFuncUser")
+            || classname.starts_with("BuiltIn.FuncGenerated")
+        {
+            Function
+        } else if classname == "BuiltIn.MethodUser" || classname == "BuiltIn.EventKernel" {
+            Method
+        } else if classname.starts_with("BuiltIn.Table") || classname == "BuiltIn.CalibrationTable"
+        {
+            Table
+        } else if classname == "BuiltIn.GroupCompound" {
+            Group
+        } else if classname == "BuiltIn.Reference" {
+            Reference
+        } else if !classname.starts_with("BuiltIn.") && !classname.is_empty() {
+            // Any non-`BuiltIn.*` component is an instance of a package-defined
+            // object class (e.g. "MoTeC Input.Sensor", "MoTeC Output.Switched
+            // Output", "_IOMethod.abs"). Its members are separate components whose
+            // path is prefixed by this object's path.
+            Object
+        } else {
+            Other
         }
     }
 }
-impl std::error::Error for ParseError {}
 
+/// Backward-compatible delegate to [`SymbolKind::from_classname`]. Retained so
+/// existing `m1prj::classify(...)` call sites keep working.
 pub fn classify(classname: &str) -> SymbolKind {
-    use SymbolKind::*;
-    if classname.starts_with("BuiltIn.Channel") || classname == "BuiltIn.CalibrationChannel" {
-        Channel
-    } else if classname.starts_with("BuiltIn.Parameter")
-        || classname == "BuiltIn.CalibrationParameter"
-        || classname == "BuiltIn.IOResourceParameter"
-    {
-        Parameter
-    } else if classname.starts_with("BuiltIn.Constant") || classname == "BuiltIn.IOResourceConstant"
-    {
-        Constant
-    } else if classname.starts_with("BuiltIn.FuncUser")
-        || classname.starts_with("BuiltIn.CalFuncUser")
-        || classname.starts_with("BuiltIn.FuncGenerated")
-    {
-        Function
-    } else if classname == "BuiltIn.MethodUser" || classname == "BuiltIn.EventKernel" {
-        Method
-    } else if classname.starts_with("BuiltIn.Table") || classname == "BuiltIn.CalibrationTable" {
-        Table
-    } else if classname == "BuiltIn.GroupCompound" {
-        Group
-    } else if classname == "BuiltIn.Reference" {
-        Reference
-    } else if !classname.starts_with("BuiltIn.") && !classname.is_empty() {
-        // Any non-`BuiltIn.*` component is an instance of a package-defined
-        // object class (e.g. "MoTeC Input.Sensor", "MoTeC Output.Switched
-        // Output", "_IOMethod.abs"). Its members are separate components whose
-        // path is prefixed by this object's path.
-        Object
-    } else {
-        Other
-    }
+    SymbolKind::from_classname(classname)
 }
 
 /// Enclosing group path for a fully-qualified symbol path (drop the last segment,
@@ -65,13 +70,6 @@ fn parent_group(path: &str) -> Option<String> {
     Some(path[..idx].to_string())
 }
 
-/// Parse a script's call rate (Hz) from its `<Props SelectedTrigger="…">`. The
-/// trigger is a (parent-relative) path to a `BuiltIn.EventKernel` whose leaf
-/// name encodes the clock, e.g. `Parent.Parent.Events.On 500Hz` → `500`. Returns
-/// `None` for `On Startup` (startup-only functions), `$(…)` parameter-reference
-/// triggers that aren't statically resolvable, and any leaf not of the form
-/// `On <N>Hz`. The rate lives entirely in the kernel leaf, so the relative path
-/// prefix need not be resolved to read it.
 /// A `BuiltIn.Table`'s shape from its `.m1prj` `<Axis>` element: each of the
 /// `<X>` / `<Y>` / `<Z>` children contributes one axis whose breakpoint count is
 /// its `MaxSites`. Returns `None` when there is no `<Axis>` or no sized axis.
@@ -117,6 +115,13 @@ fn effective_tags(path: &str, own_tags: &HashMap<String, Vec<String>>) -> Vec<St
     tags
 }
 
+/// Parse a script's call rate (Hz) from its `<Props SelectedTrigger="…">`. The
+/// trigger is a (parent-relative) path to a `BuiltIn.EventKernel` whose leaf
+/// name encodes the clock, e.g. `Parent.Parent.Events.On 500Hz` → `500`. Returns
+/// `None` for `On Startup` (startup-only functions), `$(…)` parameter-reference
+/// triggers that aren't statically resolvable, and any leaf not of the form
+/// `On <N>Hz`. The rate lives entirely in the kernel leaf, so the relative path
+/// prefix need not be resolved to read it.
 fn event_rate_hz(trigger: &str) -> Option<f64> {
     if trigger.contains("$(") {
         return None;
@@ -233,38 +238,12 @@ fn type_from_owner_class(path: &str, classname_by_path: &HashMap<String, String>
     type_from_leaf_name(path)
 }
 
-/// Byte offsets of every line start in `xml` (offset 0, then each byte after a
-/// `\n`), kept sorted. `line_at` binary-searches this to map a byte offset to its
-/// 0-based source line in O(log N), so per-component line lookup is amortized O(1)
-/// over the whole parse — replacing roxmltree's `text_pos_at`, which rescans from
-/// byte 0 on every call and is documented "very expensive, use only for errors"
-/// (its per-component use made parsing O(N^2), #95).
-pub(crate) struct LineIndex {
-    starts: Vec<usize>,
-}
-
-impl LineIndex {
-    pub(crate) fn new(xml: &str) -> Self {
-        let mut starts = vec![0usize];
-        starts.extend(
-            xml.bytes()
-                .enumerate()
-                .filter(|&(_, b)| b == b'\n')
-                .map(|(i, _)| i + 1),
-        );
-        LineIndex { starts }
-    }
-
-    /// 0-based source line containing byte offset `pos`.
-    pub(crate) fn line_at(&self, pos: usize) -> usize {
-        // partition_point yields the count of line-starts <= pos; subtract one for
-        // the 0-based line number (there is always the offset-0 entry, so it's >=1).
-        self.starts.partition_point(|&s| s <= pos) - 1
-    }
-}
-
-pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
-    let doc = roxmltree::Document::parse(xml).map_err(ParseError::Xml)?;
+pub fn parse(xml: &str) -> Result<Parsed, XmlParseError> {
+    let doc = roxmltree::Document::parse(xml).map_err(XmlParseError::in_context(".m1prj"))?;
+    // Map byte offsets to 0-based source lines in O(log N) for per-component
+    // goto-definition, instead of roxmltree's `text_pos_at` (documented "very
+    // expensive, use only for errors" — its per-component use made parsing
+    // O(N^2), #95). Shared with the other XML loaders via `m1_workspace`.
     let line_index = LineIndex::new(xml);
     let mut table = SymbolTable::default();
     let mut file_to_group = HashMap::new();

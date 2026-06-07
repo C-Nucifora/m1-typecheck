@@ -127,8 +127,7 @@ pub fn check(root: Node, scope: &Scope, anns: &Annotations, out: &mut Vec<TypeDi
 fn contains_invalid_source(root: Node) -> bool {
     root.descendants().any(|n| match n.kind() {
         Kind::BinaryExpression => n
-            .children()
-            .into_iter()
+            .child_nodes()
             .any(|c| matches!(c.kind(), Kind::Slash | Kind::Percent)),
         Kind::CallExpression => callee_path(n)
             .map(|c| c == "Calculate.Infinity" || DOMAIN_FNS.contains(&c.as_str()))
@@ -171,7 +170,7 @@ fn process(
     env: &mut HashMap<String, Taint>,
     out: &mut Vec<TypeDiagnostic>,
 ) {
-    for stmt in node.children() {
+    for stmt in node.child_nodes() {
         match stmt.kind() {
             Kind::AssignmentStatement | Kind::LocalDeclaration => {
                 let here = anns.for_target_start(stmt.byte_range().start);
@@ -312,8 +311,7 @@ fn binary_taint(node: Node, env: &HashMap<String, Taint>, sources: &HashSet<Stri
         .filter(|c| is_expr(c.kind()))
         .collect();
     let op = node
-        .children()
-        .into_iter()
+        .child_nodes()
         .find(|c| is_operator(c.kind()))
         .map(|c| c.text().to_string())
         .unwrap_or_default();
@@ -393,8 +391,7 @@ fn callee_path(call: Node) -> Option<String> {
 
 /// The positional argument expressions of a call.
 fn call_args(call: Node) -> Vec<Node> {
-    call.children()
-        .into_iter()
+    call.child_nodes()
         .find(|c| c.kind() == Kind::ArgumentList)
         .map(|al| {
             al.named_children()
@@ -444,7 +441,7 @@ fn value_expr(stmt: Node) -> Option<Node> {
 
 /// Depth-first visit of every statement-ish node.
 fn visit_statements(node: Node, f: &mut impl FnMut(Node)) {
-    for child in node.children() {
+    for child in node.child_nodes() {
         if matches!(
             child.kind(),
             Kind::AssignmentStatement | Kind::LocalDeclaration
