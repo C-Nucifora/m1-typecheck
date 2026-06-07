@@ -192,3 +192,15 @@ fn unknown_filter_code_is_rejected() {
     let ok = run(&["--ignore", "T041"]);
     assert_eq!(ok.status.code(), Some(0), "a valid code must be accepted");
 }
+
+#[test]
+fn version_flag_prints_version() {
+    // #112: report the version like the other CLIs.
+    let o = run(&["--version"]);
+    assert_eq!(o.status.code(), Some(0), "stderr: {}", err_of(&o));
+    assert!(
+        out_of(&o).contains(env!("CARGO_PKG_VERSION")),
+        "stdout: {}",
+        out_of(&o)
+    );
+}
