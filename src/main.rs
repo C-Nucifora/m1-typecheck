@@ -8,7 +8,11 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 #[derive(Parser, Debug)]
-#[command(name = "m1-typecheck", about = "Type checker for MoTeC M1 scripts")]
+#[command(
+    name = "m1-typecheck",
+    version,
+    about = "Type checker for MoTeC M1 scripts"
+)]
 struct Args {
     /// Scripts to check
     files: Vec<PathBuf>,
