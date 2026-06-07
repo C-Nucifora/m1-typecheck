@@ -43,6 +43,10 @@ fn classify(classname: &str) -> Option<SymbolKind> {
 /// can open the defining file.
 pub fn augment(table: &mut SymbolTable, xml: &str, rel_filename: &str) -> Result<(), DbcError> {
     let doc = roxmltree::Document::parse(xml).map_err(DbcError::Xml)?;
+    // Map a component's byte offset to its 0-based source line so Go to Definition
+    // opens the `.m1dbc` at the declaration, not line 0 (#169). Built once over the
+    // whole parse — roxmltree's own `text_pos_at` rescans from byte 0 each call.
+    let line_index = super::m1prj::LineIndex::new(xml);
     for node in doc.descendants().filter(|n| n.has_tag_name("Component")) {
         let (Some(classname), Some(name)) = (node.attribute("Classname"), node.attribute("Name"))
         else {
@@ -90,7 +94,7 @@ pub fn augment(table: &mut SymbolTable, xml: &str, rel_filename: &str) -> Result
             enum_assoc: None,
             class,
             classname: Some(classname.to_string()),
-            def_line: None,
+            def_line: Some(line_index.line_at(node.range().start) as u32),
             dbc_range,
             can,
             call_rate_hz: None,
@@ -211,5 +215,25 @@ mod tests {
             .get("Balls3EV25.DashVals.Aux Switch")
             .expect("bool signal");
         assert_eq!(boolsig.value_type, ValueType::Boolean);
+    }
+
+    // #169 gap 1: each DBC symbol records the 0-based source line of its
+    // `<Component>` element, so Go to Definition opens the `.m1dbc` at the
+    // declaration instead of always at line 0.
+    #[test]
+    fn captures_def_line_for_dbc_components() {
+        let mut table = SymbolTable::default();
+        augment(&mut table, DBC, "dbc/Balls3EV25.m1dbc").unwrap();
+        // Lines are 0-based; the DBC/Message/Signal <Component> elements sit on
+        // their respective rows in DBC above.
+        assert_eq!(table.get("Balls3EV25").unwrap().def_line, Some(4));
+        assert_eq!(table.get("Balls3EV25.DashVals").unwrap().def_line, Some(5));
+        assert_eq!(
+            table
+                .get("Balls3EV25.DashVals.Inverter Error")
+                .unwrap()
+                .def_line,
+            Some(8)
+        );
     }
 }
