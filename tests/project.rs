@@ -24,6 +24,38 @@ fn loads_table_and_config() {
 }
 
 #[test]
+fn table_meta_from_m1prj_axis_without_cfg() {
+    // #165: a Table's shape (axis breakpoint counts) is encoded in the .m1prj
+    // `<Axis><X MaxSites/><Y MaxSites/></Axis>` and must populate `table_meta`
+    // even when no `.m1cfg` calibration export is loaded.
+    let dir = std::env::temp_dir().join(format!("m1tc_tbl_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let prj = dir.join("Project.m1prj");
+    std::fs::write(
+        &prj,
+        r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.Table" Name="Root.Demo.Fuel Map">
+    <Axis><X MaxSites="11"/><Y MaxSites="7"/></Axis>
+  </Component>
+</Project>"#,
+    )
+    .unwrap();
+    let p = Project::load(&prj).unwrap();
+    let sym = p
+        .symbols()
+        .get("Root.Demo.Fuel Map")
+        .expect("table symbol present");
+    let meta = sym
+        .table_meta
+        .as_ref()
+        .expect("table_meta derived from .m1prj <Axis>");
+    let sizes: Vec<u32> = meta.axes.iter().map(|a| a.size).collect();
+    assert_eq!(sizes, vec![11, 7], "2-D shape 11 x 7");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn opaque_roots_include_modules_and_builtins() {
     let p = proj();
     assert!(p.is_opaque_root("MoTeC Comms")); // from module sets
