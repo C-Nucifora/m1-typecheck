@@ -134,6 +134,44 @@ fn expand_loop_variable_not_flagged() {
 }
 
 #[test]
+fn typo_on_value_compound_trailing_segment_is_flagged() {
+    let p = proj();
+    // `Foo.Mode` is a value-compound group (has a `.Value` child). `Foo.Mode.Valuee`
+    // is a typo of `.Value` — previously accepted opaquely because any segment after
+    // a value compound was treated as an accessor (#108). Now flagged.
+    let c = codes(&p, "Foo Update.m1scr", "local x = Foo.Mode.Valuee;\n");
+    assert!(c.contains(&TypeCode::T001), "expected T001, got {c:?}");
+}
+
+#[test]
+fn value_compound_real_accessor_and_value_not_flagged() {
+    let p = proj();
+    // The real `.Value` child resolves; recognised accessors (`.AsInteger`,
+    // `.Set`) on the compound stay opaque — neither is a miss.
+    for src in [
+        "local x = Foo.Mode.Value;\n",
+        "local x = Foo.Mode.AsInteger;\n",
+        "Foo.Mode.Set(1);\n",
+    ] {
+        let c = codes(&p, "Foo Update.m1scr", src);
+        assert!(
+            !c.contains(&TypeCode::T001) && !c.contains(&TypeCode::T031),
+            "false positive on `{src}`: {c:?}"
+        );
+    }
+}
+
+#[test]
+fn value_compound_enumerator_member_not_flagged() {
+    let p = proj();
+    // Where a channel name collides with an enum type name, the compound can be
+    // addressed by an enumerator (`Foo.Mode.On`, with `On` a `Switch State`
+    // member). An enum member is a valid trailing segment, not a miss (#108).
+    let c = codes(&p, "Foo Update.m1scr", "local x = Foo.Mode.On;\n");
+    assert!(!c.contains(&TypeCode::T001), "enumerator flagged: {c:?}");
+}
+
+#[test]
 fn bare_typo_in_is_clause_state_not_flagged() {
     let p = proj();
     // The `state` of a `when…is (...)` clause is an enumerator (possibly of a

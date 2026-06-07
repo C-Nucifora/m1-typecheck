@@ -188,24 +188,54 @@ pub fn resolve<'p>(path: &str, scope: &Scope<'p>) -> Resolution<'p> {
 /// resolves to a symbol via absolute, `Root.`-prefixed, or group-relative lookup.
 fn prefix_resolves(path: &str, scope: &Scope, table: &crate::symbols::SymbolTable) -> bool {
     let mut current = path;
-    // Strip trailing segments one at a time, testing each shorter prefix.
+    // Strip trailing segments one at a time, testing each shorter prefix. `tail`
+    // is the single segment immediately following the prefix under test — it is
+    // the accessor/member being applied to that prefix.
     while let Some(i) = current.rfind('.') {
+        let tail = &current[i + 1..];
         current = &current[..i];
-        if symbol_exists(current, scope, table) {
+        if symbol_exists(current, tail, scope, table) {
             return true;
         }
     }
     false
 }
 
-/// Does `path` resolve to a symbol that can expose accessors/members? That is
-/// any non-group symbol (channel/parameter/constant/…), OR a value-bearing
-/// compound group (one with a `.Value` child — the M1 enum/channel-compound
-/// idiom). Pure namespace groups are excluded: a path under one with an absent
-/// leaf is a genuine miss, whereas a path under a value compound is an accessor.
-fn symbol_exists(path: &str, scope: &Scope, table: &crate::symbols::SymbolTable) -> bool {
+/// The accessor names valid on a value-compound group: the auto-created scalar
+/// `Value` child plus every modelled object method (`AsInteger`, `Set`, `Lookup`,
+/// the CAN/timer accessors, …). Sourced from the intrinsics so new methods are
+/// covered automatically.
+fn is_known_accessor(seg: &str) -> bool {
+    seg == "Value"
+        || crate::intrinsics::get()
+            .object_methods
+            .iter()
+            .any(|m| m.name == seg)
+}
+
+/// Does `path` resolve to a symbol that exposes `tail` as an accessor/member?
+/// Any non-group symbol (channel/parameter/constant/…) exposes the built-in
+/// operations, so any `tail` is opaque. A value-bearing compound group (one with
+/// a `.Value` child — the M1 enum/channel-compound idiom) exposes only the known
+/// accessor set, so a *typo'd* trailing segment (`Mode.Valuee`) is a genuine miss
+/// rather than an opaque accessor (#108). Pure namespace groups expose nothing.
+fn symbol_exists(
+    path: &str,
+    tail: &str,
+    scope: &Scope,
+    table: &crate::symbols::SymbolTable,
+) -> bool {
     let is_accessor_base = |full: &str, s: &crate::symbols::Symbol| {
-        !matches!(s.kind, crate::symbols::SymbolKind::Group) || table.has_child(full, "Value")
+        if !matches!(s.kind, crate::symbols::SymbolKind::Group) {
+            true
+        } else {
+            // A value compound exposes the known accessor set; it may also be
+            // addressed by an enumerator of its enum where the channel name
+            // collides with the enum type name (`Control.Drive State.<Member>`),
+            // so an enum member is a valid trailing segment too.
+            table.has_child(full, "Value")
+                && (is_known_accessor(tail) || !table.enums_with_member(tail).is_empty())
+        }
     };
     for full in [path.to_string(), format!("Root.{path}")] {
         if table
