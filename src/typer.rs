@@ -1,5 +1,6 @@
 //! Best-effort expression typing over the m1-core CST.
 use crate::resolve::{Resolution, Scope, resolve};
+use crate::symbols::SymbolKind;
 use crate::types::{ValueType, numeric_join, type_of_number_literal};
 use m1_core::{Kind, Node};
 
@@ -128,6 +129,11 @@ fn type_of_call(node: Node, scope: &Scope) -> ValueType {
                 }
             }
             result.unwrap_or(ValueType::Unknown)
+        }
+        // A call to a user function/method: its inferred return type, when the
+        // body gave one (#110). `None` stays Unknown — exactly as before.
+        Resolution::Symbol(s) if matches!(s.kind, SymbolKind::Function | SymbolKind::Method) => {
+            s.return_type.unwrap_or(ValueType::Unknown)
         }
         _ => ValueType::Unknown,
     }

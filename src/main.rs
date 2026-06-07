@@ -161,7 +161,7 @@ fn main() {
     // Track whether any `.m1dbc` was discovered so a project that loads but finds
     // none can announce that T042 is skipped (mirroring the cfg/project notes).
     let mut dbc_found = false;
-    let project = project_path.clone().map(|path| match Project::load(&path) {
+    let mut project = project_path.clone().map(|path| match Project::load(&path) {
         Ok(mut p) => {
             if let Some(cfg) = &config_path {
                 p = p.with_config(cfg).unwrap_or_else(|e| {
@@ -208,6 +208,22 @@ fn main() {
         if !dbc_found {
             eprintln!("m1-typecheck: note: no .m1dbc found; T042 (dbc-signal-range) skipped");
         }
+    }
+
+    // Infer user-function/method return types from the script bodies on the
+    // command line, so call sites in other scripts type-check (#110). Scripts that
+    // back no function symbol are simply ignored by the pass.
+    if let Some(p) = project.as_mut() {
+        let scripts: Vec<(String, String)> = args
+            .files
+            .iter()
+            .filter_map(|f| {
+                let name = f.file_name()?.to_str()?.to_string();
+                let src = m1_workspace::read_text(f).ok()?;
+                Some((name, src))
+            })
+            .collect();
+        p.infer_return_types(&scripts);
     }
 
     for file in &args.files {

@@ -480,6 +480,7 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                     call_rate_hz,
                     log_rate_hz,
                     tags: effective_tags(name, &selected_tags_by_path),
+                    return_type: None,
                     // A Table's shape is encoded in the .m1prj `<Axis>` children
                     // (`<X MaxSites/>`, `<Y …/>`, `<Z …/>`); surface it so hover
                     // shows the shape even before a `.m1cfg` exists. When a cfg is

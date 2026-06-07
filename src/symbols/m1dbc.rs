@@ -100,6 +100,7 @@ pub fn augment(table: &mut SymbolTable, xml: &str, rel_filename: &str) -> Result
             call_rate_hz: None,
             log_rate_hz: None,
             tags: Vec::new(),
+            return_type: None,
             table_meta: None,
         });
     }

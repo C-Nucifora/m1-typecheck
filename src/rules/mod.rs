@@ -93,11 +93,20 @@ impl Default for Registry {
 /// reference stays Unknown (the not-yet-declared name isn't in scope). Declaration
 /// order is the safe direction — it can't create the cross-local ordering hazard
 /// (a forward dependency typing wrongly) the prior empty-scope guard avoided.
-fn collect_locals(root: Node) -> std::collections::HashMap<String, crate::types::ValueType> {
+pub(crate) fn collect_locals(
+    root: Node,
+    project: Option<&Project>,
+    group: Option<&str>,
+) -> std::collections::HashMap<String, crate::types::ValueType> {
     use crate::types::ValueType;
     use m1_core::Field;
     let mut locals: std::collections::HashMap<String, ValueType> = std::collections::HashMap::new();
-    fn walk(n: Node, locals: &mut std::collections::HashMap<String, ValueType>) {
+    fn walk(
+        n: Node,
+        locals: &mut std::collections::HashMap<String, ValueType>,
+        project: Option<&Project>,
+        group: Option<&str>,
+    ) {
         // `expand (VAR = start to end) { … }` introduces a compile-time loop
         // variable `VAR` (an integer counter), referenced in the body as
         // `$(VAR)`. It is function-local, not a project symbol, so register it as
@@ -116,26 +125,39 @@ fn collect_locals(root: Node) -> std::collections::HashMap<String, crate::types:
             // kind-exclusion heuristic, which dropped Identifier initialisers
             // (`local b = a;`) and so left every derived local Unknown.
             let t = match n.child_by_field(Field::Value) {
-                // Type against the locals declared so far (declaration-order
-                // threading) so a backward reference resolves; the name being
-                // declared is not yet inserted, so `local x = x;` stays Unknown.
-                Some(init) => crate::typer::type_of(
-                    init,
-                    &Scope {
-                        locals: locals.clone(),
-                        group: None,
-                        project: None,
-                    },
-                ),
+                // A *call* initializer is typed with the project in scope so a
+                // user-function call resolves to its inferred return type (#110);
+                // built-in calls already resolve project-lessly (intrinsics) so
+                // this only adds user-function returns — it does NOT type
+                // channel-read locals (`local x = Some Channel;` stays Unknown,
+                // which is the separate concern of project-aware local typing).
+                // Everything else stays project-less, typed only against the
+                // locals declared so far (declaration-order threading), so a
+                // backward reference resolves while `local x = x;` stays Unknown.
+                Some(init) => {
+                    let (g, p) = if init.kind() == m1_core::Kind::CallExpression {
+                        (group, project)
+                    } else {
+                        (None, None)
+                    };
+                    crate::typer::type_of(
+                        init,
+                        &Scope {
+                            locals: locals.clone(),
+                            group: g.map(str::to_string),
+                            project: p,
+                        },
+                    )
+                }
                 None => ValueType::Unknown,
             };
             locals.insert(name, t);
         }
         for c in n.children() {
-            walk(c, locals);
+            walk(c, locals, project, group);
         }
     }
-    walk(root, &mut locals);
+    walk(root, &mut locals, project, group);
     locals
 }
 
@@ -216,7 +238,7 @@ pub fn run_with(
         _ => None,
     };
     let scope = Scope {
-        locals: collect_locals(cst.root()),
+        locals: collect_locals(cst.root(), project, group.as_deref()),
         group,
         project,
     };
