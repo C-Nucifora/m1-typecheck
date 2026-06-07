@@ -132,3 +132,34 @@ fn m1cfg_augments_parameter_types() {
     assert_eq!(gain.value_type, ValueType::Float);
     assert_eq!(gain.unit.as_deref(), Some("ratio"));
 }
+
+#[test]
+fn m1cfg_integer_cell_overrides_qty_float_fallback() {
+    // A channel with a physical `Qty` and no explicit `Type` is typed Float by
+    // the `.m1prj` fallback. When the `.m1cfg` declares its storage cell as an
+    // integral type, `augment` must overwrite the Float with that type — this is
+    // the supported path to T030/T003 coverage on integer channels (#107).
+    use m1_typecheck::symbols::{m1cfg, m1prj};
+    use m1_typecheck::types::ValueType;
+    let prj = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.Group" Name="Root.Demo"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.Demo.Count"><Props Qty="ratio"/></Component>
+</Project>"#;
+    let mut parsed = m1prj::parse(prj).unwrap();
+    // The `.m1prj` alone: a physical-Qty channel is Float.
+    assert_eq!(
+        parsed.table.get("Root.Demo.Count").unwrap().value_type,
+        ValueType::Float
+    );
+    let cfg = r#"<?xml version="1.0"?>
+<Configuration>
+  <Parameter Name="Demo.Count"><Cell Type="u32" Unit="ratio">0</Cell></Parameter>
+</Configuration>"#;
+    m1cfg::augment(&mut parsed.table, cfg).unwrap();
+    assert_eq!(
+        parsed.table.get("Root.Demo.Count").unwrap().value_type,
+        ValueType::Unsigned,
+        "cfg cell type must win over the Qty Float fallback"
+    );
+}

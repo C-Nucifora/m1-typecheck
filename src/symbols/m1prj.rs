@@ -339,8 +339,18 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                     // `::This.<enum>` reference.
                     resolve_props_type(t, &table)
                 } else if props.and_then(|p| p.attribute("Qty")).is_some() {
-                    // No explicit storage type but a physical quantity (`Qty`,
-                    // e.g. `rad/s`, `V`, `K`): a measured channel, stored as Float.
+                    // A physical quantity (`Qty`, e.g. `rad/s`, `V`, `K`, `Pa`) with
+                    // no explicit storage type: a measured channel, stored as Float.
+                    // This is *exact*, not a guess — the manual states an integer,
+                    // unsigned-integer or enumeration channel can only carry the
+                    // unitless quantity, so a channel with a real physical quantity
+                    // is necessarily Float. Conversely an integer-stored channel is
+                    // unitless and its storage type is *not* recoverable from the
+                    // `.m1prj` alone — it is typed from the `.m1cfg` `<Cell Type>`
+                    // by `m1cfg::augment` (which overwrites this fallback). So
+                    // T030/T003 on integer channels requires a `.m1cfg`; we do not
+                    // guess an integral type from a unitless `Qty`, which would
+                    // false-positive on unitless floats (ratios) (#107).
                     (ValueType::Float, None)
                 } else if kind == SymbolKind::Channel {
                     // Auto-created output channels carry no inline type/quantity;
