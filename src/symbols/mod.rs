@@ -80,6 +80,19 @@ pub struct Symbol {
     /// startup-only functions (`On Startup`), and triggers that are parameter
     /// references (`$(…)`) the model can't resolve statically. Surfaced in hover.
     pub call_rate_hz: Option<f64>,
+    /// Default logging rate (Hz) of a channel, derived from its `.m1prj`
+    /// `<Props DefaultLogRate="…">` — a period string like `"5MS"` (5 ms → 200 Hz)
+    /// or `"10MS"` (100 Hz). `None` for symbols with no `DefaultLogRate` (the
+    /// channel inherits the system default, which the `.m1prj` does not record).
+    /// Surfaced in hover (#171).
+    pub log_rate_hz: Option<f64>,
+    /// Tags assigned to this object, from the `.m1prj` `<Props SelectedTags="…">`
+    /// (space-separated), unioned with the tags inherited from every ancestor
+    /// group (the manual: group tags are inherited by the group's children). Own
+    /// tags come first, in declared order, then inherited tags not already present.
+    /// Empty when neither the symbol nor any ancestor declares tags. Surfaced in
+    /// hover and queryable via [`SymbolTable::symbols_with_tag`] (#170).
+    pub tags: Vec<String>,
     /// For a `BuiltIn.Table` symbol, its shape (input axes) and output unit, read
     /// from the `.m1cfg` `<Table>` (the `.m1prj` carries none). `None` for
     /// non-tables and when no `.m1cfg` is loaded. See [`TableMeta`].
@@ -138,12 +151,17 @@ pub struct SymbolTable {
     enums: Vec<EnumType>,
     /// member name -> enum type ids that declare a member of that name.
     member_index: HashMap<String, Vec<EnumId>>,
+    /// tag name -> indices of symbols that carry that tag (own or inherited).
+    tag_index: HashMap<String, Vec<usize>>,
 }
 
 impl SymbolTable {
     pub fn push(&mut self, sym: Symbol) {
         let idx = self.symbols.len();
         self.by_path.insert(sym.path.clone(), idx);
+        for tag in &sym.tags {
+            self.tag_index.entry(tag.clone()).or_default().push(idx);
+        }
         self.symbols.push(sym);
     }
     pub fn get(&self, path: &str) -> Option<&Symbol> {
@@ -207,6 +225,15 @@ impl SymbolTable {
             self.symbols[i].value_type = ValueType::Enum(id);
         }
     }
+    /// Symbols carrying `tag` (own or inherited), in declaration order. Empty
+    /// when no symbol carries it. Powers the `tag:` workspace-symbol filter (#170).
+    pub fn symbols_with_tag(&self, tag: &str) -> Vec<&Symbol> {
+        self.tag_index
+            .get(tag)
+            .map(|idxs| idxs.iter().map(|&i| &self.symbols[i]).collect())
+            .unwrap_or_default()
+    }
+
     /// True if `path` exists as a symbol with a direct child of the given leaf
     /// name (e.g. a group `…Drive State` that contains `…Drive State.Value`).
     /// Used to recognise value-bearing enum/channel compounds, whose members
