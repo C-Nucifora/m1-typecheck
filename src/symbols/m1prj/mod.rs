@@ -1,8 +1,8 @@
 //! Parse Project.m1prj into a SymbolTable, enum types, and a file->group map.
 //!
 //! Split across submodules:
-//!   * [`parse`] — the XML walk that builds the `SymbolTable` and maps.
-//!   * [`type_inference`] — value-type inference for channels with no explicit
+//!   * `parse` — the XML walk that builds the `SymbolTable` and maps.
+//!   * `type_inference` — value-type inference for channels with no explicit
 //!     `<Props Type>`/`Qty` (owner-class + leaf-name heuristics).
 //!
 //! The public surface (`parse`, `classify`, `Parsed`) is re-exported here so
