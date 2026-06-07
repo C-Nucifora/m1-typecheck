@@ -24,6 +24,44 @@ fn loads_table_and_config() {
 }
 
 #[test]
+fn parameter_without_type_or_qty_inferred_from_leaf_name() {
+    // #106: a parameter with no inline Type and no .m1cfg entry, whose leaf is a
+    // float-quantity word, is inferred Float by convention (recovering T030/T003).
+    let dir = std::env::temp_dir().join(format!("m1tc_param_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let prj = dir.join("Project.m1prj");
+    std::fs::write(
+        &prj,
+        r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root.Demo"/>
+  <Component Classname="BuiltIn.Parameter" Name="Root.Demo.Widget Voltage"><Props/></Component>
+  <Component Classname="BuiltIn.Parameter" Name="Root.Demo.Widget Count"><Props/></Component>
+</Project>"#,
+    )
+    .unwrap();
+    let p = Project::load(&prj).unwrap();
+    use m1_typecheck::types::ValueType;
+    assert_eq!(
+        p.symbols()
+            .get("Root.Demo.Widget Voltage")
+            .unwrap()
+            .value_type,
+        ValueType::Float,
+        "leaf ending in `Voltage` -> Float"
+    );
+    // A non-quantity leaf stays Unknown (no false positive).
+    assert_eq!(
+        p.symbols()
+            .get("Root.Demo.Widget Count")
+            .unwrap()
+            .value_type,
+        ValueType::Unknown
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn table_meta_from_m1prj_axis_without_cfg() {
     // #165: a Table's shape (axis breakpoint counts) is encoded in the .m1prj
     // `<Axis><X MaxSites/><Y MaxSites/></Axis>` and must populate `table_meta`

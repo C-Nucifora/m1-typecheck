@@ -314,10 +314,16 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                     (ValueType::Float, None)
                 } else if kind == SymbolKind::Channel {
                     // Auto-created output channels carry no inline type/quantity;
-                    // derive it from the owning object's class (#25).
+                    // derive it from the owning object's class (#25), which itself
+                    // falls back to the leaf-name heuristic.
                     (type_from_owner_class(name, &classname_by_path), None)
                 } else {
-                    (ValueType::Unknown, None)
+                    // Parameters (and any other typeless symbol) with no Type/Qty
+                    // and no .m1cfg coverage: a conservative leaf-name heuristic —
+                    // a leaf ending in a float-quantity word (Voltage/Temperature/
+                    // Frequency/…) is Float by M1 convention, recovering T030/T003
+                    // that would otherwise be silenced (#106).
+                    (type_from_leaf_name(name), None)
                 };
                 let class = if kind == SymbolKind::Object {
                     Some(classname.to_string())
