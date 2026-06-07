@@ -96,6 +96,27 @@ fn table_meta_from_axis(node: roxmltree::Node) -> Option<TableMeta> {
     })
 }
 
+/// Effective tag set for `path`: its own `SelectedTags` (declared order) unioned
+/// with every ancestor group's tags (#170). The manual states a group node's tags
+/// are inherited by its children, so we walk the parent chain and append each
+/// ancestor's tags not already present. `own_tags` maps a component path to the
+/// space-split tags it declared directly.
+fn effective_tags(path: &str, own_tags: &HashMap<String, Vec<String>>) -> Vec<String> {
+    let mut tags: Vec<String> = own_tags.get(path).cloned().unwrap_or_default();
+    let mut cur = parent_group(path);
+    while let Some(p) = cur {
+        if let Some(inherited) = own_tags.get(&p) {
+            for t in inherited {
+                if !tags.contains(t) {
+                    tags.push(t.clone());
+                }
+            }
+        }
+        cur = parent_group(&p);
+    }
+    tags
+}
+
 fn event_rate_hz(trigger: &str) -> Option<f64> {
     if trigger.contains("$(") {
         return None;
@@ -103,6 +124,27 @@ fn event_rate_hz(trigger: &str) -> Option<f64> {
     let leaf = trigger.rsplit('.').next().unwrap_or(trigger);
     let n = leaf.strip_prefix("On ")?.strip_suffix("Hz")?;
     n.trim().parse::<f64>().ok()
+}
+
+/// Parse a `.m1prj` `DefaultLogRate` value into a rate in Hz. M1 Build writes the
+/// channel's default logging *period* as `<number><unit>` — `"5MS"` (5 ms → 200 Hz),
+/// `"10MS"` (100 Hz), `"1S"` (1 Hz), `"200US"` — or, defensively, a rate `"<n>HZ"`.
+/// Returns `None` for an unrecognised unit or a non-positive value.
+fn log_rate_hz(raw: &str) -> Option<f64> {
+    let raw = raw.trim();
+    let split = raw.find(|c: char| c.is_ascii_alphabetic())?;
+    let (num, unit) = raw.split_at(split);
+    let n: f64 = num.trim().parse().ok()?;
+    if n <= 0.0 {
+        return None;
+    }
+    match unit.trim().to_ascii_uppercase().as_str() {
+        "MS" => Some(1000.0 / n),      // period in milliseconds
+        "US" => Some(1_000_000.0 / n), // period in microseconds
+        "S" => Some(1.0 / n),          // period in seconds
+        "HZ" => Some(n),               // already a rate
+        _ => None,
+    }
 }
 
 /// Derive an untyped channel's value type from the class of the object that
@@ -240,6 +282,29 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                 n.attribute("Name")?.to_string(),
                 n.attribute("Classname")?.to_string(),
             ))
+        })
+        .collect();
+
+    // Pre-pass: map every component's path -> the tags it declares directly
+    // (`<Props SelectedTags="a b c">`, space-separated). Collected up front so a
+    // channel can inherit its ancestor groups' tags regardless of document order
+    // (#170). NOTE: `SelectedTags` is the attribute name documented in the issue;
+    // it is absent from both verification corpora, so this is spec-grounded but
+    // unverified against real data — an absent attribute is a pure no-op, and a
+    // future schema correction is a one-line change here.
+    let selected_tags_by_path: HashMap<String, Vec<String>> = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("Component"))
+        .filter_map(|n| {
+            let name = n.attribute("Name")?;
+            let tags = n
+                .children()
+                .find(|c| c.has_tag_name("Props"))?
+                .attribute("SelectedTags")?
+                .split_whitespace()
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            (!tags.is_empty()).then(|| (name.to_string(), tags))
         })
         .collect();
 
@@ -389,6 +454,11 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                 let call_rate_hz = props
                     .and_then(|p| p.attribute("SelectedTrigger"))
                     .and_then(event_rate_hz);
+                // Default log rate (#171): `<Props DefaultLogRate="5MS">` — a
+                // logging *period*, surfaced as a rate in Hz for hover.
+                let log_rate_hz = props
+                    .and_then(|p| p.attribute("DefaultLogRate"))
+                    .and_then(log_rate_hz);
                 let def_line = Some(line_index.line_at(node.range().start) as u32);
                 table.push(Symbol {
                     path: name.to_string(),
@@ -408,6 +478,8 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                     dbc_range: None,
                     can: None,
                     call_rate_hz,
+                    log_rate_hz,
+                    tags: effective_tags(name, &selected_tags_by_path),
                     // A Table's shape is encoded in the .m1prj `<Axis>` children
                     // (`<X MaxSites/>`, `<Y …/>`, `<Z …/>`); surface it so hover
                     // shows the shape even before a `.m1cfg` exists. When a cfg is
@@ -503,6 +575,81 @@ mod tests {
         let parsed = parse(xml).unwrap();
         assert_eq!(parsed.table.get("Root.A").unwrap().def_line, Some(2));
         assert_eq!(parsed.table.get("Root.B").unwrap().def_line, Some(3));
+    }
+
+    // #171: a channel's `<Props DefaultLogRate="5MS">` records the default
+    // logging period; we expose it as a rate in Hz (5 ms period => 200 Hz) for
+    // the hover badge. Channels with no DefaultLogRate carry `None`.
+    #[test]
+    fn channel_records_default_log_rate_as_hz() {
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.Channel" Name="Root.A"><Props Type="u32" DefaultLogRate="5MS"/></Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.B"><Props Type="u32" DefaultLogRate="10MS"/></Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.C"><Props Type="u32"/></Component>
+</Project>"#;
+        let parsed = parse(xml).unwrap();
+        assert_eq!(parsed.table.get("Root.A").unwrap().log_rate_hz, Some(200.0));
+        assert_eq!(parsed.table.get("Root.B").unwrap().log_rate_hz, Some(100.0));
+        assert_eq!(parsed.table.get("Root.C").unwrap().log_rate_hz, None);
+    }
+
+    // #170: a channel records its `<Props SelectedTags="…">` (space-separated),
+    // and inherits the tags of every ancestor group (the manual: "tags assigned
+    // to a group node are inherited by the children of the group"). The union is
+    // queryable by tag via the tag index.
+    #[test]
+    fn channel_records_and_inherits_selected_tags() {
+        use std::collections::HashSet;
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root.Demo"><Props SelectedTags="Engine"/></Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.Demo.Widget Count"><Props Type="u32" SelectedTags="Normal Vehicle"/></Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.Demo.Mode"><Props Type="u32"/></Component>
+</Project>"#;
+        let parsed = parse(xml).unwrap();
+        // Own tags come first, in declared order; the inherited group tag follows.
+        assert_eq!(
+            parsed.table.get("Root.Demo.Widget Count").unwrap().tags,
+            vec!["Normal", "Vehicle", "Engine"]
+        );
+        // No own tags -> inherits the group's tag set.
+        assert_eq!(
+            parsed.table.get("Root.Demo.Mode").unwrap().tags,
+            vec!["Engine"]
+        );
+        // Tag index returns the group itself and both descendants for `Engine`.
+        let engine: HashSet<&str> = parsed
+            .table
+            .symbols_with_tag("Engine")
+            .iter()
+            .map(|s| s.path.as_str())
+            .collect();
+        assert!(engine.contains("Root.Demo"));
+        assert!(engine.contains("Root.Demo.Widget Count"));
+        assert!(engine.contains("Root.Demo.Mode"));
+        // A tag only on the channel is not attributed to the parent group.
+        let vehicle: Vec<&str> = parsed
+            .table
+            .symbols_with_tag("Vehicle")
+            .iter()
+            .map(|s| s.path.as_str())
+            .collect();
+        assert_eq!(vehicle, vec!["Root.Demo.Widget Count"]);
+    }
+
+    #[test]
+    fn log_rate_hz_parses_period_units() {
+        assert_eq!(log_rate_hz("5MS"), Some(200.0));
+        assert_eq!(log_rate_hz("10MS"), Some(100.0));
+        assert_eq!(log_rate_hz("1S"), Some(1.0));
+        assert_eq!(log_rate_hz("200US"), Some(5000.0));
+        assert_eq!(log_rate_hz("50HZ"), Some(50.0));
+        // Unrecognised unit, zero, or junk -> None (no guessed rate).
+        assert_eq!(log_rate_hz("5PS"), None);
+        assert_eq!(log_rate_hz("0MS"), None);
+        assert_eq!(log_rate_hz(""), None);
     }
 
     #[test]

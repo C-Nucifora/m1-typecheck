@@ -98,6 +98,8 @@ pub fn augment(table: &mut SymbolTable, xml: &str, rel_filename: &str) -> Result
             dbc_range,
             can,
             call_rate_hz: None,
+            log_rate_hz: None,
+            tags: Vec::new(),
             table_meta: None,
         });
     }
