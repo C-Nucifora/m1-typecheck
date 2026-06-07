@@ -108,9 +108,13 @@ pub struct TypeDiagnostic {
     pub inner: Diagnostic,
 }
 
-/// Build a `TypeDiagnostic` spanning `node`. The inner `Code` field is unused by
-/// type rules (they carry identity in `TypeDiagnostic::code`); it is set to
-/// `Code::SyntaxError` as a placeholder.
+/// Build a `TypeDiagnostic` spanning `node`. A type diagnostic's specific
+/// identity is carried by [`TypeDiagnostic::code`] (the `T0xx` `TypeCode`); the
+/// inner [`m1_core::Code`] is only the broad *category*, so it is set to
+/// `Code::TypeError` — the category m1-core defines for type-checker findings.
+/// (It was previously the `Code::SyntaxError` placeholder, which mislabelled
+/// every type finding as a syntax error; no consumer reads `inner.code`, so this
+/// corrects the category without changing behaviour.)
 pub fn make(code: TypeCode, node: &Node, severity: Severity, message: String) -> TypeDiagnostic {
     TypeDiagnostic {
         code,
@@ -118,7 +122,7 @@ pub fn make(code: TypeCode, node: &Node, severity: Severity, message: String) ->
             range: node.range(),
             byte_range: node.byte_range(),
             severity,
-            code: Code::SyntaxError,
+            code: Code::TypeError,
             message,
         },
     }
@@ -136,7 +140,7 @@ pub fn make_project(code: TypeCode, severity: Severity, message: String) -> Type
             },
             byte_range: 0..0,
             severity,
-            code: Code::SyntaxError,
+            code: Code::TypeError,
             message,
         },
     }
