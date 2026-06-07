@@ -197,12 +197,12 @@ fn type_from_owner_class(path: &str, classname_by_path: &HashMap<String, String>
 /// over the whole parse — replacing roxmltree's `text_pos_at`, which rescans from
 /// byte 0 on every call and is documented "very expensive, use only for errors"
 /// (its per-component use made parsing O(N^2), #95).
-struct LineIndex {
+pub(crate) struct LineIndex {
     starts: Vec<usize>,
 }
 
 impl LineIndex {
-    fn new(xml: &str) -> Self {
+    pub(crate) fn new(xml: &str) -> Self {
         let mut starts = vec![0usize];
         starts.extend(
             xml.bytes()
@@ -214,7 +214,7 @@ impl LineIndex {
     }
 
     /// 0-based source line containing byte offset `pos`.
-    fn line_at(&self, pos: usize) -> usize {
+    pub(crate) fn line_at(&self, pos: usize) -> usize {
         // partition_point yields the count of line-starts <= pos; subtract one for
         // the 0-based line number (there is always the offset-0 entry, so it's >=1).
         self.starts.partition_point(|&s| s <= pos) - 1
