@@ -1,5 +1,5 @@
 //! Parse Project.m1prj into a SymbolTable, enum types, and a file->group map.
-use super::{EnumId, EnumType, Symbol, SymbolKind, SymbolTable};
+use super::{EnumId, EnumType, Symbol, SymbolKind, SymbolTable, TableAxis, TableMeta};
 use crate::types::{ValueType, primitive_type};
 use std::collections::{HashMap, HashSet};
 
@@ -72,6 +72,30 @@ fn parent_group(path: &str) -> Option<String> {
 /// triggers that aren't statically resolvable, and any leaf not of the form
 /// `On <N>Hz`. The rate lives entirely in the kernel leaf, so the relative path
 /// prefix need not be resolved to read it.
+/// A `BuiltIn.Table`'s shape from its `.m1prj` `<Axis>` element: each of the
+/// `<X>` / `<Y>` / `<Z>` children contributes one axis whose breakpoint count is
+/// its `MaxSites`. Returns `None` when there is no `<Axis>` or no sized axis.
+/// The `.m1cfg` `augment()` pass overrides this with richer per-axis units when a
+/// calibration export is present (#165).
+fn table_meta_from_axis(node: roxmltree::Node) -> Option<TableMeta> {
+    let axis = node.children().find(|c| c.has_tag_name("Axis"))?;
+    let axes: Vec<TableAxis> = ["X", "Y", "Z"]
+        .iter()
+        .filter_map(|dim| {
+            axis.children()
+                .find(|c| c.has_tag_name(*dim))?
+                .attribute("MaxSites")?
+                .parse::<u32>()
+                .ok()
+                .map(|size| TableAxis { size, unit: None })
+        })
+        .collect();
+    (!axes.is_empty()).then_some(TableMeta {
+        axes,
+        output_unit: None,
+    })
+}
+
 fn event_rate_hz(trigger: &str) -> Option<f64> {
     if trigger.contains("$(") {
         return None;
@@ -338,7 +362,15 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                     dbc_range: None,
                     can: None,
                     call_rate_hz,
-                    table_meta: None,
+                    // A Table's shape is encoded in the .m1prj `<Axis>` children
+                    // (`<X MaxSites/>`, `<Y …/>`, `<Z …/>`); surface it so hover
+                    // shows the shape even before a `.m1cfg` exists. When a cfg is
+                    // present, its richer per-axis units override this in augment().
+                    table_meta: if kind == SymbolKind::Table {
+                        table_meta_from_axis(node)
+                    } else {
+                        None
+                    },
                 });
             }
             _ => {}
