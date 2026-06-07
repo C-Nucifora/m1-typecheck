@@ -17,6 +17,8 @@
     <Component Classname="BuiltIn.Channel" Name="Root.Foo.Speed"><Props Security="Tune"/></Component>
     <Component Classname="BuiltIn.Parameter" Name="Root.Foo.Gain.Value"><Props/></Component>
     <Component Classname="BuiltIn.Constant" Name="Root.Foo.Limit"><Props Value="100"/></Component>
+    <Component Classname="BuiltIn.GroupCompound" Name="Root.Foo.Mode"/>
+    <Component Classname="BuiltIn.Channel" Name="Root.Foo.Mode.Value"><Props Security="Tune"/></Component>
     <Component Classname="BuiltIn.FuncUser" Filename="Foo Update.m1scr" Name="Root.Foo.Update"/>
     <Component Classname="BuiltIn.MethodUser" Name="Root.Foo.Startup"/>
    </List>
