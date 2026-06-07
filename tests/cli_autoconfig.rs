@@ -51,7 +51,16 @@ fn setup(dir: &Path, with_cfg: bool) -> PathBuf {
 }
 
 fn run(script: &Path) -> String {
-    let out = Command::new(bin()).arg(script).output().unwrap();
+    // Hermetic: these tests assert auto-discovery from the script's own path, so
+    // they must not inherit the caller's M1_PROJECT / M1_CONFIG. When the suite
+    // runs with M1_PROJECT pointed at a real corpus (e.g. EV/AV), a leaked var
+    // would override discovery and the cfg-typed-parameter assertions would fail.
+    let out = Command::new(bin())
+        .arg(script)
+        .env_remove("M1_PROJECT")
+        .env_remove("M1_CONFIG")
+        .output()
+        .unwrap();
     let mut s = String::from_utf8(out.stdout).unwrap();
     s.push_str(&String::from_utf8(out.stderr).unwrap());
     s
