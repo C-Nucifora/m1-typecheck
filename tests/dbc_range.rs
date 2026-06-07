@@ -95,6 +95,36 @@ fn accepts_in_range_hex_literal() {
 }
 
 #[test]
+fn flags_out_of_range_literal_compared_against_signal() {
+    // #113: read-only signals are compared, never assigned. A guard literal past
+    // the signal's physical range is the common real-world bug T042 missed.
+    let p = project_with_signal();
+    assert_eq!(
+        t042_count(&p, "if (Bus.Msg.Sig > 300)\n{\nx = 1;\n}\n"),
+        1,
+        "comparison `Sig > 300` (max 255) should be flagged"
+    );
+    // Literal-on-the-left form, too.
+    assert_eq!(
+        t042_count(&p, "if (300 < Bus.Msg.Sig)\n{\nx = 1;\n}\n"),
+        1,
+        "`300 < Sig` should be flagged"
+    );
+}
+
+#[test]
+fn accepts_in_range_literal_comparison() {
+    assert_eq!(
+        t042_count(
+            &project_with_signal(),
+            "if (Bus.Msg.Sig > 200)\n{\nx = 1;\n}\n"
+        ),
+        0,
+        "an in-range threshold is a legitimate guard"
+    );
+}
+
+#[test]
 fn ignores_computed_rhs() {
     // Not a literal — value is unknown at check time, so no range check.
     assert_eq!(
