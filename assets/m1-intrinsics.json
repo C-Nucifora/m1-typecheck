@@ -2844,6 +2844,60 @@
       "doc": "Interpolated table lookup (y, z optional depending on axis count).",
       "stateful": false,
       "deprecated": false
+    },
+    {
+      "name": "GetScaled",
+      "returns": "FloatingPoint",
+      "params": [],
+      "doc": "Scaled physical value of a received CAN signal (scale/offset applied).",
+      "stateful": false,
+      "deprecated": false
+    },
+    {
+      "name": "Receive",
+      "returns": "Boolean",
+      "params": [],
+      "doc": "True if a new message has been received for this object since the last call.",
+      "stateful": false,
+      "deprecated": false
+    },
+    {
+      "name": "Start",
+      "returns": "Void",
+      "params": [
+        {
+          "name": "period",
+          "type": "FloatingPoint",
+          "doc": "Countdown duration (time)."
+        }
+      ],
+      "doc": "Start (or restart) the timer counting down from period.",
+      "stateful": false,
+      "deprecated": false
+    },
+    {
+      "name": "Stop",
+      "returns": "Void",
+      "params": [],
+      "doc": "Stop the timer.",
+      "stateful": false,
+      "deprecated": false
+    },
+    {
+      "name": "Reset",
+      "returns": "Void",
+      "params": [],
+      "doc": "Reset the timer to its initial state.",
+      "stateful": false,
+      "deprecated": false
+    },
+    {
+      "name": "Remaining",
+      "returns": "FloatingPoint",
+      "params": [],
+      "doc": "Time remaining on the timer (zero once elapsed).",
+      "stateful": false,
+      "deprecated": false
     }
   ],
   "integratedOnly": [

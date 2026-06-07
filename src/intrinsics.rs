@@ -191,6 +191,33 @@ mod tests {
     }
 
     #[test]
+    fn firmware_object_methods_present() {
+        // CAN-signal and timer group-object accessors (#105): real firmware
+        // methods (heavily used in real projects) that were previously
+        // unmodelled, so hover fell through to "type not modelled".
+        let i = get();
+        let scaled = i.object_method("GetScaled");
+        assert!(!scaled.is_empty(), "GetScaled modelled");
+        assert_eq!(scaled[0].returns, "FloatingPoint");
+        assert!(scaled[0].params.is_empty());
+
+        let recv = i.object_method("Receive");
+        assert!(!recv.is_empty(), "Receive modelled");
+        assert_eq!(recv[0].returns, "Boolean");
+
+        let remaining = i.object_method("Remaining");
+        assert!(!remaining.is_empty(), "Remaining modelled");
+        assert_eq!(remaining[0].returns, "FloatingPoint");
+
+        // Timer control methods return Void (statement-position).
+        for m in ["Start", "Stop", "Reset"] {
+            let ov = i.object_method(m);
+            assert!(!ov.is_empty(), "{m} modelled");
+            assert_eq!(ov[0].returns, "Void", "{m} returns Void");
+        }
+    }
+
+    #[test]
     fn calibration_only_functions_are_present_and_flagged() {
         let i = get();
         // Calibration Maths / UI functions exist and are flagged calibration-only.
