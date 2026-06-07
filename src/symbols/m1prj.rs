@@ -243,6 +243,35 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
         })
         .collect();
 
+    // Pre-pass: register firmware-supplied enums (`MoTeC Types.<N>` /
+    // `::Hardware.<N>`) declared on any channel's `<Props Type>`. Their member
+    // lists live in the firmware, not the project, so they are modelled "open"
+    // — channels typed by them resolve to `Enum(id)` (enabling T021 and enum
+    // hover) while T020 enum-non-member is suppressed (a name we don't have
+    // can't be proven a non-member). Done up front so the component pass below
+    // can resolve these names regardless of document order.
+    for node in doc.descendants() {
+        if !node.has_tag_name("Component") {
+            continue;
+        }
+        let Some(name) = node
+            .children()
+            .find(|c| c.has_tag_name("Props"))
+            .and_then(|p| p.attribute("Type"))
+            .and_then(firmware_enum_name)
+        else {
+            continue;
+        };
+        if table.enum_by_name(name).is_none() {
+            table.add_enum(EnumType {
+                name: name.to_string(),
+                members: Vec::new(),
+                default: None,
+                open: true,
+            });
+        }
+    }
+
     for node in doc.descendants() {
         match node.tag_name().name() {
             "File" if node.parent().map(|p| p.tag_name().name()) == Some("SelectedModuleSets") => {
@@ -269,6 +298,7 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                     name,
                     members,
                     default,
+                    open: false, // project-local enum: member list is authoritative
                 });
             }
             "Component" => {
@@ -408,7 +438,23 @@ fn resolve_props_type(type_attr: &str, table: &SymbolTable) -> (ValueType, Optio
     {
         return (ValueType::Enum(id), Some(id));
     }
+    // Firmware-supplied enum (`MoTeC Types.<N>` / `::Hardware.<N>`): registered
+    // open in the pre-pass, so the lookup resolves to its `Enum(id)`.
+    if let Some(name) = firmware_enum_name(type_attr)
+        && let Some(id) = table.enum_by_name(name)
+    {
+        return (ValueType::Enum(id), Some(id));
+    }
     (ValueType::Unknown, None)
+}
+
+/// The firmware enum name a `<Props Type>` string names, if it is one: a
+/// `MoTeC Types.<N>` or `::Hardware.<N>` reference resolves to firmware enum
+/// `<N>`. Returns `None` for primitives, `::This.` refs and `$(…)` templates.
+fn firmware_enum_name(type_attr: &str) -> Option<&str> {
+    type_attr
+        .strip_prefix("MoTeC Types.")
+        .or_else(|| type_attr.strip_prefix("::Hardware."))
 }
 
 fn constant_value_type(value: &str) -> ValueType {
@@ -505,19 +551,16 @@ mod tests {
 
     #[test]
     fn unresolvable_props_type_stays_unknown() {
-        // Cross-module enum (not defined in this file) and derived types are
-        // left Unknown rather than guessed.
+        // A derived-type template (`$(…)`) and a typeless channel are left
+        // Unknown rather than guessed. (Firmware enums — `MoTeC Types.*` /
+        // `::Hardware.*` — are handled separately, see
+        // `firmware_enum_props_type_resolves_to_open_enum`.)
         let xml = r#"<?xml version="1.0"?>
 <Project>
-  <Component Classname="BuiltIn.Channel" Name="Root.M"><Props Type="MoTeC Types.Mode Enumeration"/></Component>
   <Component Classname="BuiltIn.Channel" Name="Root.N"><Props Type="$(Parent.Value:Type)"/></Component>
   <Component Classname="BuiltIn.Channel" Name="Root.O"/>
 </Project>"#;
         let parsed = parse(xml).unwrap();
-        assert_eq!(
-            parsed.table.get("Root.M").unwrap().value_type,
-            ValueType::Unknown
-        );
         assert_eq!(
             parsed.table.get("Root.N").unwrap().value_type,
             ValueType::Unknown
@@ -526,6 +569,33 @@ mod tests {
             parsed.table.get("Root.O").unwrap().value_type,
             ValueType::Unknown
         );
+    }
+
+    #[test]
+    fn firmware_enum_props_type_resolves_to_open_enum() {
+        // A channel typed with a firmware-supplied enum — `MoTeC Types.<N>` or
+        // `::Hardware.<N>` — resolves to an Enum value type (so T021 and enum
+        // hover work) rather than Unknown. The enum is registered "open": its
+        // member list is firmware-supplied and not present in the project, so
+        // membership-based checks (T020) must not fire on it.
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.Channel" Name="Root.M"><Props Type="MoTeC Types.Mode Enumeration"/></Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.H"><Props Type="::Hardware.relay.state"/></Component>
+</Project>"#;
+        let parsed = parse(xml).unwrap();
+
+        let m = parsed.table.get("Root.M").unwrap();
+        let mid = m.enum_assoc.expect("firmware enum associated");
+        assert_eq!(m.value_type, ValueType::Enum(mid));
+        assert_eq!(parsed.table.enum_type(mid).name, "Mode Enumeration");
+        assert!(parsed.table.enum_is_open(mid), "firmware enum is open");
+
+        let h = parsed.table.get("Root.H").unwrap();
+        let hid = h.enum_assoc.expect("firmware enum associated");
+        assert_eq!(h.value_type, ValueType::Enum(hid));
+        assert_eq!(parsed.table.enum_type(hid).name, "relay.state");
+        assert!(parsed.table.enum_is_open(hid));
     }
 
     #[test]
