@@ -39,7 +39,7 @@
 
 use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
 use crate::resolve::{Resolution, Scope, resolve};
-use crate::typer::path_text;
+use crate::typer::{is_expr, path_text};
 use crate::types::ValueType;
 use m1_core::{Annotations, Kind, Node, Severity};
 use std::collections::{HashMap, HashSet};
@@ -481,22 +481,6 @@ fn is_boolean_operator(op: &str) -> bool {
     matches!(
         op,
         "<" | "<=" | ">" | ">=" | "==" | "!=" | "eq" | "neq" | "and" | "or"
-    )
-}
-
-fn is_expr(k: Kind) -> bool {
-    matches!(
-        k,
-        Kind::Identifier
-            | Kind::MemberExpression
-            | Kind::CallExpression
-            | Kind::UnaryExpression
-            | Kind::BinaryExpression
-            | Kind::TernaryExpression
-            | Kind::ParenthesizedExpression
-            | Kind::Number
-            | Kind::Boolean
-            | Kind::String
     )
 }
 

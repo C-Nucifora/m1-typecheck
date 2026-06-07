@@ -179,6 +179,17 @@ impl Project {
             if !cst.syntax_diagnostics().is_empty() {
                 continue;
             }
+            // Parity with `rules::run_with`'s depth guard (#94): the inference
+            // passes below (`collect_locals`, `out_return_type`/`collect_out_types`,
+            // and the `type_of` they call) recurse over the CST, so a
+            // pathologically deep — yet syntactically valid — body would overflow
+            // the stack here. `max_depth()` is computed iteratively, so probe it
+            // and skip return-type inference for an over-deep file rather than
+            // crash. (`collect_out_types` is additionally iterative as a belt-and-
+            // braces measure.)
+            if cst.root().max_depth() > m1_core::MAX_RECURSION_DEPTH {
+                continue;
+            }
             let group = self.group_for_script(file_name);
             let scope = Scope {
                 locals: crate::rules::collect_locals(cst.root(), Some(self), group.as_deref()),
@@ -222,16 +233,23 @@ fn out_return_type(root: Node, scope: &Scope) -> Option<ValueType> {
 }
 
 /// Push the type of each `Out = <expr>` right-hand side in `node` onto `out`.
+///
+/// Walks the subtree with the **iterative** `descendants()` traversal (which
+/// includes `node` itself) rather than recursing per child: a pathologically
+/// deep function body — e.g. tens of thousands of nested parens in an `Out =`
+/// expression — would otherwise overflow the stack here, since this runs during
+/// `infer_return_types` *before* `run_with`'s `max_depth` guard ever sees the
+/// file. The iterative walk has no such depth limit (#94, parity with the main
+/// `rules::walk` protection).
 fn collect_out_types(node: Node, scope: &Scope, out: &mut Vec<ValueType>) {
-    if node.kind() == Kind::AssignmentStatement
-        && let Some(target) = node.child_by_field(Field::Target)
-        && path_text(target) == "Out"
-        && let Some(value) = node.child_by_field(Field::Value)
-    {
-        out.push(type_of(value, scope));
-    }
-    for c in node.children() {
-        collect_out_types(c, scope, out);
+    for n in node.descendants() {
+        if n.kind() == Kind::AssignmentStatement
+            && let Some(target) = n.child_by_field(Field::Target)
+            && path_text(target) == "Out"
+            && let Some(value) = n.child_by_field(Field::Value)
+        {
+            out.push(type_of(value, scope));
+        }
     }
 }
 
@@ -321,6 +339,34 @@ mod tests {
             project.symbols().get("Root.Mixed").unwrap().return_type,
             None
         );
+    }
+
+    // #94: a pathologically deep function body must not stack-overflow during
+    // return-type inference. `collect_out_types` runs in `infer_return_types`,
+    // which is reached *before* `run_with`'s `max_depth` guard, so it carries its
+    // own protection (an iterative `descendants()` walk). The nesting here is
+    // structural (thousands of nested `if` blocks) so the deep walk is exercised
+    // while the `Out = 1.5` value itself stays shallow.
+    #[test]
+    fn deeply_nested_body_does_not_overflow_collecting_out_types() {
+        const DEPTH: usize = 20_000;
+        let mut body = String::new();
+        for _ in 0..DEPTH {
+            body.push_str("if (1)\n{\n");
+        }
+        body.push_str("Out = 1.5;\n");
+        for _ in 0..DEPTH {
+            body.push_str("}\n");
+        }
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>
+  <Component Classname="BuiltIn.FuncUser" Name="Root.Deep"/>
+</Project>"#;
+        let mut project = Project::from_xml(xml).unwrap();
+        // Must return (not SIGABRT). If m1-core rejects the depth as a syntax
+        // error, inference simply skips the file; either way it does not crash.
+        project.infer_return_types(&[("Deep.m1scr".to_string(), body)]);
     }
 
     #[test]

@@ -7,7 +7,7 @@
 use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
 use crate::resolve::{Resolution, Scope, resolve};
 use crate::symbols::SymbolKind;
-use crate::typer::path_text;
+use crate::typer::{is_expr, path_text};
 use m1_core::{Kind, Node};
 use std::collections::HashMap;
 
@@ -167,20 +167,4 @@ fn nth_assignment<'a>(root: Node<'a>, scope: &Scope, path: &str, n: u32) -> Opti
     }
     let mut count = 0;
     walk(root, scope, path, n, &mut count)
-}
-
-fn is_expr(k: Kind) -> bool {
-    matches!(
-        k,
-        Kind::Identifier
-            | Kind::MemberExpression
-            | Kind::CallExpression
-            | Kind::UnaryExpression
-            | Kind::BinaryExpression
-            | Kind::TernaryExpression
-            | Kind::ParenthesizedExpression
-            | Kind::Number
-            | Kind::Boolean
-            | Kind::String
-    )
 }

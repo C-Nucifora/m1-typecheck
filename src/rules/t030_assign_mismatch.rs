@@ -1,7 +1,7 @@
 use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
 use crate::resolve::{Resolution, Scope, resolve};
 use crate::symbols::SymbolKind;
-use crate::typer::{path_text, type_of};
+use crate::typer::{is_expr, path_text, type_of};
 use crate::types::ValueType;
 use m1_core::{Kind, Node, Severity};
 
@@ -63,20 +63,4 @@ fn compatible(target: ValueType, value: ValueType) -> bool {
         (Enum(a), Enum(b)) => a == b,
         _ => false, // e.g. Float -> Integer channel, Enum vs numeric, Boolean vs numeric
     }
-}
-
-fn is_expr(k: Kind) -> bool {
-    matches!(
-        k,
-        Kind::Identifier
-            | Kind::MemberExpression
-            | Kind::CallExpression
-            | Kind::UnaryExpression
-            | Kind::BinaryExpression
-            | Kind::TernaryExpression
-            | Kind::ParenthesizedExpression
-            | Kind::Number
-            | Kind::Boolean
-            | Kind::String
-    )
 }
