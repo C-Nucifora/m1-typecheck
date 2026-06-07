@@ -165,8 +165,8 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "m1-core"
-version = "0.6.0"
-source = "git+https://github.com/C-Nucifora/m1-core.git?tag=v0.6.0#1a11f62e74cb22fbaad6b07a3aa5f7cd0e12d496"
+version = "0.7.0"
+source = "git+https://github.com/C-Nucifora/m1-core.git?tag=v0.7.0#e25623d28bf70f26170995b97dac83d71ecd5cea"
 dependencies = [
  "tree-sitter",
  "tree-sitter-m1",
@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "m1-typecheck"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "clap",
  "m1-core",
@@ -187,8 +187,8 @@ dependencies = [
 
 [[package]]
 name = "m1-workspace"
-version = "0.4.1"
-source = "git+https://github.com/nedlane/m1-workspace.git?tag=v0.4.1#1bcfbf6bf56804097130d92ce8cf92e2bc3dbf3a"
+version = "0.5.0"
+source = "git+https://github.com/nedlane/m1-workspace.git?tag=v0.5.0#8cfcd9eece5518d66bac489bf90e16998108ff45"
 dependencies = [
  "serde",
  "toml 0.8.23",

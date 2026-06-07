@@ -1,6 +1,6 @@
 use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
 use crate::resolve::Scope;
-use crate::typer::type_of;
+use crate::typer::{is_expr, type_of};
 use crate::types::ValueType;
 use m1_core::{Kind, Node, Severity};
 
@@ -35,20 +35,4 @@ impl super::Rule for Rule {
             ));
         }
     }
-}
-
-fn is_expr(k: Kind) -> bool {
-    matches!(
-        k,
-        Kind::Identifier
-            | Kind::MemberExpression
-            | Kind::CallExpression
-            | Kind::UnaryExpression
-            | Kind::BinaryExpression
-            | Kind::TernaryExpression
-            | Kind::ParenthesizedExpression
-            | Kind::Number
-            | Kind::Boolean
-            | Kind::String
-    )
 }

@@ -8,6 +8,42 @@ use crate::types::ValueType;
 pub use enums::{EnumId, EnumType};
 use std::collections::HashMap;
 
+/// A failure to parse one of the MoTeC XML files (`.m1prj` / `.m1cfg` / `.m1dbc`).
+///
+/// The three loaders previously each had their own single-variant error enum
+/// (`ParseError`, `ConfigError`, `DbcError`) wrapping a `roxmltree::Error`; this
+/// is the one shared type they now return. `context` is the human-readable file
+/// kind for the message (e.g. `".m1prj"`), so each loader's `Display` text is
+/// preserved verbatim. `Project`'s `LoadError::Parse(String)` conversion still
+/// works unchanged because it goes through this type's `Display`.
+#[derive(Debug)]
+pub struct XmlParseError {
+    /// The file kind, for the error message (e.g. `".m1prj"`, `".m1cfg"`, `".m1dbc"`).
+    pub context: &'static str,
+    /// The underlying roxmltree parse error.
+    pub source: roxmltree::Error,
+}
+
+impl XmlParseError {
+    /// Build a closure that tags a `roxmltree::Error` with `context` — for use as
+    /// `roxmltree::Document::parse(xml).map_err(XmlParseError::in_context(".m1prj"))`.
+    pub fn in_context(context: &'static str) -> impl Fn(roxmltree::Error) -> XmlParseError {
+        move |source| XmlParseError { context, source }
+    }
+}
+
+impl std::fmt::Display for XmlParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid {} XML: {}", self.context, self.source)
+    }
+}
+
+impl std::error::Error for XmlParseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolKind {
     Channel,

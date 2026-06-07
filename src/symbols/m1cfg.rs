@@ -1,19 +1,6 @@
 //! Parse parameters.m1cfg and augment matching symbols with value type + unit.
-use super::{SymbolTable, TableAxis, TableMeta};
+use super::{SymbolTable, TableAxis, TableMeta, XmlParseError};
 use crate::types::ValueType;
-
-#[derive(Debug)]
-pub enum ConfigError {
-    Xml(roxmltree::Error),
-}
-impl std::fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ConfigError::Xml(e) => write!(f, "invalid .m1cfg XML: {e}"),
-        }
-    }
-}
-impl std::error::Error for ConfigError {}
 
 /// Map a `.m1cfg` cell primitive type to a [`ValueType`]. `enum` cells are
 /// handled separately in [`augment`] (back-resolved to a specific enum type);
@@ -22,8 +9,8 @@ pub fn cell_type(t: &str) -> ValueType {
     crate::types::primitive_type(t).unwrap_or(ValueType::Unknown)
 }
 
-pub fn augment(table: &mut SymbolTable, xml: &str) -> Result<(), ConfigError> {
-    let doc = roxmltree::Document::parse(xml).map_err(ConfigError::Xml)?;
+pub fn augment(table: &mut SymbolTable, xml: &str) -> Result<(), XmlParseError> {
+    let doc = roxmltree::Document::parse(xml).map_err(XmlParseError::in_context(".m1cfg"))?;
     for param in doc.descendants().filter(|n| n.has_tag_name("Parameter")) {
         let Some(name) = param.attribute("Name") else {
             continue;
@@ -139,8 +126,8 @@ fn parse_table(tbl: roxmltree::Node<'_, '_>) -> (TableMeta, ValueType) {
 
 /// The parameter names a `.m1cfg` declares, as written there (unprefixed, e.g.
 /// `Foo.Bar`). Used to flag project parameters that have no cfg entry (T041).
-pub fn parameter_names(xml: &str) -> Result<Vec<String>, ConfigError> {
-    let doc = roxmltree::Document::parse(xml).map_err(ConfigError::Xml)?;
+pub fn parameter_names(xml: &str) -> Result<Vec<String>, XmlParseError> {
+    let doc = roxmltree::Document::parse(xml).map_err(XmlParseError::in_context(".m1cfg"))?;
     Ok(doc
         .descendants()
         .filter(|n| n.has_tag_name("Parameter"))

@@ -7,7 +7,7 @@
 use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
 use crate::resolve::{Resolution, Scope, resolve};
 use crate::symbols::SymbolKind;
-use crate::typer::path_text;
+use crate::typer::{is_expr, path_text};
 use m1_core::{Kind, Node};
 use std::collections::HashMap;
 
@@ -40,7 +40,7 @@ pub fn single_assignment(root: Node, scope: &Scope, out: &mut Vec<TypeDiagnostic
 /// Compose the facts of a node's *statement* children in sequence.
 fn seq_children(node: Node, scope: &Scope) -> Facts {
     let mut acc = Facts::default();
-    for child in node.children() {
+    for child in node.child_nodes() {
         let f = facts_of(child, scope);
         acc = merge_seq(acc, f);
     }
@@ -60,8 +60,7 @@ fn facts_of(node: Node, scope: &Scope) -> Facts {
         Kind::IfStatement => {
             // then-block facts vs else-block facts -> per-key max (mutual exclusion).
             let blocks: Vec<_> = node
-                .children()
-                .into_iter()
+                .child_nodes()
                 .filter(|c| c.kind() == Kind::Block || c.kind() == Kind::ElseClause)
                 .collect();
             let then_f = blocks
@@ -82,13 +81,11 @@ fn facts_of(node: Node, scope: &Scope) -> Facts {
             // per-channel MAX across them (merge_alt), not the sequential sum
             // (#20). Two writes in different arms are fine; two in one arm still
             // flag T040 (seq_children sums within a single Block).
-            node.children()
-                .into_iter()
+            node.child_nodes()
                 .filter(|c| c.kind() == Kind::IsClause)
                 .map(|clause| {
                     clause
-                        .children()
-                        .into_iter()
+                        .child_nodes()
                         .find(|c| c.kind() == Kind::Block)
                         .map(|b| seq_children(b, scope))
                         .unwrap_or_default()
@@ -97,10 +94,7 @@ fn facts_of(node: Node, scope: &Scope) -> Facts {
         }
         Kind::ExpandStatement => {
             // Treated as a no-else conditional body (see spec §5.2).
-            let body = node
-                .children()
-                .into_iter()
-                .find(|c| c.kind() == Kind::Block);
+            let body = node.child_nodes().find(|c| c.kind() == Kind::Block);
             let body_f = body.map(|b| seq_children(b, scope)).unwrap_or_default();
             merge_alt(body_f, Facts::default())
         }
@@ -128,7 +122,7 @@ fn merge_alt(a: Facts, b: Facts) -> Facts {
 
 /// If `node` is `target = …` to a Channel symbol, return its canonical path.
 fn assigned_channel(node: Node, scope: &Scope) -> Option<String> {
-    if !node.children().iter().any(|c| c.kind() == Kind::Assign) {
+    if !node.child_nodes().any(|c| c.kind() == Kind::Assign) {
         return None; // skip += etc. (the "set once" rule targets plain assignment)
     }
     let target = node
@@ -158,7 +152,7 @@ fn nth_assignment<'a>(root: Node<'a>, scope: &Scope, path: &str, n: u32) -> Opti
                 return Some(node);
             }
         }
-        for c in node.children() {
+        for c in node.child_nodes() {
             if let Some(found) = walk(c, scope, path, n, count) {
                 return Some(found);
             }
@@ -167,20 +161,4 @@ fn nth_assignment<'a>(root: Node<'a>, scope: &Scope, path: &str, n: u32) -> Opti
     }
     let mut count = 0;
     walk(root, scope, path, n, &mut count)
-}
-
-fn is_expr(k: Kind) -> bool {
-    matches!(
-        k,
-        Kind::Identifier
-            | Kind::MemberExpression
-            | Kind::CallExpression
-            | Kind::UnaryExpression
-            | Kind::BinaryExpression
-            | Kind::TernaryExpression
-            | Kind::ParenthesizedExpression
-            | Kind::Number
-            | Kind::Boolean
-            | Kind::String
-    )
 }

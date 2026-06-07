@@ -14,7 +14,7 @@
 //! rule produced on the corpus.
 use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
 use crate::resolve::Scope;
-use crate::typer::type_of;
+use crate::typer::{is_expr, type_of};
 use crate::types::ValueType;
 use m1_core::{Kind, Node, Severity};
 
@@ -89,22 +89,6 @@ fn operand(node: Node) -> Option<Node> {
 fn signed_unsigned(lt: ValueType, rt: ValueType) -> bool {
     (lt == ValueType::Unsigned && rt == ValueType::Integer)
         || (lt == ValueType::Integer && rt == ValueType::Unsigned)
-}
-
-fn is_expr(k: Kind) -> bool {
-    matches!(
-        k,
-        Kind::Identifier
-            | Kind::MemberExpression
-            | Kind::CallExpression
-            | Kind::UnaryExpression
-            | Kind::BinaryExpression
-            | Kind::TernaryExpression
-            | Kind::ParenthesizedExpression
-            | Kind::Number
-            | Kind::Boolean
-            | Kind::String
-    )
 }
 
 #[cfg(test)]

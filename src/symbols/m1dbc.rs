@@ -12,21 +12,9 @@
 //!
 //! DBC/Message are objects so their built-in methods (`.Init`, `.Transmit`, …)
 //! resolve as opaque accessors rather than being flagged.
-use super::{CanMeta, Symbol, SymbolKind, SymbolTable};
+use super::{CanMeta, Symbol, SymbolKind, SymbolTable, XmlParseError};
 use crate::types::{ValueType, primitive_type};
-
-#[derive(Debug)]
-pub enum DbcError {
-    Xml(roxmltree::Error),
-}
-impl std::fmt::Display for DbcError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DbcError::Xml(e) => write!(f, "invalid .m1dbc XML: {e}"),
-        }
-    }
-}
-impl std::error::Error for DbcError {}
+use m1_workspace::LineIndex;
 
 /// Classify a `BuiltIn.CAN.*` DBC component classname. Returns `None` for
 /// classnames that are not CAN objects (organisation wrappers, etc.).
@@ -41,12 +29,16 @@ fn classify(classname: &str) -> Option<SymbolKind> {
 /// Parse `xml` and push its CAN objects into `table`. `rel_filename` is the
 /// `.m1dbc` path relative to the project root, stored on each symbol so goto
 /// can open the defining file.
-pub fn augment(table: &mut SymbolTable, xml: &str, rel_filename: &str) -> Result<(), DbcError> {
-    let doc = roxmltree::Document::parse(xml).map_err(DbcError::Xml)?;
+pub fn augment(
+    table: &mut SymbolTable,
+    xml: &str,
+    rel_filename: &str,
+) -> Result<(), XmlParseError> {
+    let doc = roxmltree::Document::parse(xml).map_err(XmlParseError::in_context(".m1dbc"))?;
     // Map a component's byte offset to its 0-based source line so Go to Definition
     // opens the `.m1dbc` at the declaration, not line 0 (#169). Built once over the
     // whole parse — roxmltree's own `text_pos_at` rescans from byte 0 each call.
-    let line_index = super::m1prj::LineIndex::new(xml);
+    let line_index = LineIndex::new(xml);
     for node in doc.descendants().filter(|n| n.has_tag_name("Component")) {
         let (Some(classname), Some(name)) = (node.attribute("Classname"), node.attribute("Name"))
         else {

@@ -1,77 +1,15 @@
-//! Parse Project.m1prj into a SymbolTable, enum types, and a file->group map.
-use super::{EnumId, EnumType, Symbol, SymbolKind, SymbolTable, TableAxis, TableMeta};
+//! The `.m1prj` parse pass: walk the project XML and build the `SymbolTable`,
+//! enum types, file→group map, and module-root set.
+
+use super::type_inference::{type_from_leaf_name, type_from_owner_class};
+use super::{Parsed, parent_group};
+use crate::symbols::{
+    EnumId, EnumType, Symbol, SymbolKind, SymbolTable, TableAxis, TableMeta, XmlParseError,
+};
 use crate::types::{ValueType, primitive_type};
+use m1_workspace::LineIndex;
 use std::collections::{HashMap, HashSet};
 
-pub struct Parsed {
-    pub table: SymbolTable,
-    pub file_to_group: HashMap<String, String>,
-    pub module_roots: HashSet<String>,
-}
-
-#[derive(Debug)]
-pub enum ParseError {
-    Xml(roxmltree::Error),
-}
-impl std::fmt::Display for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ParseError::Xml(e) => write!(f, "invalid .m1prj XML: {e}"),
-        }
-    }
-}
-impl std::error::Error for ParseError {}
-
-pub fn classify(classname: &str) -> SymbolKind {
-    use SymbolKind::*;
-    if classname.starts_with("BuiltIn.Channel") || classname == "BuiltIn.CalibrationChannel" {
-        Channel
-    } else if classname.starts_with("BuiltIn.Parameter")
-        || classname == "BuiltIn.CalibrationParameter"
-        || classname == "BuiltIn.IOResourceParameter"
-    {
-        Parameter
-    } else if classname.starts_with("BuiltIn.Constant") || classname == "BuiltIn.IOResourceConstant"
-    {
-        Constant
-    } else if classname.starts_with("BuiltIn.FuncUser")
-        || classname.starts_with("BuiltIn.CalFuncUser")
-        || classname.starts_with("BuiltIn.FuncGenerated")
-    {
-        Function
-    } else if classname == "BuiltIn.MethodUser" || classname == "BuiltIn.EventKernel" {
-        Method
-    } else if classname.starts_with("BuiltIn.Table") || classname == "BuiltIn.CalibrationTable" {
-        Table
-    } else if classname == "BuiltIn.GroupCompound" {
-        Group
-    } else if classname == "BuiltIn.Reference" {
-        Reference
-    } else if !classname.starts_with("BuiltIn.") && !classname.is_empty() {
-        // Any non-`BuiltIn.*` component is an instance of a package-defined
-        // object class (e.g. "MoTeC Input.Sensor", "MoTeC Output.Switched
-        // Output", "_IOMethod.abs"). Its members are separate components whose
-        // path is prefixed by this object's path.
-        Object
-    } else {
-        Other
-    }
-}
-
-/// Enclosing group path for a fully-qualified symbol path (drop the last segment,
-/// honouring space-containing segments — segments are split on '.').
-fn parent_group(path: &str) -> Option<String> {
-    let idx = path.rfind('.')?;
-    Some(path[..idx].to_string())
-}
-
-/// Parse a script's call rate (Hz) from its `<Props SelectedTrigger="…">`. The
-/// trigger is a (parent-relative) path to a `BuiltIn.EventKernel` whose leaf
-/// name encodes the clock, e.g. `Parent.Parent.Events.On 500Hz` → `500`. Returns
-/// `None` for `On Startup` (startup-only functions), `$(…)` parameter-reference
-/// triggers that aren't statically resolvable, and any leaf not of the form
-/// `On <N>Hz`. The rate lives entirely in the kernel leaf, so the relative path
-/// prefix need not be resolved to read it.
 /// A `BuiltIn.Table`'s shape from its `.m1prj` `<Axis>` element: each of the
 /// `<X>` / `<Y>` / `<Z>` children contributes one axis whose breakpoint count is
 /// its `MaxSites`. Returns `None` when there is no `<Axis>` or no sized axis.
@@ -117,6 +55,13 @@ fn effective_tags(path: &str, own_tags: &HashMap<String, Vec<String>>) -> Vec<St
     tags
 }
 
+/// Parse a script's call rate (Hz) from its `<Props SelectedTrigger="…">`. The
+/// trigger is a (parent-relative) path to a `BuiltIn.EventKernel` whose leaf
+/// name encodes the clock, e.g. `Parent.Parent.Events.On 500Hz` → `500`. Returns
+/// `None` for `On Startup` (startup-only functions), `$(…)` parameter-reference
+/// triggers that aren't statically resolvable, and any leaf not of the form
+/// `On <N>Hz`. The rate lives entirely in the kernel leaf, so the relative path
+/// prefix need not be resolved to read it.
 fn event_rate_hz(trigger: &str) -> Option<f64> {
     if trigger.contains("$(") {
         return None;
@@ -147,124 +92,12 @@ fn log_rate_hz(raw: &str) -> Option<f64> {
     }
 }
 
-/// Derive an untyped channel's value type from the class of the object that
-/// owns it (its parent in the component tree). Each mapping is a known output
-/// type for that package class; classes whose output is genuinely indeterminate
-/// (`MoTeC Comms.CAN Bus`, `BuiltIn.Reference`, the odd built-ins) stay
-/// `Unknown` — no worse than before.
-/// The known output [`ValueType`] for a package class, or `None` when the class
-/// doesn't determine one (a group, a CAN/comms container, an unmapped class) —
-/// in which case the ancestor walk stops and falls back to the leaf name.
-fn class_value_type(class: &str) -> Option<ValueType> {
-    match class {
-        // Physical-measurement sensors and float-producing IO methods.
-        // `MoTeC Input.*` = temperature/acceleration/pressure/…; `ratio` =
-        // dimensionless; `abs` = magnitude of a signal — all FloatingPoint.
-        c if c.starts_with("MoTeC Input.") => Some(ValueType::Float),
-        "_IOMethod.ratio" | "_IOMethod.abs" => Some(ValueType::Float),
-        // A switched output is on/off.
-        "MoTeC Output.Switched Output" => Some(ValueType::Boolean),
-        // A table's auto-created `.Value` output is always a floating-point
-        // quantity — the interpolated result is real-valued regardless of the
-        // table's tune (#25, case 1).
-        "BuiltIn.Table" | "BuiltIn.CalibrationTable" => Some(ValueType::Float),
-        _ => None,
-    }
-}
-
-/// Leaf names whose final word is an unambiguous physical quantity (always a
-/// measured `FloatingPoint`). Deliberately conservative — only words that are
-/// never an enum/integer *state* — so this heuristic can't introduce false
-/// type-mismatch diagnostics on real code (#103).
-const FLOAT_QUANTITY_WORDS: &[&str] = &[
-    "Voltage",
-    "Current",
-    "Temperature",
-    "Pressure",
-    "Frequency",
-    "Power",
-    "Torque",
-    "Force",
-    "Acceleration",
-    "Velocity",
-    "Resistance",
-    "Energy",
-    "Humidity",
-    "Inductance",
-    "Capacitance",
-];
-
-/// Infer `FloatingPoint` from a channel's leaf name when its last space-separated
-/// word is an unambiguous physical quantity; otherwise `Unknown`.
-fn type_from_leaf_name(path: &str) -> ValueType {
-    let leaf = path.rsplit('.').next().unwrap_or(path);
-    let last_word = leaf.rsplit(' ').next().unwrap_or(leaf);
-    if FLOAT_QUANTITY_WORDS
-        .iter()
-        .any(|q| q.eq_ignore_ascii_case(last_word))
-    {
-        ValueType::Float
-    } else {
-        ValueType::Unknown
-    }
-}
-
-/// Derive an untyped channel's value type from the class of the object that owns
-/// it. Walks up through any intervening *sub-channel* ancestors (`.Value`,
-/// `.Filtered`, …) to the nearest owning object class, so a sub-channel inherits
-/// its object's type rather than stopping at its immediate channel parent (#103,
-/// extending #25). The walk does NOT cross a GroupCompound (groups regroup
-/// heterogeneous children — crossing would mis-type). When the class doesn't
-/// determine a type, falls back to a conservative leaf-name quantity heuristic.
-fn type_from_owner_class(path: &str, classname_by_path: &HashMap<String, String>) -> ValueType {
-    let mut cur = parent_group(path);
-    while let Some(p) = cur {
-        match classname_by_path.get(&p).map(String::as_str) {
-            // A sub-channel link in the chain: keep walking up to the object.
-            Some(c) if c.starts_with("BuiltIn.Channel") || c == "BuiltIn.CalibrationChannel" => {
-                cur = parent_group(&p);
-            }
-            // The owning object's class decides (or stops the walk).
-            Some(c) => return class_value_type(c).unwrap_or_else(|| type_from_leaf_name(path)),
-            // No component at this ancestor path — fall back to the leaf name.
-            None => return type_from_leaf_name(path),
-        }
-    }
-    type_from_leaf_name(path)
-}
-
-/// Byte offsets of every line start in `xml` (offset 0, then each byte after a
-/// `\n`), kept sorted. `line_at` binary-searches this to map a byte offset to its
-/// 0-based source line in O(log N), so per-component line lookup is amortized O(1)
-/// over the whole parse — replacing roxmltree's `text_pos_at`, which rescans from
-/// byte 0 on every call and is documented "very expensive, use only for errors"
-/// (its per-component use made parsing O(N^2), #95).
-pub(crate) struct LineIndex {
-    starts: Vec<usize>,
-}
-
-impl LineIndex {
-    pub(crate) fn new(xml: &str) -> Self {
-        let mut starts = vec![0usize];
-        starts.extend(
-            xml.bytes()
-                .enumerate()
-                .filter(|&(_, b)| b == b'\n')
-                .map(|(i, _)| i + 1),
-        );
-        LineIndex { starts }
-    }
-
-    /// 0-based source line containing byte offset `pos`.
-    pub(crate) fn line_at(&self, pos: usize) -> usize {
-        // partition_point yields the count of line-starts <= pos; subtract one for
-        // the 0-based line number (there is always the offset-0 entry, so it's >=1).
-        self.starts.partition_point(|&s| s <= pos) - 1
-    }
-}
-
-pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
-    let doc = roxmltree::Document::parse(xml).map_err(ParseError::Xml)?;
+pub fn parse(xml: &str) -> Result<Parsed, XmlParseError> {
+    let doc = roxmltree::Document::parse(xml).map_err(XmlParseError::in_context(".m1prj"))?;
+    // Map byte offsets to 0-based source lines in O(log N) for per-component
+    // goto-definition, instead of roxmltree's `text_pos_at` (documented "very
+    // expensive, use only for errors" — its per-component use made parsing
+    // O(N^2), #95). Shared with the other XML loaders via `m1_workspace`.
     let line_index = LineIndex::new(xml);
     let mut table = SymbolTable::default();
     let mut file_to_group = HashMap::new();
@@ -372,7 +205,7 @@ pub fn parse(xml: &str) -> Result<Parsed, ParseError> {
                 else {
                     continue;
                 };
-                let kind = classify(classname);
+                let kind = SymbolKind::from_classname(classname);
                 let filename = node.attribute("Filename").map(str::to_string);
                 if matches!(kind, SymbolKind::Function | SymbolKind::Method)
                     && let Some(g) = parent_group(name)
@@ -556,18 +389,6 @@ fn constant_value_type(value: &str) -> ValueType {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn classifies_package_objects_and_keeps_builtins() {
-        assert_eq!(classify("MoTeC Input.Sensor"), SymbolKind::Object);
-        assert_eq!(classify("MoTeC Output.Switched Output"), SymbolKind::Object);
-        assert_eq!(classify("_IOMethod.abs"), SymbolKind::Object);
-        // BuiltIn.* primitives are unchanged.
-        assert_eq!(classify("BuiltIn.Channel"), SymbolKind::Channel);
-        assert_eq!(classify("BuiltIn.MethodUser"), SymbolKind::Method);
-        // An unhandled BuiltIn.* stays Other, not Object.
-        assert_eq!(classify("BuiltIn.IOCharacteristic"), SymbolKind::Other);
-    }
 
     #[test]
     fn symbols_record_their_m1prj_definition_line() {
