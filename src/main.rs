@@ -75,47 +75,9 @@ fn print_rules(format: Format) {
     }
 }
 
-fn find_project(args: &Args) -> Option<PathBuf> {
-    if let Some(p) = &args.project {
-        return Some(p.clone());
-    }
-    if let Some(p) = std::env::var_os("M1_PROJECT") {
-        return Some(PathBuf::from(p));
-    }
-    let start = args.files.first()?;
-    m1_workspace::find_project_file(start.parent()?)
-}
-
-/// Locate the `parameters.m1cfg` that augments parameter symbols with concrete
-/// value types and units. Explicit `--config` (or `$M1_CONFIG`) wins; otherwise
-/// auto-discover the first `*.m1cfg` by walking UP from the project file's parent
-/// directory through its ancestors (nearest wins), stopping at the filesystem
-/// root — mirroring `find_project`. Real projects keep `parameters.m1cfg` at the
-/// repository root while `Project.m1prj` is nested several directories deeper, so
-/// a sibling-only search would miss it.
-fn find_config(args: &Args, project_path: Option<&PathBuf>) -> Option<PathBuf> {
-    if let Some(p) = &args.config {
-        return Some(p.clone());
-    }
-    if let Some(p) = std::env::var_os("M1_CONFIG") {
-        return Some(PathBuf::from(p));
-    }
-    m1_workspace::find_config_file(project_path?.parent()?)
-}
-
-fn main() {
-    let args = Args::parse();
-
-    // `--rules` prints the catalogue and exits, before any project work.
-    if args.rules {
-        print_rules(args.format);
-        return;
-    }
-
-    let mut had_error = false;
-
-    // Reject unknown T-codes in --select/--ignore up front (a silent typo used to
-    // disable nothing) (#111).
+/// Reject unknown T-codes in `--select`/`--ignore` up front; a silent typo used
+/// to disable nothing (#111). Exits with code 2 on the first unknown code.
+fn validate_codes(args: &Args) {
     let known: std::collections::HashSet<&str> =
         TypeCode::all_codes().iter().map(|c| c.as_str()).collect();
     for code in args
@@ -129,44 +91,28 @@ fn main() {
             std::process::exit(2);
         }
     }
+}
 
-    let project_path = find_project(&args);
-    let config_path = find_config(&args, project_path.as_ref());
+/// Buffered diagnostics for `--format json`: per-file results plus project-level
+/// audits, rendered as one document at the end.
+#[derive(Default)]
+struct JsonBuf {
+    files: Vec<JsonFile>,
+    project: Vec<TypeDiagnostic>,
+}
 
-    // Cross-source T-code filter: nearest `m1-tools.toml` `[diagnostics]` overlaid
-    // by explicit --select/--ignore (the LSP applies the same `[diagnostics]`
-    // semantics). Discovered from the project's dir, else the first file's dir.
-    let filter_root = project_path
-        .as_ref()
-        .and_then(|p| p.parent())
-        .or_else(|| args.files.first().and_then(|f| f.parent()))
-        .map(Path::to_path_buf);
-    let filter = DiagFilter::resolve(
-        filter_root.as_deref(),
-        args.select.clone(),
-        args.ignore.clone(),
-    );
-
-    // Opt-in rules (e.g. T064) run only when explicitly selected. A code is
-    // "enabled" if it is opt-in AND named in the resolved `select` set.
-    let enabled_opt_in: std::collections::HashSet<String> =
-        m1_typecheck::rules::Registry::opt_in_codes()
-            .iter()
-            .map(|c| c.as_str().to_string())
-            .filter(|c| filter.select.contains(c))
-            .collect();
-
-    // In JSON mode diagnostics are buffered and rendered as one document at the
-    // end; human mode prints as it goes.
-    let json = args.format == Format::Json;
-    let mut json_files: Vec<JsonFile> = Vec::new();
-    let mut json_project: Vec<TypeDiagnostic> = Vec::new();
+/// Load the project model (when a `Project.m1prj` was located), layering in the
+/// `parameters.m1cfg` and any discovered `.m1dbc` files, then emit the degraded-run
+/// notes (project-less / no-cfg / no-dbc) so a green CI run is not mistaken for
+/// "all clean". A bad project/config exits with code 2; a malformed DBC is warned
+/// and skipped without blanking the model.
+fn load_project(project_path: Option<&PathBuf>, config_path: Option<&PathBuf>) -> Option<Project> {
     // Track whether any `.m1dbc` was discovered so a project that loads but finds
     // none can announce that T042 is skipped (mirroring the cfg/project notes).
     let mut dbc_found = false;
-    let mut project = project_path.clone().map(|path| match Project::load(&path) {
+    let project = project_path.map(|path| match Project::load(path) {
         Ok(mut p) => {
-            if let Some(cfg) = &config_path {
+            if let Some(cfg) = config_path {
                 p = p.with_config(cfg).unwrap_or_else(|e| {
                     eprintln!("m1-typecheck: config {}: {e}", cfg.display());
                     process::exit(2);
@@ -212,23 +158,21 @@ fn main() {
             eprintln!("m1-typecheck: note: no .m1dbc found; T042 (dbc-signal-range) skipped");
         }
     }
+    project
+}
 
-    // Infer user-function/method return types from the script bodies on the
-    // command line, so call sites in other scripts type-check (#110). Scripts that
-    // back no function symbol are simply ignored by the pass.
-    if let Some(p) = project.as_mut() {
-        let scripts: Vec<(String, String)> = args
-            .files
-            .iter()
-            .filter_map(|f| {
-                let name = f.file_name()?.to_str()?.to_string();
-                let src = m1_workspace::read_text(f).ok()?;
-                Some((name, src))
-            })
-            .collect();
-        p.infer_return_types(&scripts);
-    }
-
+/// Type-check every script on the command line, printing human-mode diagnostics
+/// as it goes (or buffering them for JSON). Returns `true` if any error-severity
+/// diagnostic, syntax error, or unreadable file was seen.
+fn check_files(
+    args: &Args,
+    project: Option<&Project>,
+    enabled_opt_in: &std::collections::HashSet<String>,
+    filter: &DiagFilter,
+    json: bool,
+    json_buf: &mut JsonBuf,
+) -> bool {
+    let mut had_error = false;
     for file in &args.files {
         // Read tolerantly: MoTeC `.m1scr` sources may carry Windows-1252 bytes
         // (e.g. `°` in a unit comment), which strict UTF-8 would reject (#86).
@@ -240,12 +184,7 @@ fn main() {
                 continue;
             }
         };
-        let result = check_script_with(
-            &enabled_opt_in,
-            project.as_ref(),
-            Some(file.as_path()),
-            &src,
-        );
+        let result = check_script_with(enabled_opt_in, project, Some(file.as_path()), &src);
         // Syntax errors are not T-coded and always fail the run; the filter only
         // governs the T-code diagnostics.
         for d in &result.syntax_errors {
@@ -282,33 +221,49 @@ fn main() {
             }
         }
         if json {
-            json_files.push(JsonFile {
+            json_buf.files.push(JsonFile {
                 path: file.display().to_string(),
                 syntax_errors: result.syntax_errors,
                 diagnostics: kept.into_iter().cloned().collect(),
             });
         }
     }
+    had_error
+}
+
+/// Project-level audits that run once per invocation (not per file): the
+/// calibration-coverage check (T041, always when a project + cfg loaded) and,
+/// when `--audit-names` is set, the naming-convention audit (T050). Human-mode
+/// output is printed; JSON-mode diagnostics are buffered into `json_buf.project`.
+fn audit_project(
+    args: &Args,
+    project: Option<&Project>,
+    project_path: Option<&PathBuf>,
+    filter: &DiagFilter,
+    json: bool,
+    json_buf: &mut JsonBuf,
+) {
+    let path_label = || {
+        project_path
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<project>".into())
+    };
 
     // Project-level audit: parameters declared in the .m1prj but missing from the
     // loaded .m1cfg (T041). Emitted on every run that has a project + cfg so CI
     // validates calibration coverage. Warning severity — annotates without failing
     // the build unless the caller opts into fail-on-warning.
-    if let Some(p) = &project {
-        let path_label = project_path
-            .as_ref()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "<project>".into());
+    if let Some(p) = project {
         for d in p.missing_cfg_parameters() {
             if !filter.allows(d.code.as_str()) {
                 continue;
             }
             if json {
-                json_project.push(d);
+                json_buf.project.push(d);
             } else {
                 println!(
                     "{}: warning[{}]: {}",
-                    path_label,
+                    path_label(),
                     d.code.as_str(),
                     d.inner.message
                 );
@@ -317,22 +272,18 @@ fn main() {
     }
 
     if args.audit_names {
-        match &project {
+        match project {
             Some(p) => {
-                let path_label = project_path
-                    .as_ref()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(|| "<project>".into());
                 for d in p.audit() {
                     if !filter.allows(d.code.as_str()) {
                         continue;
                     }
                     if json {
-                        json_project.push(d);
+                        json_buf.project.push(d);
                     } else {
                         println!(
                             "{}: {}[{}]: {}",
-                            path_label,
+                            path_label(),
                             severity_str(d.inner.severity),
                             d.code.as_str(),
                             d.inner.message
@@ -343,14 +294,133 @@ fn main() {
             None => eprintln!("m1-typecheck: --audit-names needs a project; skipping"),
         }
     }
+}
 
+/// Render the buffered JSON document to stdout (JSON mode only). Human-mode
+/// diagnostics are printed as they are produced, so this is a no-op there.
+fn emit_output(project_path: Option<&PathBuf>, json: bool, json_buf: &JsonBuf) {
     if json {
         let label = project_path
-            .as_ref()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| "<project>".into());
-        println!("{}", render_json(&json_files, &json_project, &label));
+        println!(
+            "{}",
+            render_json(&json_buf.files, &json_buf.project, &label)
+        );
     }
+}
+
+fn find_project(args: &Args) -> Option<PathBuf> {
+    if let Some(p) = &args.project {
+        return Some(p.clone());
+    }
+    if let Some(p) = std::env::var_os("M1_PROJECT") {
+        return Some(PathBuf::from(p));
+    }
+    let start = args.files.first()?;
+    m1_workspace::find_project_file(start.parent()?)
+}
+
+/// Locate the `parameters.m1cfg` that augments parameter symbols with concrete
+/// value types and units. Explicit `--config` (or `$M1_CONFIG`) wins; otherwise
+/// auto-discover the first `*.m1cfg` by walking UP from the project file's parent
+/// directory through its ancestors (nearest wins), stopping at the filesystem
+/// root — mirroring `find_project`. Real projects keep `parameters.m1cfg` at the
+/// repository root while `Project.m1prj` is nested several directories deeper, so
+/// a sibling-only search would miss it.
+fn find_config(args: &Args, project_path: Option<&PathBuf>) -> Option<PathBuf> {
+    if let Some(p) = &args.config {
+        return Some(p.clone());
+    }
+    if let Some(p) = std::env::var_os("M1_CONFIG") {
+        return Some(PathBuf::from(p));
+    }
+    m1_workspace::find_config_file(project_path?.parent()?)
+}
+
+fn main() {
+    let args = Args::parse();
+
+    // `--rules` prints the catalogue and exits, before any project work.
+    if args.rules {
+        print_rules(args.format);
+        return;
+    }
+
+    // Reject unknown T-codes in --select/--ignore up front (#111).
+    validate_codes(&args);
+
+    // Locate the project and its augmenting config.
+    let project_path = find_project(&args);
+    let config_path = find_config(&args, project_path.as_ref());
+
+    // Cross-source T-code filter: nearest `m1-tools.toml` `[diagnostics]` overlaid
+    // by explicit --select/--ignore (the LSP applies the same `[diagnostics]`
+    // semantics). Discovered from the project's dir, else the first file's dir.
+    let filter_root = project_path
+        .as_ref()
+        .and_then(|p| p.parent())
+        .or_else(|| args.files.first().and_then(|f| f.parent()))
+        .map(Path::to_path_buf);
+    let filter = DiagFilter::resolve(
+        filter_root.as_deref(),
+        args.select.clone(),
+        args.ignore.clone(),
+    );
+
+    // Opt-in rules (e.g. T064) run only when explicitly selected. A code is
+    // "enabled" if it is opt-in AND named in the resolved `select` set.
+    let enabled_opt_in: std::collections::HashSet<String> =
+        m1_typecheck::rules::Registry::opt_in_codes()
+            .iter()
+            .map(|c| c.as_str().to_string())
+            .filter(|c| filter.select.contains(c))
+            .collect();
+
+    // In JSON mode diagnostics are buffered and rendered as one document at the
+    // end; human mode prints as it goes.
+    let json = args.format == Format::Json;
+    let mut json_buf = JsonBuf::default();
+
+    // Load the project model (config + DBCs) and emit degraded-run notes.
+    let mut project = load_project(project_path.as_ref(), config_path.as_ref());
+
+    // Infer user-function/method return types from the script bodies on the
+    // command line, so call sites in other scripts type-check (#110). Scripts that
+    // back no function symbol are simply ignored by the pass.
+    if let Some(p) = project.as_mut() {
+        let scripts: Vec<(String, String)> = args
+            .files
+            .iter()
+            .filter_map(|f| {
+                let name = f.file_name()?.to_str()?.to_string();
+                let src = m1_workspace::read_text(f).ok()?;
+                Some((name, src))
+            })
+            .collect();
+        p.infer_return_types(&scripts);
+    }
+
+    // Per-file checks, then the once-per-run project-level audits.
+    let had_error = check_files(
+        &args,
+        project.as_ref(),
+        &enabled_opt_in,
+        &filter,
+        json,
+        &mut json_buf,
+    );
+    audit_project(
+        &args,
+        project.as_ref(),
+        project_path.as_ref(),
+        &filter,
+        json,
+        &mut json_buf,
+    );
+
+    // Emit the buffered JSON document (no-op in human mode).
+    emit_output(project_path.as_ref(), json, &json_buf);
 
     if had_error {
         process::exit(1);
