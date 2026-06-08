@@ -75,6 +75,18 @@ fn print_rules(format: Format) {
     }
 }
 
+/// Trim each `--select`/`--ignore` token and drop the empty ones, so an empty
+/// value (`--ignore ""`), a whitespace-only value, or an empty entry from a
+/// trailing/double comma (`T002,`) is treated as "no code" rather than an
+/// unknown empty code. Mirrors m1-lint's `split_codes` tolerance. A genuinely
+/// unknown non-empty code still reaches `validate_codes` and errors.
+fn normalize_codes(codes: &mut Option<Vec<String>>) {
+    if let Some(v) = codes {
+        v.iter_mut().for_each(|c| *c = c.trim().to_string());
+        v.retain(|c| !c.is_empty());
+    }
+}
+
 /// Reject unknown T-codes in `--select`/`--ignore` up front; a silent typo used
 /// to disable nothing (#111). Exits with code 2 on the first unknown code.
 fn validate_codes(args: &Args) {
@@ -339,13 +351,18 @@ fn find_config(args: &Args, project_path: Option<&PathBuf>) -> Option<PathBuf> {
 }
 
 fn main() {
-    let args = Args::parse();
+    let mut args = Args::parse();
 
     // `--rules` prints the catalogue and exits, before any project work.
     if args.rules {
         print_rules(args.format);
         return;
     }
+
+    // Drop empty/whitespace-only filter tokens (empty value, trailing comma)
+    // before validation so they are no-ops rather than "unknown empty code".
+    normalize_codes(&mut args.select);
+    normalize_codes(&mut args.ignore);
 
     // Reject unknown T-codes in --select/--ignore up front (#111).
     validate_codes(&args);

@@ -193,6 +193,88 @@ fn unknown_filter_code_is_rejected() {
     assert_eq!(ok.status.code(), Some(0), "a valid code must be accepted");
 }
 
+// A clean script (no diagnostics) so a tolerated filter run exits 0, mirroring
+// the bug repro (`printf 'Out = 1;\n'`).
+const CLEAN_SCRIPT: &str = "Out = 1;\n";
+
+fn setup_clean(name: &str) -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("clean.m1scr");
+    fs::write(&script, CLEAN_SCRIPT).unwrap();
+    script
+}
+
+#[test]
+fn empty_filter_value_is_a_noop() {
+    // An empty `--ignore ""` (and whitespace-only `--select "  "`) must be
+    // tolerated as "no codes" rather than rejected as an unknown empty code
+    // (exit 2), matching m1-lint. On a clean file this is a clean exit 0.
+    let script = setup_clean("cli_empty_ignore");
+    let o = run(&["--ignore", "", script.to_str().unwrap()]);
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "empty --ignore must be a no-op (exit 0); stderr:\n{}",
+        err_of(&o)
+    );
+
+    let ws = run(&["--select", "  ", script.to_str().unwrap()]);
+    assert_eq!(
+        ws.status.code(),
+        Some(0),
+        "whitespace-only --select must be a no-op (exit 0); stderr:\n{}",
+        err_of(&ws)
+    );
+
+    // The empty token must not poison validation of a real run with diagnostics:
+    // an empty --ignore leaves the baseline diagnostics intact.
+    let proj = setup("cli_empty_ignore_proj", Some(EMPTY_CONFIG));
+    let p = run(&["--ignore", "", proj.to_str().unwrap()]);
+    assert_ne!(
+        p.status.code(),
+        Some(2),
+        "empty --ignore must not be a validation error; stderr:\n{}",
+        err_of(&p)
+    );
+    assert!(
+        out_of(&p).contains("T041"),
+        "empty --ignore must not suppress anything:\n{}",
+        out_of(&p)
+    );
+}
+
+#[test]
+fn trailing_comma_in_filter_is_tolerated() {
+    // A trailing comma (`T041,`) splits to an empty trailing token; that empty
+    // entry must be skipped, while the real code is still applied.
+    let script = setup("cli_trailing_comma", Some(EMPTY_CONFIG));
+    let o = run(&["--ignore", "T041,", script.to_str().unwrap()]);
+    assert_ne!(
+        o.status.code(),
+        Some(2),
+        "trailing comma must be tolerated, not a validation error; stderr:\n{}",
+        err_of(&o)
+    );
+    let s = out_of(&o);
+    assert!(!s.contains("T041"), "T041 should still be ignored:\n{s}");
+    assert!(s.contains("T002"), "T002 should remain:\n{s}");
+}
+
+#[test]
+fn genuinely_unknown_filter_code_still_errors() {
+    // A real (non-empty) unknown code must STILL exit 2 — only empty tokens are
+    // tolerated.
+    let o = run(&["--ignore", "T999"]);
+    assert_eq!(
+        o.status.code(),
+        Some(2),
+        "an unknown non-empty code must still exit 2; stderr:\n{}",
+        err_of(&o)
+    );
+}
+
 #[test]
 fn version_flag_prints_version() {
     // #112: report the version like the other CLIs.
