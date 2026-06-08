@@ -48,6 +48,36 @@ fn t021_no_flag_enum_vs_member() {
 }
 
 #[test]
+fn t002_not_fired_for_enum_vs_float_literal() {
+    // `SwitchMode.Value eq 1.0` mixes an enum with a number: the genuine issue is
+    // T021 (comparing an enum to a number), NOT T002 (float-equality precision).
+    // An enum is a discrete enumerator, so there is no float-precision hazard —
+    // T002 firing here is a spurious duplicate. T021 must still fire.
+    let p = proj();
+    let got = codes(&p, "if (SwitchMode.Value eq 1.0) {\n}\n");
+    assert!(
+        !got.contains(&TypeCode::T002),
+        "T002 must not fire when an operand is an enum: {got:?}"
+    );
+    assert!(
+        got.contains(&TypeCode::T021),
+        "T021 should still flag the enum-vs-number comparison: {got:?}"
+    );
+}
+
+#[test]
+fn t002_still_fires_for_two_floats() {
+    // Guard against over-suppression: a real float == float comparison must still
+    // be flagged when no enum is involved.
+    let p = proj();
+    let got = codes(&p, "local a = 1.5;\nlocal b = 2.5;\nif (a eq b) {\n}\n");
+    assert!(
+        got.contains(&TypeCode::T002),
+        "T002 must still fire for a genuine float == float: {got:?}"
+    );
+}
+
+#[test]
 fn t021_no_flag_int_vs_int() {
     let p = proj();
     assert!(!codes(&p, "local iX = 1;\nif (iX eq 2) {\n}\n").contains(&TypeCode::T021));
