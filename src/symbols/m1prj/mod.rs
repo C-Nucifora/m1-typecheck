@@ -1,13 +1,20 @@
 //! Parse Project.m1prj into a SymbolTable, enum types, and a file->group map.
 //!
 //! Split across submodules:
-//!   * `parse` — the XML walk that builds the `SymbolTable` and maps.
+//!   * `parse` — the thin orchestrator: parse the doc, build the line index and
+//!     pre-pass indexes, register enums, then walk components.
+//!   * `index` — `ProjectXmlIndex`, the up-front pre-pass maps (classname and
+//!     declared tags by path) read by the component pass.
+//!   * `component` — enum registration and per-`<Component>` symbol construction
+//!     (value type, unit, security, rates, tags).
 //!   * `type_inference` — value-type inference for channels with no explicit
 //!     `<Props Type>`/`Qty` (owner-class + leaf-name heuristics).
 //!
 //! The public surface (`parse`, `classify`, `Parsed`) is re-exported here so
 //! `crate::symbols::m1prj::{parse, classify, Parsed}` paths are unchanged.
 
+mod component;
+mod index;
 mod parse;
 mod type_inference;
 
