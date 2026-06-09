@@ -13,6 +13,7 @@ fn ty(src_expr: &str, locals: &[(&str, ValueType)]) -> ValueType {
         locals: m,
         group: None,
         project: None,
+        fn_symbol: None,
     };
     type_of_source_expr(&format!("{src_expr};\n"), &scope)
 }

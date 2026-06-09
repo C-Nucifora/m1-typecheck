@@ -87,6 +87,10 @@ struct ComponentProps {
     class: Option<String>,
     table_meta: Option<TableMeta>,
     tags: Vec<String>,
+    /// Declared return type from `<Signature ReturnType="…">` (#110).
+    return_type: Option<ValueType>,
+    /// Declared parameters from `<Signature><Params>` (#110).
+    in_params: Option<Vec<(String, ValueType)>>,
 }
 
 /// Extract the derived fields for one component from its node, `<Props>`, the
@@ -172,6 +176,33 @@ fn component_props(
         .and_then(|p| p.attribute("Type"))
         .filter(|t| !t.is_empty())
         .map(str::to_string);
+    // Declared function signature (#110): `<Signature ReturnType="bool">` with
+    // `<Params><Param Name="Timeout" Type="f32">…`. Present on user functions
+    // and the auto-created FuncGenerated components in real projects.
+    let signature = node.children().find(|c| c.has_tag_name("Signature"));
+    let return_type = signature
+        .and_then(|sig| sig.attribute("ReturnType"))
+        .filter(|t| !t.is_empty())
+        .and_then(crate::types::primitive_type);
+    let in_params = signature.map(|sig| {
+        sig.children()
+            .find(|c| c.has_tag_name("Params"))
+            .map(|params| {
+                params
+                    .children()
+                    .filter(|c| c.has_tag_name("Param"))
+                    .filter_map(|p| {
+                        let name = p.attribute("Name")?;
+                        let ty = p
+                            .attribute("Type")
+                            .and_then(crate::types::primitive_type)
+                            .unwrap_or(ValueType::Unknown);
+                        Some((name.to_string(), ty))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    });
     ComponentProps {
         value_type,
         enum_assoc,
@@ -181,6 +212,8 @@ fn component_props(
         call_rate_hz,
         log_rate_hz,
         class,
+        return_type,
+        in_params,
         // A Table's shape is encoded in the .m1prj `<Axis>` children
         // (`<X MaxSites/>`, `<Y …/>`, `<Z …/>`); surface it so hover
         // shows the shape even before a `.m1cfg` exists. When a cfg is
@@ -244,7 +277,8 @@ pub(super) fn symbol_from_component(
         call_rate_hz: props.call_rate_hz,
         log_rate_hz: props.log_rate_hz,
         tags: props.tags,
-        return_type: None,
+        return_type: props.return_type,
+        in_params: props.in_params,
         table_meta: props.table_meta,
     })
 }

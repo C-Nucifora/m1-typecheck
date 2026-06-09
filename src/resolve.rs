@@ -7,6 +7,10 @@ pub struct Scope<'p> {
     pub locals: HashMap<String, ValueType>,
     pub group: Option<String>,
     pub project: Option<&'p Project>,
+    /// Canonical path of the Function/Method symbol the current script backs
+    /// (#110), so `In.<Param>` references resolve against its declared
+    /// signature. `None` when no project/function context exists.
+    pub fn_symbol: Option<String>,
 }
 
 #[derive(Debug)]
@@ -81,7 +85,23 @@ pub fn resolve<'p>(path: &str, scope: &Scope<'p>) -> Resolution<'p> {
     //     `Parent`, then resolve the remainder. A `Parent` that resolves is a real
     //     symbol; one that doesn't stays opaque (conservative — never a miss).
     match root_segment(path) {
-        "In" | "Out" => return Resolution::Opaque,
+        "In" => {
+            // `In.<Param>` resolves against the backing function's declared
+            // `<Signature>` parameters when the project carries one (#110), so
+            // argument reads participate in the type rules. An unknown
+            // parameter name, a missing signature, or a bare `In` stays opaque
+            // (conservative — the firmware model may be richer than ours).
+            if let (Some(project), Some(fn_path)) = (scope.project, scope.fn_symbol.as_ref())
+                && let Some(param) = path.strip_prefix("In.")
+                && let Some(sym) = project.symbols().get(fn_path)
+                && let Some(params) = &sym.in_params
+                && let Some((_, ty)) = params.iter().find(|(n, _)| n == param)
+            {
+                return Resolution::Local(*ty);
+            }
+            return Resolution::Opaque;
+        }
+        "Out" => return Resolution::Opaque,
         "Parent" => {
             if let (Some(project), Some(group)) = (scope.project, scope.group.as_ref())
                 && let Some(target) = parent_target(path, group)
@@ -314,6 +334,7 @@ mod intrinsics_tests {
             locals: HashMap::new(),
             group: None,
             project: None,
+            fn_symbol: None,
         }
     }
 

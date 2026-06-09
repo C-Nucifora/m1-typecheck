@@ -16,6 +16,7 @@ fn resolves_absolute() {
         locals: HashMap::new(),
         group: None,
         project: Some(&p),
+        fn_symbol: None,
     };
     assert!(matches!(
         resolve("Root.Foo.Speed", &scope),
@@ -30,6 +31,7 @@ fn resolves_group_relative() {
         locals: HashMap::new(),
         group: Some("Root.Foo".into()),
         project: Some(&p),
+        fn_symbol: None,
     };
     // "Speed" relative to Root.Foo -> Root.Foo.Speed
     assert!(matches!(resolve("Speed", &scope), Resolution::Symbol(_)));
@@ -44,6 +46,7 @@ fn resolves_local() {
         locals,
         group: None,
         project: Some(&p),
+        fn_symbol: None,
     };
     assert!(matches!(
         resolve("fGain", &scope),
@@ -58,6 +61,7 @@ fn opaque_root_passes_through() {
         locals: HashMap::new(),
         group: Some("Root.Foo".into()),
         project: Some(&p),
+        fn_symbol: None,
     };
     // An unknown member of a known library object is a built-in root, not a miss.
     // (`Calculate.Min`/`Max` are now real overloads, so use a name that isn't.)
@@ -74,6 +78,7 @@ fn unresolved_when_project_rooted_but_absent() {
         locals: HashMap::new(),
         group: Some("Root.Foo".into()),
         project: Some(&p),
+        fn_symbol: None,
     };
     assert!(matches!(
         resolve("Root.Foo.Missing", &scope),
@@ -88,6 +93,7 @@ fn accessor_on_resolved_channel_is_opaque() {
         locals: HashMap::new(),
         group: Some("Root.Foo".into()),
         project: Some(&p),
+        fn_symbol: None,
     };
     // `Speed` is a channel; `Speed.AsInteger` is a built-in accessor, not a miss.
     assert!(matches!(
@@ -108,6 +114,7 @@ fn unknown_root_is_opaque_not_unresolved() {
         locals: HashMap::new(),
         group: Some("Root.Foo".into()),
         project: Some(&p),
+        fn_symbol: None,
     };
     // "Bar" is neither a project group root nor opaque-listed; treat as opaque
     // (conservative: only project-rooted misses are flagged).

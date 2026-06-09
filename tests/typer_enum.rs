@@ -18,6 +18,7 @@ fn ty(p: &Project, expr: &str) -> ValueType {
         locals: HashMap::new(),
         group: Some("Root.Foo".into()),
         project: Some(p),
+        fn_symbol: None,
     };
     type_of_source_expr(&format!("{expr};\n"), &scope)
 }

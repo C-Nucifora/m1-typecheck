@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<MoTeCM1BuildSession>
+ <Project Name="Semantics" TargetHardware="ecu120">
+  <SelectedModuleSets><File Name="MoTeC Comms"/></SelectedModuleSets>
+  <DataTypes/>
+  <ComponentStream>
+   <List>
+    <Component Classname="BuiltIn.GroupCompound" Name="Root.Events"/>
+    <Component Classname="BuiltIn.EventKernel" Name="Root.Events.On 100Hz"/>
+    <Component Classname="BuiltIn.EventKernel" Name="Root.Events.On 500Hz"/>
+    <Component Classname="BuiltIn.GroupCompound" Name="Root.Ctrl"/>
+    <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.Yaw Rate"><Props Qty="rad/s"/></Component>
+    <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.Pressure"><Props Qty="Pa"/></Component>
+    <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.Other Rate"><Props Qty="rad/s"/></Component>
+    <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.Counter"><Props Type="s32"/></Component>
+    <Component Classname="BuiltIn.FuncUserParam" Filename="Ctrl.Scale.m1scr" Name="Root.Ctrl.Scale">
+     <Signature Name="" ReturnType="f32">
+      <Params>
+       <Param Name="Input" Type="f32" Attrs="0"/>
+       <Param Name="Gain" Type="s32" Attrs="0"/>
+      </Params>
+     </Signature>
+    </Component>
+    <Component Classname="BuiltIn.FuncUser" Filename="Ctrl.Alpha.m1scr" Name="Root.Ctrl.Alpha">
+     <Props SelectedTrigger="Parent.Events.On 100Hz"/>
+    </Component>
+    <Component Classname="BuiltIn.FuncUser" Filename="Ctrl.Beta.m1scr" Name="Root.Ctrl.Beta">
+     <Props SelectedTrigger="Parent.Events.On 100Hz"/>
+    </Component>
+    <Component Classname="BuiltIn.FuncUser" Filename="Ctrl.Fast.m1scr" Name="Root.Ctrl.Fast">
+     <Props SelectedTrigger="Parent.Events.On 500Hz"/>
+    </Component>
+    <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.A Out"><Props Type="f32"/></Component>
+    <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.B Out"><Props Type="f32"/></Component>
+    <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.Slow Out"><Props Type="f32"/></Component>
+   </List>
+  </ComponentStream>
+ </Project>
+</MoTeCM1BuildSession>

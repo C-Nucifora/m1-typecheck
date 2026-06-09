@@ -176,6 +176,15 @@ impl Project {
             let Some(sym_path) = self.function_symbol_for_script(file_name) else {
                 continue;
             };
+            // A `<Signature ReturnType>` declared in the .m1prj is
+            // authoritative (#110); only infer when nothing is declared.
+            if self
+                .table
+                .get(&sym_path)
+                .is_some_and(|s| s.return_type.is_some())
+            {
+                continue;
+            }
             let cst = m1_core::parse(source);
             if !cst.syntax_diagnostics().is_empty() {
                 continue;
@@ -196,6 +205,7 @@ impl Project {
                 locals: crate::rules::collect_locals(cst.root(), Some(self), group.as_deref()),
                 group: group.clone(),
                 project: Some(self),
+                fn_symbol: Some(sym_path.clone()),
             };
             if let Some(ty) = out_return_type(cst.root(), &scope) {
                 inferred.push((sym_path, ty));
@@ -209,7 +219,7 @@ impl Project {
     /// The path of the `Function`/`Method` symbol backed by `file_name`: an
     /// explicit `Filename=` match first, else the `Root.<stem>` path convention
     /// real projects use (`Engine.Update.m1scr` → `Root.Engine.Update`).
-    pub(crate) fn function_symbol_for_script(&self, file_name: &str) -> Option<String> {
+    pub fn function_symbol_for_script(&self, file_name: &str) -> Option<String> {
         let is_fn = |s: &&Symbol| matches!(s.kind, SymbolKind::Function | SymbolKind::Method);
         if let Some(s) = self
             .table
