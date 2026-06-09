@@ -57,6 +57,24 @@ pub fn numeric_join(a: ValueType, b: ValueType) -> ValueType {
     }
 }
 
+/// Map a `local <Type>` annotation name (manual p.34) to a [`ValueType`].
+/// The manual's data-type names are `Boolean`, `Integer`, `Unsigned Integer`,
+/// `Floating Point` and `String`; the real corpora also use lowercase
+/// spellings (`<boolean>`), so matching is case-insensitive and internal
+/// whitespace is normalised. Returns `None` for unrecognised names — the
+/// local then falls back to initialiser inference.
+pub fn declared_local_type(name: &str) -> Option<ValueType> {
+    let normalised = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    Some(match normalised.to_ascii_lowercase().as_str() {
+        "boolean" | "bool" => ValueType::Boolean,
+        "integer" => ValueType::Integer,
+        "unsigned integer" | "unsigned" => ValueType::Unsigned,
+        "floating point" | "float" => ValueType::Float,
+        "string" => ValueType::String,
+        _ => return None,
+    })
+}
+
 /// Map an M1 primitive storage/cell type name (`u32`, `s16`, `f32`, `bool`, …)
 /// to a [`ValueType`]. Returns `None` for non-primitive names (enums, derived
 /// `$(…)` expressions, etc.). Shared by the `.m1prj` and `.m1cfg` parsers.
