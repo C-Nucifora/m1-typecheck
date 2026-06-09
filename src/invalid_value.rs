@@ -33,9 +33,13 @@
 //!   (`Filter.*`, `Integral.*`, `Derivative.*`) is escalated to an error, because
 //!   the filter state stays poisoned after the input recovers.
 //!
-//! This pass is **intra-script** (P2/P4 of #78). Cross-script `Out`→`In`
-//! propagation (the full SBG→torque-vectoring shape, P3) is a follow-up that
-//! reuses this taint lattice over the project channel-writer index.
+//! This file is the **intra-script** half (P2/P4 of #78). The **cross-script**
+//! half (P3, the full SBG→torque-vectoring shape) lives in
+//! [`crate::cross_script`]: the walker here additionally returns a per-script
+//! write summary (canonical project-symbol target → taint + read edges), the
+//! solver iterates the writer→reader channel graph to a fixpoint, and the
+//! reporting pass seeds the solved taints back into this walker so T080/T081
+//! fire at the sink with the full provenance chain.
 
 use crate::cross_script::ChannelTaints;
 use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
