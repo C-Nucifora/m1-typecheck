@@ -37,24 +37,29 @@
 //! propagation (the full SBG→torque-vectoring shape, P3) is a follow-up that
 //! reuses this taint lattice over the project channel-writer index.
 
+use crate::cross_script::ChannelTaints;
 use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
 use crate::resolve::{Resolution, Scope, resolve};
 use crate::typer::{is_expr, path_text};
 use crate::types::ValueType;
 use m1_core::{Annotations, Kind, Node, Severity};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// The invalid-value state of an expression's result.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct Taint {
+pub(crate) struct Taint {
     /// The value can be NaN/Inf.
-    invalid: bool,
+    pub(crate) invalid: bool,
     /// An explicit finite guard (`Math.IsNaN` fallback / `@sanitizes`) cleared it.
-    sanitised: bool,
+    pub(crate) sanitised: bool,
     /// It flowed through a stateful function that latches NaN — escalate.
-    latched: bool,
+    pub(crate) latched: bool,
     /// A short provenance string for the diagnostic message.
-    why: Option<String>,
+    pub(crate) why: Option<String>,
+    /// Canonical project-symbol paths this value reads (the cross-script
+    /// dependency edges, #78 P3), each flagged true when the read flows through
+    /// a latching stateful function on its way to the result.
+    pub(crate) deps: BTreeMap<String, bool>,
 }
 
 impl Taint {
@@ -62,12 +67,13 @@ impl Taint {
         Taint::default()
     }
 
-    fn source(why: impl Into<String>) -> Self {
+    pub(crate) fn source(why: impl Into<String>) -> Self {
         Taint {
             invalid: true,
             sanitised: false,
             latched: false,
             why: Some(why.into()),
+            deps: BTreeMap::new(),
         }
     }
 
@@ -77,16 +83,23 @@ impl Taint {
             sanitised: true,
             latched: false,
             why: None,
+            deps: BTreeMap::new(),
         }
     }
 
     /// Combine two operand taints (the result is invalid if either is).
     fn join(self, other: Taint) -> Taint {
+        let mut deps = self.deps;
+        for (path, latched) in other.deps {
+            let e = deps.entry(path).or_insert(false);
+            *e = *e || latched;
+        }
         Taint {
             invalid: self.invalid || other.invalid,
             sanitised: false,
             latched: self.latched || other.latched,
             why: self.why.or(other.why),
+            deps,
         }
     }
 }
@@ -104,21 +117,64 @@ const DOMAIN_FNS: &[&str] = &[
 /// Stateful library functions that latch NaN in their internal accumulator.
 const STATEFUL_PREFIXES: &[&str] = &["Filter.", "Integral.", "Derivative."];
 
-/// Run the invalid-value analysis, appending T080 diagnostics.
-///
-/// `_scope` is unused intra-script but kept on the signature: the cross-script
-/// pass (P3) needs it to resolve `Out`→`In` channel references project-wide.
+/// Everything the statement/expression walkers need, bundled so the recursion
+/// threads one reference instead of five parameters.
+struct Ctx<'a, 'p> {
+    scope: &'a Scope<'p>,
+    anns: &'a Annotations,
+    /// Names declared `@source`/`@external` (spelled paths).
+    sources: &'a HashSet<String>,
+    /// Project-wide solved channel taints, seeded into project-symbol reads
+    /// (empty for the pure intra-script run).
+    channels: &'a ChannelTaints,
+    /// Canonical path of the function symbol this script backs — the channel
+    /// an `Out =` assignment writes (None when the script backs no function).
+    fn_symbol: Option<&'a str>,
+}
+
+/// Run the intra-script invalid-value analysis, appending T080 diagnostics.
 pub fn check(root: Node, scope: &Scope, anns: &Annotations, out: &mut Vec<TypeDiagnostic>) {
-    // Cheap exit: a possibly-NaN value can only arise from a division (or a
-    // domain-restricted call / `@source`), and only matters if it can reach a
-    // sink — an annotated finiteness sink, or the implicit integer-conversion
-    // sink (#120). Skip when neither a taint source nor an annotation is present.
-    if anns.all().is_empty() && !contains_invalid_source(root) {
+    let empty = ChannelTaints::default();
+    if can_skip(root, anns, &empty) {
         return;
     }
+    check_with_channels(root, scope, anns, &empty, None, out);
+}
+
+/// Cheap exit: a possibly-NaN value can only arise from a division (or a
+/// domain-restricted call / `@source`), and only matters if it can reach a
+/// sink — an annotated finiteness sink, or the implicit integer-conversion
+/// sink (#120). With cross-script taints seeded the walk must always run: a
+/// plain channel copy can carry a remote invalid value into an integer sink.
+pub(crate) fn can_skip(root: Node, anns: &Annotations, channels: &ChannelTaints) -> bool {
+    anns.all().is_empty() && !contains_invalid_source(root) && channels.is_empty()
+}
+
+/// Run the analysis with the project-wide solved `channels` taints seeded into
+/// project-symbol reads (#78 P3). Returns the script's *write summary*: for
+/// each assignment targeting a project symbol (canonical path; `Out` maps to
+/// `fn_symbol`), the taint of the written value including its `deps` edges —
+/// the input [`crate::cross_script::solve`] builds the channel graph from.
+pub(crate) fn check_with_channels(
+    root: Node,
+    scope: &Scope,
+    anns: &Annotations,
+    channels: &ChannelTaints,
+    fn_symbol: Option<&str>,
+    out: &mut Vec<TypeDiagnostic>,
+) -> Vec<(String, Taint)> {
     let sources = collect_sources(root, anns);
+    let ctx = Ctx {
+        scope,
+        anns,
+        sources: &sources,
+        channels,
+        fn_symbol,
+    };
     let mut env: HashMap<String, Taint> = HashMap::new();
-    process(root, scope, anns, &sources, &mut env, out);
+    let mut writes = Vec::new();
+    process(root, &ctx, &mut env, &mut writes, out);
+    writes
 }
 
 /// True if the tree contains a potential NaN/Inf source the analysis cares about:
@@ -161,19 +217,19 @@ fn collect_sources(root: Node, anns: &Annotations) -> HashSet<String> {
     sources
 }
 
-/// Walk statements in document order, threading the taint environment.
+/// Walk statements in document order, threading the taint environment and
+/// collecting the cross-script write summary.
 fn process(
     node: Node,
-    scope: &Scope,
-    anns: &Annotations,
-    sources: &HashSet<String>,
+    ctx: &Ctx,
     env: &mut HashMap<String, Taint>,
+    writes: &mut Vec<(String, Taint)>,
     out: &mut Vec<TypeDiagnostic>,
 ) {
     for stmt in node.child_nodes() {
         match stmt.kind() {
             Kind::AssignmentStatement | Kind::LocalDeclaration => {
-                let here = anns.for_target_start(stmt.byte_range().start);
+                let here = ctx.anns.for_target_start(stmt.byte_range().start);
                 let is_sanitiser = here
                     .iter()
                     .any(|a| a.kind == "sanitizes" || a.kind == "clears");
@@ -192,9 +248,7 @@ fn process(
                         name.as_deref().unwrap_or("source")
                     ))
                 } else {
-                    value
-                        .map(|e| expr_taint(e, env, sources))
-                        .unwrap_or_default()
+                    value.map(|e| expr_taint(e, ctx, env)).unwrap_or_default()
                 };
 
                 // Sink check: does an unsanitised invalid value reach a value
@@ -222,7 +276,7 @@ fn process(
                     && !taint.sanitised
                     && stmt.kind() == Kind::AssignmentStatement
                     && let Some(target) = &name
-                    && is_integer_target(target, scope)
+                    && is_integer_target(target, ctx.scope)
                 {
                     let at = value.unwrap_or(stmt);
                     out.push(make(
@@ -233,11 +287,29 @@ fn process(
                     ));
                 }
 
+                // Cross-script channel graph (#78 P3): record the canonical
+                // symbol this assignment writes (an `Out =` writes the
+                // script's backing function symbol).
+                if stmt.kind() == Kind::AssignmentStatement
+                    && let Some(target) = &name
+                {
+                    let canonical = if target == "Out" {
+                        ctx.fn_symbol.map(str::to_string)
+                    } else if let Resolution::Symbol(s) = resolve(target, ctx.scope) {
+                        Some(s.path.clone())
+                    } else {
+                        None
+                    };
+                    if let Some(c) = canonical {
+                        writes.push((c, taint.clone()));
+                    }
+                }
+
                 if let Some(name) = name {
                     env.insert(name, taint);
                 }
             }
-            _ => process(stmt, scope, anns, sources, env, out),
+            _ => process(stmt, ctx, env, writes, out),
         }
     }
 }
@@ -280,31 +352,40 @@ fn message(t: &Taint) -> String {
 }
 
 /// Taint of an expression's result.
-fn expr_taint(node: Node, env: &HashMap<String, Taint>, sources: &HashSet<String>) -> Taint {
+fn expr_taint(node: Node, ctx: &Ctx, env: &HashMap<String, Taint>) -> Taint {
     match node.kind() {
         Kind::Number | Kind::Boolean | Kind::String => Taint::finite(),
         Kind::Identifier | Kind::MemberExpression => {
             let p = path_text(node);
-            if sources.contains(&p) {
-                Taint::source(format!("`{p}` (declared a volatile invalid-value source)"))
-            } else {
-                env.get(&p).cloned().unwrap_or_default()
+            if ctx.sources.contains(&p) {
+                return Taint::source(format!("`{p}` (declared a volatile invalid-value source)"));
             }
+            if let Some(t) = env.get(&p) {
+                return t.clone();
+            }
+            // A project-symbol read is a cross-script edge: seed from the
+            // solved channel taints and record the dependency for the solver.
+            if let Resolution::Symbol(s) = resolve(&p, ctx.scope) {
+                let mut t = ctx.channels.read_taint(&s.path);
+                t.deps.insert(s.path.clone(), false);
+                return t;
+            }
+            Taint::default()
         }
         Kind::ParenthesizedExpression | Kind::UnaryExpression => node
             .named_children()
             .into_iter()
             .find(|c| is_expr(c.kind()))
-            .map(|c| expr_taint(c, env, sources))
+            .map(|c| expr_taint(c, ctx, env))
             .unwrap_or_default(),
-        Kind::BinaryExpression => binary_taint(node, env, sources),
-        Kind::TernaryExpression => ternary_taint(node, env, sources),
-        Kind::CallExpression => call_taint(node, env, sources),
+        Kind::BinaryExpression => binary_taint(node, ctx, env),
+        Kind::TernaryExpression => ternary_taint(node, ctx, env),
+        Kind::CallExpression => call_taint(node, ctx, env),
         _ => Taint::finite(),
     }
 }
 
-fn binary_taint(node: Node, env: &HashMap<String, Taint>, sources: &HashSet<String>) -> Taint {
+fn binary_taint(node: Node, ctx: &Ctx, env: &HashMap<String, Taint>) -> Taint {
     let operands: Vec<Node> = node
         .named_children()
         .into_iter()
@@ -322,7 +403,7 @@ fn binary_taint(node: Node, env: &HashMap<String, Taint>, sources: &HashSet<Stri
     }
     let mut t = operands
         .into_iter()
-        .map(|c| expr_taint(c, env, sources))
+        .map(|c| expr_taint(c, ctx, env))
         .fold(Taint::finite(), Taint::join);
     if op == "/" || op == "%" {
         t.invalid = true;
@@ -332,7 +413,7 @@ fn binary_taint(node: Node, env: &HashMap<String, Taint>, sources: &HashSet<Stri
     t
 }
 
-fn ternary_taint(node: Node, env: &HashMap<String, Taint>, sources: &HashSet<String>) -> Taint {
+fn ternary_taint(node: Node, ctx: &Ctx, env: &HashMap<String, Taint>) -> Taint {
     // `condition ? consequence : alternative`. The condition is a boolean; the
     // result is whichever branch is selected, so its taint is the join of the
     // two branches. We deliberately do NOT treat any condition as a sanitiser:
@@ -344,11 +425,11 @@ fn ternary_taint(node: Node, env: &HashMap<String, Taint>, sources: &HashSet<Str
         .into_iter()
         .filter(|c| is_expr(c.kind()))
         .skip(1) // drop the condition; keep the two branches
-        .map(|c| expr_taint(c, env, sources))
+        .map(|c| expr_taint(c, ctx, env))
         .fold(Taint::finite(), Taint::join)
 }
 
-fn call_taint(node: Node, env: &HashMap<String, Taint>, sources: &HashSet<String>) -> Taint {
+fn call_taint(node: Node, ctx: &Ctx, env: &HashMap<String, Taint>) -> Taint {
     let Some(callee) = callee_path(node) else {
         return Taint::finite();
     };
@@ -358,22 +439,36 @@ fn call_taint(node: Node, env: &HashMap<String, Taint>, sources: &HashSet<String
     }
     let args: Vec<Taint> = call_args(node)
         .into_iter()
-        .map(|a| expr_taint(a, env, sources))
+        .map(|a| expr_taint(a, ctx, env))
         .collect();
     let args_taint = args.into_iter().fold(Taint::finite(), Taint::join);
 
     // Domain-restricted math: NaN on out-of-domain input, regardless of args.
+    // The argument edges stay on the result for the solver's bookkeeping.
     if DOMAIN_FNS.contains(&callee.as_str()) {
         let mut t = Taint::source(format!("`{callee}` can return NaN for out-of-domain input"));
         t.latched = args_taint.latched;
+        t.deps = args_taint.deps;
         return t;
     }
-    // Stateful function: propagate, and escalate (latch) if the input is tainted.
+    // Stateful function: propagate, and escalate (latch) if the input is
+    // tainted. Any upstream channel feeding this call is latched *here* even
+    // when nothing is invalid yet — the solver may taint it later (#78 P3).
     if STATEFUL_PREFIXES.iter().any(|p| callee.starts_with(p)) {
         let mut t = args_taint;
         if t.invalid {
             t.latched = true;
         }
+        for latched in t.deps.values_mut() {
+            *latched = true;
+        }
+        return t;
+    }
+    // A user-function/method call returns the callee's `Out` value — a
+    // cross-script edge keyed by the callee's symbol path, like a channel read.
+    if let Resolution::Symbol(s) = resolve(&callee, ctx.scope) {
+        let mut t = args_taint.join(ctx.channels.read_taint(&s.path));
+        t.deps.insert(s.path.clone(), false);
         return t;
     }
     // Everything else (including clamps like Limit.Range / Calculate.Min/Max)

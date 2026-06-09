@@ -208,7 +208,7 @@ impl Project {
     /// The path of the `Function`/`Method` symbol backed by `file_name`: an
     /// explicit `Filename=` match first, else the `Root.<stem>` path convention
     /// real projects use (`Engine.Update.m1scr` → `Root.Engine.Update`).
-    fn function_symbol_for_script(&self, file_name: &str) -> Option<String> {
+    pub(crate) fn function_symbol_for_script(&self, file_name: &str) -> Option<String> {
         let is_fn = |s: &&Symbol| matches!(s.kind, SymbolKind::Function | SymbolKind::Method);
         if let Some(s) = self
             .table
