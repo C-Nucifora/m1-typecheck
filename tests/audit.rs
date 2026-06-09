@@ -34,32 +34,36 @@ fn t050_flags_only_violators() {
         .map(|d| d.inner.message.clone())
         .collect();
     let all = msgs.join("\n");
-    // Violators present.
+    // Manual p.64 (#153): object names begin with an uppercase letter; spaces
+    // are legal. Lowercase-leading objects flag; locals are L016's concern.
     assert!(
-        all.contains("BrakePressure"),
-        "channel UpperCamel should flag: {all}"
+        all.contains("`brakePressure`"),
+        "lowercase channel should flag: {all}"
     );
     assert!(
-        all.contains("brakeBias"),
-        "parameter lowerCamel should flag"
+        all.contains("`brakeBias`"),
+        "lowercase parameter should flag"
     );
-    assert!(all.contains("trackWidth"), "constant non-caps should flag");
     assert!(
-        all.contains("CheckLimit"),
-        "function UpperCamel should flag"
+        all.contains("`trackWidth`"),
+        "constant non-caps should flag"
     );
-    assert!(all.contains("bad state"), "enum with space should flag");
+    assert!(
+        all.contains("`checkLimit`"),
+        "lowercase function should flag"
+    );
+    assert!(all.contains("bad state"), "lowercase enum name should flag");
     // Conformers absent.
     assert!(
-        !all.contains("`brakePressure`"),
-        "conforming channel must not flag"
+        !all.contains("`BrakePressure`"),
+        "uppercase channel must not flag"
     );
     assert!(
         !all.contains("`BrakeBias`"),
         "conforming parameter must not flag"
     );
     assert!(!all.contains("`TRACKWIDTH`"));
-    assert!(!all.contains("`checkLimit`"));
+    assert!(!all.contains("`CheckLimit`"), "uppercase function fine");
     assert!(!all.contains("`GoodState`"));
 }
 
