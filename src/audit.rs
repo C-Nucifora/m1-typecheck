@@ -1,5 +1,5 @@
 //! Project-wide symbol-name audit (T050) against the m1-example naming conventions.
-use crate::diagnostics::{TypeCode, TypeDiagnostic, make_project};
+use crate::diagnostics::{TypeCode, TypeDiagnostic, make_project_for};
 use crate::project::Project;
 use crate::symbols::SymbolKind;
 use m1_core::Severity;
@@ -25,27 +25,64 @@ pub fn audit_project(project: &Project) -> Vec<TypeDiagnostic> {
         if let Some((name, ok)) = conv
             && !ok
         {
-            out.push(make_project(
+            out.push(make_project_for(
                 TypeCode::T050,
                 Severity::Warning,
                 format!(
                     "{:?} `{leaf}` does not follow {name} (in `{}`)",
                     sym.kind, sym.path
                 ),
+                &sym.path,
             ));
         }
     }
     for e in table.enums() {
         if !upper_camel(&e.name) {
-            out.push(make_project(
+            out.push(make_project_for(
                 TypeCode::T050,
                 Severity::Warning,
                 format!("enum type `{}` does not follow UpperCamelCase", e.name),
+                &e.name,
             ));
         }
     }
     out.extend(audit_name_collisions(project));
     out.extend(audit_classname_structure(project));
+    out.extend(audit_type_restrictions(project));
+    out
+}
+
+/// Project-wide data-type restriction audit (T087): the manual (p.24)
+/// restricts Boolean and String data types to local variables — a channel or
+/// parameter declared with a `bool`/`string` storage type cannot exist as an
+/// ECU project object. CAN/DBC symbols (`BuiltIn.CAN.*`) are exempt: flag
+/// signals are legitimately boolean at the bus level; the restriction is
+/// about M1 project objects.
+pub fn audit_type_restrictions(project: &Project) -> Vec<TypeDiagnostic> {
+    use crate::types::ValueType;
+    let mut out: Vec<TypeDiagnostic> = project
+        .symbols()
+        .iter()
+        .filter(|s| matches!(s.kind, SymbolKind::Channel | SymbolKind::Parameter))
+        .filter(|s| {
+            !s.classname
+                .as_deref()
+                .is_some_and(|c| c.starts_with("BuiltIn.CAN."))
+        })
+        .filter(|s| matches!(s.value_type, ValueType::Boolean | ValueType::String))
+        .map(|s| {
+            make_project_for(
+                TypeCode::T087,
+                Severity::Warning,
+                format!(
+                    "{:?} `{}` is declared {:?} — Boolean/String data types are restricted to local variables",
+                    s.kind, s.path, s.value_type
+                ),
+                &s.path,
+            )
+        })
+        .collect();
+    out.sort_by(|a, b| a.inner.message.cmp(&b.inner.message));
     out
 }
 
@@ -77,7 +114,7 @@ pub fn audit_classname_structure(project: &Project) -> Vec<TypeDiagnostic> {
             continue; // parent isn't a known component; nothing to check.
         };
         if let Some(allowed) = crate::classname::parent_violation(child_class, parent_class) {
-            out.push(make_project(
+            out.push(make_project_for(
                 TypeCode::T010,
                 Severity::Warning,
                 format!(
@@ -90,6 +127,7 @@ pub fn audit_classname_structure(project: &Project) -> Vec<TypeDiagnostic> {
                         .collect::<Vec<_>>()
                         .join(" or "),
                 ),
+                &sym.path,
             ));
         }
     }
@@ -124,13 +162,14 @@ pub fn audit_name_collisions(project: &Project) -> Vec<TypeDiagnostic> {
         sorted.sort_unstable();
         for i in 0..sorted.len() {
             for j in (i + 1)..sorted.len() {
-                out.push(make_project(
+                out.push(make_project_for(
                     TypeCode::T071,
                     Severity::Warning,
                     format!(
                         "symbol names `{}` and `{}` differ only by case",
                         sorted[i], sorted[j]
                     ),
+                    sorted[i],
                 ));
             }
         }
@@ -141,10 +180,11 @@ pub fn audit_name_collisions(project: &Project) -> Vec<TypeDiagnostic> {
     for sym in table.iter() {
         let leaf = leaf_of(&sym.path);
         if let Some(obj) = lib_names.iter().find(|n| n.eq_ignore_ascii_case(leaf)) {
-            out.push(make_project(
+            out.push(make_project_for(
                 TypeCode::T071,
                 Severity::Warning,
                 format!("symbol `{}` shadows the library object `{obj}`", sym.path),
+                &sym.path,
             ));
         }
     }

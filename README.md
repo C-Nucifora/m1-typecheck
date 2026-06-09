@@ -117,8 +117,12 @@ This unlocks four new rules, added to the default rule set
 | T030 | Warning | **assignment-type-mismatch** — `target = value` where the target is a Channel/Parameter with a known type and the value's known type is incompatible. |
 | T031 | Warning | **unresolved-assignment-target** — the target of a plain `=` assignment is a project-rooted path that does not resolve (e.g. `Root.Foo.Missing = 1`). Distinct from T001 because a write target is not a read; compound assignments (`+=`, …) read the target first and stay T001. |
 | T040 | Warning | **channel-multiple-assignment** — a Channel assigned more than once on a single code path (control-flow aware: mutually-exclusive `if`/`else` arms are not a conflict). Implemented as a whole-tree pass in `flow.rs`, not a node-at-a-time rule. |
-| T070 | Error | **when-is-exhaustive** — a `when (subject) { is (…) … }` over an enum-typed subject that does not cover every enumerator (`or` groups enumerators within one arm). One of the remaining §6 compile-time checks M1 Build enforces. An arm naming a non-member label is treated as a catch-all (the `when` is then exhaustive); a non-enum subject is skipped silently. |
+| T070 | Error | **when-is-exhaustive** — a `when (subject) { is (…) … }` over an enum-typed subject that does not cover every enumerator (`or` groups enumerators within one arm). One of the remaining §6 compile-time checks M1 Build enforces. An arm naming a non-member label is treated as a catch-all (the `when` is then exhaustive); a non-enum subject is T082's finding. |
 | T080 | Error / Warning | **invalid-value-reaches-finite-sink** — NaN/Inf provenance tracing (see below). Fires only for a value marked `@m1:requires-finite` / `@m1:safety-critical`; otherwise silent. |
+| T082 | Error | **when-subject-not-enum** — the manual (p.32) requires the `when` argument to be an enumerated data type; fires when the subject's type is *known* and non-enum. |
+| T083 | Error | **static-local-initialiser** — a `static local`'s initial value must be a literal, enumerator or constant (manual p.34); runtime reads and calls flag. Constant-foldable literal arithmetic (`2 * 60`) is accepted. |
+| T084 | Error | **expand-bounds** — `expand` bounds must be literals or constants, 0 or positive (manual p.33); negative, float and runtime-value bounds flag. |
+| T087 | Warning | **type-restricted-to-locals** — project audit: a Channel/Parameter declared `bool`/`string`, which the manual (p.24) restricts to local variables. CAN/DBC signals are exempt. |
 
 Every v2 rule keeps the v1 invariant: it fires only when every type/enum it needs
 is **known**, and stays silent under `Unknown` — so the m1-example corpus stays free of
@@ -227,15 +231,17 @@ if (b == c) { }            // T002 (float ==) not reported here
 
 It attaches **leading** (the next statement, stacking on consecutive lines) or
 **trailing** (a statement it follows on the same line); suppression is
-line-scoped to the target construct. Project-level findings (T041/T042, not tied
-to a source construct) are **not** suppressible this way — quiet those with
-`--ignore` / the `[diagnostics]` config instead.
+line-scoped to the target construct. Project-level findings (T010/T041/T050/T071/T087, not tied
+to a source construct) are **not** suppressible this way — quiet a whole code
+with `--ignore` / the `[diagnostics]` config, or suppress a single symbol with
+`[diagnostics] ignore_symbols = ["T050:Root.Engine.Speed"]` in `m1-tools.toml`
+(or the `--ignore-symbol` flag).
 
 ## CLI usage
 
 ```
 m1-typecheck [--project <Project.m1prj>] [--config <parameters.m1cfg>]
-             [--audit-names] [--select <CODES>] [--ignore <CODES>]
+             [--audit-names] [--select <CODES>] [--ignore <CODES>] [--ignore-symbol <CODE:PATH>]
              [--format human|json] [--rules] [--explain <CHANNEL>] <file.m1scr>...
 ```
 
@@ -243,6 +249,7 @@ m1-typecheck [--project <Project.m1prj>] [--config <parameters.m1cfg>]
 m1-typecheck --project Project.m1prj --config parameters.m1cfg Scripts/*.m1scr
 m1-typecheck --project Project.m1prj --audit-names
 m1-typecheck --ignore T041 Scripts/*.m1scr        # silence the cfg-coverage audit
+m1-typecheck --audit-names --ignore-symbol T050:Root.GPS  # allow one naming exception
 m1-typecheck --format json Scripts/*.m1scr        # machine-parsable diagnostics
 m1-typecheck --select T064 Scripts/*.m1scr        # opt into wrong-argument-count
 m1-typecheck --rules                              # list every T-code
@@ -278,6 +285,10 @@ m1-typecheck --explain Demo.Rate Scripts/*.m1scr  # trace a channel's NaN proven
   `m1-tools.toml` the editors read (the nearest `m1-tools.toml` `[diagnostics]`
   `ignore`/`select` is honoured too; explicit flags override the file). A non-empty
   `--select` runs only the listed codes; `--ignore` drops the listed codes.
+- `--ignore-symbol <CODE:PATH>` (comma-separated `CODE:Symbol.Path` entries)
+  suppresses a project-level code for exactly one symbol; the
+  `[diagnostics] ignore_symbols` list in `m1-tools.toml` is honoured the same
+  way (flags replace the file list).
 - `--rules` prints the T-code catalogue (with `--format json`, as JSON) and exits.
 - `--explain <CHANNEL>` prints one channel's solved project-wide invalid-value
   (NaN/Inf) status and exits: the backward provenance chain when tainted (plus a

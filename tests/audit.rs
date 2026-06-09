@@ -125,3 +125,37 @@ fn t010_clean_project_has_none() {
         "project without constrained classes must produce no T010"
     );
 }
+
+// ---- T087 type-restricted-to-locals (#149) --------------------------------
+
+#[test]
+fn t087_flags_bool_channels_and_parameters() {
+    let p = load("type_restrictions.m1prj");
+    let msgs: Vec<String> = p
+        .audit()
+        .iter()
+        .filter(|d| d.code == TypeCode::T087)
+        .map(|d| d.inner.message.clone())
+        .collect();
+    let all = msgs.join("\n");
+    assert!(all.contains("boolFlag"), "bool channel must flag: {all}");
+    assert!(all.contains("BoolParam"), "bool parameter must flag: {all}");
+    assert!(!all.contains("fineFloat"), "f32 channel must not flag");
+    assert!(!all.contains("fineInt"), "s32 channel must not flag");
+    assert_eq!(msgs.len(), 2, "exactly the two bool symbols: {all}");
+}
+
+#[test]
+fn project_diagnostics_carry_their_subject() {
+    // #151: every project-level (zero-range) finding names the symbol it is
+    // about, so [diagnostics] ignore_symbols can suppress it per-symbol.
+    let p = proj();
+    for d in p.audit() {
+        assert!(
+            d.subject.is_some(),
+            "audit diagnostic without subject: {} {}",
+            d.code.as_str(),
+            d.inner.message
+        );
+    }
+}

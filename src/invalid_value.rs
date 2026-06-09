@@ -352,7 +352,9 @@ fn message(t: &Taint) -> String {
             "; it reaches a stateful function (Filter/Integral/Derivative) that latches NaN",
         );
     }
-    m.push_str(" — guard it with a `Calculate.IsNAN(x) ? fallback : x` ternary or a finite fallback");
+    m.push_str(
+        " — guard it with a `Calculate.IsNAN(x) ? fallback : x` ternary or a finite fallback",
+    );
     m
 }
 

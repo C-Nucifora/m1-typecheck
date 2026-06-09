@@ -90,19 +90,39 @@ impl super::Rule for Rule {
 }
 
 /// The enumerator name(s) named by an `is (...)` state expression. A single
-/// `Identifier` names one enumerator; a `BinaryExpression` joined by `or` lists
-/// several (`A or B or C`).
+/// `Identifier` names one enumerator; an `IsPatternList` (grammar ≥0.5.0,
+/// `A or B or C`) lists several. Returns empty when any pattern is
+/// unrecognisable — the caller then treats the arm as a catch-all and stays
+/// silent rather than risk a false "not exhaustive".
 fn arm_enumerators(state: Node) -> Vec<String> {
     match state.kind() {
         Kind::Identifier => vec![state.text().to_string()],
+        // `State.A`: the enumerator is the leaf segment.
+        Kind::MemberExpression => state
+            .named_children()
+            .into_iter()
+            .rfind(|c| c.kind() == Kind::Identifier)
+            .map(|leaf| vec![leaf.text().to_string()])
+            .unwrap_or_default(),
+        Kind::IsPatternList => {
+            let mut names = Vec::new();
+            for pattern in state.named_children() {
+                let got = arm_enumerators(pattern);
+                if got.is_empty() {
+                    return Vec::new(); // unrecognisable pattern → whole arm bails
+                }
+                names.extend(got);
+            }
+            names
+        }
         Kind::ParenthesizedExpression => state
             .named_children()
             .into_iter()
             .flat_map(arm_enumerators)
             .collect(),
+        // Pre-0.5.0 grammars parsed `A or B` as a binary or-expression; keep
+        // accepting that shape for one transition release.
         Kind::BinaryExpression => {
-            // Only `or`-joined identifier lists name enumerators; any other
-            // operator yields no recognised enumerators (and thus no coverage).
             let is_or = state.children().iter().any(|c| c.kind() == Kind::Or);
             if !is_or {
                 return Vec::new();

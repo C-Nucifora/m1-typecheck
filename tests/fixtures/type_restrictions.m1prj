@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<MoTeCM1BuildSession>
+ <Project Name="TypeRestrictions" TargetHardware="ecu120">
+  <SelectedModuleSets><File Name="MoTeC Comms"/></SelectedModuleSets>
+  <DataTypes/>
+  <ComponentStream>
+   <List>
+    <Component Classname="BuiltIn.GroupCompound" Name="Root.Inputs"/>
+    <Component Classname="BuiltIn.Channel" Name="Root.Inputs.boolFlag"><Props Type="bool"/></Component>
+    <Component Classname="BuiltIn.Parameter" Name="Root.Inputs.BoolParam"><Props Type="bool"/></Component>
+    <Component Classname="BuiltIn.Channel" Name="Root.Inputs.fineFloat"><Props Type="f32"/></Component>
+    <Component Classname="BuiltIn.Channel" Name="Root.Inputs.fineInt"><Props Type="s32"/></Component>
+   </List>
+  </ComponentStream>
+ </Project>
+</MoTeCM1BuildSession>

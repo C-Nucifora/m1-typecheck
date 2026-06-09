@@ -1,5 +1,5 @@
 //! The loaded project: symbol table + enum types + opaque roots + file->group.
-use crate::diagnostics::{TypeCode, TypeDiagnostic, make_project};
+use crate::diagnostics::{TypeCode, TypeDiagnostic, make_project_for};
 use crate::resolve::Scope;
 use crate::symbols::{Symbol, SymbolKind, SymbolTable, m1cfg, m1dbc, m1prj};
 use crate::typer::{path_text, type_of};
@@ -102,13 +102,14 @@ impl Project {
             .iter()
             .filter(|s| s.kind == SymbolKind::Parameter && !cfg_params.contains(&s.path))
             .map(|s| {
-                make_project(
+                make_project_for(
                     TypeCode::T041,
                     Severity::Warning,
                     format!(
                         "parameter `{}` is declared in the project but has no entry in the .m1cfg (will use its default value)",
                         s.path
                     ),
+                    &s.path,
                 )
             })
             .collect();
