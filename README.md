@@ -156,8 +156,34 @@ Front Axle Torque = Yaw Moment / Track Width;   // T080: division can be NaN/Inf
 
 Severity: `@m1:safety-critical` → error (fails the build); `@m1:requires-finite`
 → warning, escalated to error when latched. Because m1-typecheck exits non-zero
-on any error, this **is** the CI gate — no separate wiring. This pass is
-intra-script; cross-script `Out`→`In` propagation is a planned follow-up.
+on any error, this **is** the CI gate — no separate wiring.
+
+#### Cross-script propagation
+
+The analysis is **project-wide**: every run with a project solves the
+writer→reader channel graph over all the scripts passed on the command line
+(pass the whole project, as CI does, so the solve sees every edge). A channel
+written from an invalid-value source in one script taints its reads everywhere
+else, through any depth of copies — the solve iterates to a **fixpoint** over a
+finite monotone lattice, so even feedback loops between scripts terminate. An
+`Out =` assignment writes the script's backing function symbol (the same
+`Filename=`/path convention used for return-type inference), and a call to that
+function reads it, so taint also flows through user-function results.
+Diagnostics carry the full backward provenance chain:
+
+```
+warning[T080]: a value required to be finite can be NaN/Inf: `Root.Demo.Heading` is
+written by `Demo.Update.m1scr` from `Root.Demo.Rate`; `Root.Demo.Rate` is written by
+`Demo.Read.m1scr`: division (the denominator may be 0) — guard it with Math.IsNaN()
+or a finite fallback
+```
+
+`@m1:sanitizes`/`@m1:clears` is the cross-script barrier too (a sanitised
+rewrite stops the chain), latching escalates across scripts the same way, and
+**T081** also fires cross-script when a remotely-tainted float is stored into an
+integer channel. Function argument→`In` flow is not yet modelled (only `Out` and
+channel reads propagate). Query one channel's solved status with
+[`--explain`](#cli-usage).
 
 ### T050 project-name audit (opt-in)
 
@@ -210,7 +236,7 @@ to a source construct) are **not** suppressible this way — quiet those with
 ```
 m1-typecheck [--project <Project.m1prj>] [--config <parameters.m1cfg>]
              [--audit-names] [--select <CODES>] [--ignore <CODES>]
-             [--format human|json] [--rules] <file.m1scr>...
+             [--format human|json] [--rules] [--explain <CHANNEL>] <file.m1scr>...
 ```
 
 ```sh
@@ -220,6 +246,7 @@ m1-typecheck --ignore T041 Scripts/*.m1scr        # silence the cfg-coverage aud
 m1-typecheck --format json Scripts/*.m1scr        # machine-parsable diagnostics
 m1-typecheck --select T064 Scripts/*.m1scr        # opt into wrong-argument-count
 m1-typecheck --rules                              # list every T-code
+m1-typecheck --explain Demo.Rate Scripts/*.m1scr  # trace a channel's NaN provenance
 ```
 
 - `--project` defaults to the nearest `Project.m1prj` upward from the first input
@@ -252,6 +279,14 @@ m1-typecheck --rules                              # list every T-code
   `ignore`/`select` is honoured too; explicit flags override the file). A non-empty
   `--select` runs only the listed codes; `--ignore` drops the listed codes.
 - `--rules` prints the T-code catalogue (with `--format json`, as JSON) and exits.
+- `--explain <CHANNEL>` prints one channel's solved project-wide invalid-value
+  (NaN/Inf) status and exits: the backward provenance chain when tainted (plus a
+  latch note), or a clean note otherwise. Accepts the canonical
+  `Root.`-qualified or the bare channel path; pass every project script as
+  FILES so the solve sees the whole graph. With `--format json`, emits
+  `{"version":1,"explain":{"channel":…,"invalid":…,"latched":…,"chain":[…]}}`.
+  A query, not a check: exits `0` either way, `2` for a missing project or an
+  unknown channel.
 - `--format json` emits one machine-parsable document
   (`{"version":1,"files":[…],"project":[…],"summary":{…}}`) instead of the human
   lines; syntax errors and project audits are included.

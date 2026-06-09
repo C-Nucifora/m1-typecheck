@@ -75,11 +75,17 @@ mod tests {
     use crate::rules::{Registry, run_with};
 
     fn codes(src: &str) -> Vec<TypeCode> {
-        run_with(&Registry::all(), None, None, src)
-            .diagnostics
-            .into_iter()
-            .map(|d| d.code)
-            .collect()
+        run_with(
+            &Registry::all(),
+            None,
+            None,
+            src,
+            &crate::cross_script::ChannelTaints::default(),
+        )
+        .diagnostics
+        .into_iter()
+        .map(|d| d.code)
+        .collect()
     }
 
     #[test]

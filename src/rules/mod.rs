@@ -168,11 +168,18 @@ pub fn check_script(project: &Project, script_path: &Path, source: &str) -> Chec
         Some(project),
         script_path.file_name().and_then(|s| s.to_str()),
         source,
+        &crate::cross_script::ChannelTaints::default(),
     )
 }
 
 pub fn check_script_no_project(source: &str) -> CheckResult {
-    run_with(&Registry::default(), None, None, source)
+    run_with(
+        &Registry::default(),
+        None,
+        None,
+        source,
+        &crate::cross_script::ChannelTaints::default(),
+    )
 }
 
 /// Like [`check_script`] but with opt-in rules activated for the T-codes in
@@ -184,6 +191,26 @@ pub fn check_script_with(
     script_path: Option<&Path>,
     source: &str,
 ) -> CheckResult {
+    check_script_with_channels(
+        enabled,
+        project,
+        script_path,
+        source,
+        &crate::cross_script::ChannelTaints::default(),
+    )
+}
+
+/// Like [`check_script_with`] but with the project-wide solved channel taints
+/// seeded into the invalid-value analysis, so cross-script T080/T081 fire at
+/// this file's sinks with their provenance chains (#78 P3). Build `channels`
+/// once per run with [`crate::cross_script::solve`].
+pub fn check_script_with_channels(
+    enabled: &std::collections::HashSet<String>,
+    project: Option<&Project>,
+    script_path: Option<&Path>,
+    source: &str,
+    channels: &crate::cross_script::ChannelTaints,
+) -> CheckResult {
     run_with(
         &Registry::with_opt_in(enabled),
         project,
@@ -191,6 +218,7 @@ pub fn check_script_with(
             .and_then(|p| p.file_name())
             .and_then(|s| s.to_str()),
         source,
+        channels,
     )
 }
 
@@ -200,6 +228,7 @@ pub fn run_with(
     project: Option<&Project>,
     file_name: Option<&str>,
     source: &str,
+    channels: &crate::cross_script::ChannelTaints,
 ) -> CheckResult {
     let cst = m1_core::parse(source);
     let syntax_errors = cst.syntax_diagnostics();
@@ -247,10 +276,21 @@ pub fn run_with(
     crate::flow::single_assignment(cst.root(), &scope, &mut diagnostics);
 
     // Parse `@m1:` annotations once and drive both consumers: the invalid-value
-    // (NaN/Inf) provenance analysis (T080, #78) reads the finiteness sinks /
-    // sources, then `@allow` suppression filters the final diagnostic set.
+    // (NaN/Inf) provenance analysis (T080/T081, #78) reads the finiteness
+    // sinks/sources — seeded with the project-wide solved channel taints so
+    // cross-script provenance reaches this file's sinks — then `@allow`
+    // suppression filters the final diagnostic set.
     let anns = m1_core::annotations(&cst, &m1_core::Registry::seed());
-    crate::invalid_value::check(cst.root(), &scope, &anns, &mut diagnostics);
+    if !crate::invalid_value::can_skip(cst.root(), &anns, channels) {
+        crate::invalid_value::check_with_channels(
+            cst.root(),
+            &scope,
+            &anns,
+            channels,
+            None,
+            &mut diagnostics,
+        );
+    }
     suppress_allowed(&anns, source, &mut diagnostics);
     CheckResult {
         diagnostics,

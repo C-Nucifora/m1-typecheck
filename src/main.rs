@@ -2,10 +2,11 @@ mod output;
 
 use clap::{Parser, ValueEnum};
 use m1_core::Severity;
+use m1_typecheck::cross_script::{self, ChannelTaints};
 use m1_typecheck::diagnostics::{TypeCode, TypeDiagnostic};
 use m1_typecheck::filter::DiagFilter;
 use m1_typecheck::project::Project;
-use m1_typecheck::rules::check_script_with;
+use m1_typecheck::rules::check_script_with_channels;
 use output::{JsonFile, json_str, render_json, severity_str};
 use std::path::{Path, PathBuf};
 use std::process;
@@ -40,6 +41,12 @@ struct Args {
     /// Print the T-code catalogue (honours --format json) and exit.
     #[arg(long)]
     rules: bool,
+    /// Explain a channel's project-wide invalid-value (NaN/Inf) status: print
+    /// the solved cross-script taint and its backward provenance chain, then
+    /// exit. Accepts the canonical `Root.`-qualified or the bare channel path;
+    /// pass every project script as FILES so the solve sees the whole graph.
+    #[arg(long, value_name = "CHANNEL")]
+    explain: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
@@ -181,6 +188,7 @@ fn check_files(
     project: Option<&Project>,
     enabled_opt_in: &std::collections::HashSet<String>,
     filter: &DiagFilter,
+    channels: &ChannelTaints,
     json: bool,
     json_buf: &mut JsonBuf,
 ) -> bool {
@@ -196,7 +204,13 @@ fn check_files(
                 continue;
             }
         };
-        let result = check_script_with(enabled_opt_in, project, Some(file.as_path()), &src);
+        let result = check_script_with_channels(
+            enabled_opt_in,
+            project,
+            Some(file.as_path()),
+            &src,
+            channels,
+        );
         // Syntax errors are not T-coded and always fail the run; the filter only
         // governs the T-code diagnostics.
         for d in &result.syntax_errors {
@@ -322,6 +336,58 @@ fn emit_output(project_path: Option<&PathBuf>, json: bool, json_buf: &JsonBuf) {
     }
 }
 
+/// `--explain <CHANNEL>`: print the channel's solved invalid-value status —
+/// the backward provenance chain when tainted, a clean note otherwise. A
+/// query, not a check: exits 0 either way; 2 when the project or the channel
+/// is missing.
+fn explain_channel(project: Option<&Project>, taints: &ChannelTaints, channel: &str, json: bool) {
+    let Some(p) = project else {
+        eprintln!("m1-typecheck: --explain needs a project (no Project.m1prj found)");
+        process::exit(2);
+    };
+    let Some(ex) = cross_script::explain(p, taints, channel) else {
+        eprintln!("m1-typecheck: --explain: unknown channel `{channel}` (not in the project)");
+        process::exit(2);
+    };
+    if json {
+        let chain: &[String] = ex.taint.as_ref().map(|t| t.chain.as_slice()).unwrap_or(&[]);
+        let mut s = format!(
+            "{{\"version\":1,\"explain\":{{\"channel\":{},\"invalid\":{},\"latched\":{},\"chain\":[",
+            json_str(&ex.channel),
+            ex.taint.is_some(),
+            ex.taint.as_ref().is_some_and(|t| t.latched),
+        );
+        for (i, step) in chain.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&json_str(step));
+        }
+        s.push_str("]}}");
+        println!("{s}");
+    } else {
+        match &ex.taint {
+            None => println!(
+                "{}: no invalid-value (NaN/Inf) path found — finite as far as the \
+                 cross-script analysis can see",
+                ex.channel
+            ),
+            Some(t) => {
+                println!("{}: can be NaN/Inf", ex.channel);
+                for step in &t.chain {
+                    println!("  {step}");
+                }
+                if t.latched {
+                    println!(
+                        "  latched: the value flows through a stateful function \
+                         (Filter/Integral/Derivative) that holds NaN after the input recovers"
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn find_project(args: &Args) -> Option<PathBuf> {
     if let Some(p) = &args.project {
         return Some(p.clone());
@@ -402,20 +468,37 @@ fn main() {
     // Load the project model (config + DBCs) and emit degraded-run notes.
     let mut project = load_project(project_path.as_ref(), config_path.as_ref());
 
+    // The script sources back both return-type inference (#110) and the
+    // cross-script invalid-value solve (#78 P3); read them once.
+    let scripts: Vec<(String, String)> = args
+        .files
+        .iter()
+        .filter_map(|f| {
+            let name = f.file_name()?.to_str()?.to_string();
+            let src = m1_workspace::read_text(f).ok()?;
+            Some((name, src))
+        })
+        .collect();
+
     // Infer user-function/method return types from the script bodies on the
-    // command line, so call sites in other scripts type-check (#110). Scripts that
-    // back no function symbol are simply ignored by the pass.
+    // command line, so call sites in other scripts type-check (#110). Scripts
+    // that back no function symbol are simply ignored by the pass.
     if let Some(p) = project.as_mut() {
-        let scripts: Vec<(String, String)> = args
-            .files
-            .iter()
-            .filter_map(|f| {
-                let name = f.file_name()?.to_str()?.to_string();
-                let src = m1_workspace::read_text(f).ok()?;
-                Some((name, src))
-            })
-            .collect();
         p.infer_return_types(&scripts);
+    }
+
+    // Solve the project-wide channel taint graph so cross-script invalid
+    // values reach each file's T080/T081 sinks (project-less runs have no
+    // channel identity to propagate through, so the map stays empty).
+    let channel_taints = project
+        .as_ref()
+        .map(|p| cross_script::solve(p, &scripts))
+        .unwrap_or_default();
+
+    // `--explain <CHANNEL>`: report that channel's solved status and exit.
+    if let Some(channel) = &args.explain {
+        explain_channel(project.as_ref(), &channel_taints, channel, json);
+        return;
     }
 
     // Per-file checks, then the once-per-run project-level audits.
@@ -424,6 +507,7 @@ fn main() {
         project.as_ref(),
         &enabled_opt_in,
         &filter,
+        &channel_taints,
         json,
         &mut json_buf,
     );
