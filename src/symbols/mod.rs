@@ -134,9 +134,16 @@ pub struct Symbol {
     /// `Some` only when every `Out = <expr>` in the body agrees on one known type;
     /// `None` when there is no `Out` assignment, the types disagree, or the symbol
     /// is not a user function — never a guessed type. Populated by
+    /// (For a declared `<Signature ReturnType="…">` it is set at parse time;
+    /// otherwise inferred by)
     /// [`crate::project::Project::infer_return_types`] and read by `type_of_call`
     /// so user-function call sites participate in T030/T003/T004/T021 (#110).
     pub return_type: Option<ValueType>,
+    /// The function's declared input parameters from the `.m1prj`
+    /// `<Signature><Params><Param Name Type>` (#110): name → value type, in
+    /// declaration order. `None` when the component declares no signature —
+    /// `In.*` references and call arguments are then unchecked (Opaque).
+    pub in_params: Option<Vec<(String, ValueType)>>,
     /// For a `BuiltIn.Table` symbol, its shape (input axes) and output unit, read
     /// from the `.m1cfg` `<Table>` (the `.m1prj` carries none). `None` for
     /// non-tables and when no `.m1cfg` is loaded. See [`TableMeta`].

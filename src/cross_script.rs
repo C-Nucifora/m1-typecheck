@@ -120,13 +120,14 @@ pub fn solve(project: &Project, scripts: &[(String, String)]) -> ChannelTaints {
             continue;
         }
         let group = project.group_for_script(file_name);
+        let fn_symbol = project.function_symbol_for_script(file_name);
         let scope = Scope {
             locals: crate::rules::collect_locals(cst.root(), Some(project), group.as_deref()),
             group,
             project: Some(project),
+            fn_symbol: fn_symbol.clone(),
         };
         let anns = m1_core::annotations(&cst, &m1_core::Registry::seed());
-        let fn_symbol = project.function_symbol_for_script(file_name);
         // Per-file diagnostics are produced by the (later) reporting pass;
         // here only the write summary matters.
         let mut discard = Vec::new();

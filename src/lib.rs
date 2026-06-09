@@ -10,6 +10,7 @@ pub mod invalid_value;
 pub mod project;
 pub mod resolve;
 pub mod rules;
+pub mod schedule;
 pub mod symbols;
 pub mod typer;
 pub mod types;

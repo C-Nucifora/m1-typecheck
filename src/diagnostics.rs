@@ -28,7 +28,11 @@ pub enum TypeCode {
     T082, // when-subject-not-enum (manual p.32: the when argument must be an enumerated type)
     T083, // static-local-initialiser (manual p.34: must be a literal, enumerator or constant)
     T084, // expand-bounds (manual p.33: literals or constants, 0 or positive)
+    T085, // user-argument-mismatch (call arity/types vs the function's declared Signature params)
+    T086, // unit-mismatch (assignment copies a value of a different physical quantity)
     T087, // type-restricted-to-locals (project audit; manual p.24: Boolean/String channels)
+    T088, // circular-dependency (same-rate write/read cycle between scripts; manual p.29)
+    T089, // rate-inversion (opt-in: a faster script reads a channel written only at a slower rate)
     T090, // expression-nesting-too-deep (analysis skipped to avoid a stack overflow)
 }
 
@@ -60,7 +64,11 @@ impl TypeCode {
             TypeCode::T082 => "T082",
             TypeCode::T083 => "T083",
             TypeCode::T084 => "T084",
+            TypeCode::T085 => "T085",
+            TypeCode::T086 => "T086",
             TypeCode::T087 => "T087",
+            TypeCode::T088 => "T088",
+            TypeCode::T089 => "T089",
             TypeCode::T090 => "T090",
         }
     }
@@ -96,7 +104,11 @@ impl TypeCode {
             TypeCode::T082 => "when-subject-not-enum",
             TypeCode::T083 => "static-local-initialiser",
             TypeCode::T084 => "expand-bounds",
+            TypeCode::T085 => "user-argument-mismatch",
+            TypeCode::T086 => "unit-mismatch",
             TypeCode::T087 => "type-restricted-to-locals",
+            TypeCode::T088 => "circular-dependency",
+            TypeCode::T089 => "rate-inversion",
             TypeCode::T090 => "expression-nesting-too-deep",
         }
     }
@@ -109,7 +121,8 @@ impl TypeCode {
         use TypeCode::*;
         &[
             T001, T002, T003, T004, T010, T020, T021, T030, T031, T040, T041, T042, T050, T060,
-            T061, T062, T063, T064, T070, T071, T080, T081, T082, T083, T084, T087, T090,
+            T061, T062, T063, T064, T070, T071, T080, T081, T082, T083, T084, T085, T086, T087,
+            T088, T089, T090,
         ]
     }
 }
@@ -206,6 +219,6 @@ mod tests {
             );
         }
         // Catalogue size tracks the enum (bump both together).
-        assert_eq!(codes.len(), 27);
+        assert_eq!(codes.len(), 31);
     }
 }

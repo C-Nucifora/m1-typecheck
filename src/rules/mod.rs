@@ -21,6 +21,8 @@ pub mod t064_arg_count;
 pub mod t070_when_exhaustive;
 pub mod t083_static_local_init;
 pub mod t084_expand_bounds;
+pub mod t085_user_arg_mismatch;
+pub mod t086_unit_mismatch;
 
 pub trait Rule: Send + Sync {
     fn check_node(&self, node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>);
@@ -36,10 +38,13 @@ impl Registry {
     }
 
     /// The opt-in T-codes — rules that run only when explicitly selected (via
-    /// `--select`/`[diagnostics] select`), never by default. Currently just T064.
+    /// `--select`/`[diagnostics] select`), never by default: T064 (a per-node
+    /// rule) and T088/T089 (project-level scheduling checks in
+    /// `schedule::check` — the real corpora contain deliberate same-rate
+    /// feedback loops, so neither is safe default-on).
     pub fn opt_in_codes() -> &'static [crate::diagnostics::TypeCode] {
         use crate::diagnostics::TypeCode::*;
-        &[T064]
+        &[T064, T088, T089]
     }
 
     /// The default rule set plus any opt-in rules whose code is in `enabled`. Used
@@ -82,6 +87,8 @@ impl Default for Registry {
                 Box::new(t063_calibration_only::Rule),
                 Box::new(t070_when_exhaustive::Rule),
                 Box::new(t083_static_local_init::Rule),
+                Box::new(t085_user_arg_mismatch::Rule),
+                Box::new(t086_unit_mismatch::Rule),
                 Box::new(t084_expand_bounds::Rule),
             ],
         }
@@ -165,6 +172,7 @@ pub(crate) fn collect_locals(
                             locals: locals.clone(),
                             group: g.map(str::to_string),
                             project: p,
+                            fn_symbol: None,
                         },
                     )
                 }
@@ -285,10 +293,16 @@ pub fn run_with(
         (Some(p), Some(f)) => p.group_for_script(f),
         _ => None,
     };
+    // The backing function symbol anchors `In.<Param>` resolution (#110).
+    let fn_symbol = match (project, file_name) {
+        (Some(p), Some(f)) => p.function_symbol_for_script(f),
+        _ => None,
+    };
     let scope = Scope {
         locals: collect_locals(cst.root(), project, group.as_deref()),
         group,
         project,
+        fn_symbol,
     };
     let mut diagnostics = Vec::new();
     walk(cst.root(), registry, &scope, &mut diagnostics);

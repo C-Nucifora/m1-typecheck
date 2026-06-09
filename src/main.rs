@@ -50,6 +50,11 @@ struct Args {
     /// Print the T-code catalogue (honours --format json) and exit.
     #[arg(long)]
     rules: bool,
+    /// Explain a channel's physical quantity: its declared base unit and the
+    /// unit of every symbol directly assigned into it across the given
+    /// scripts, then exit (#144's units sibling of --explain).
+    #[arg(long, value_name = "CHANNEL")]
+    explain_units: Option<String>,
     /// Explain a channel's project-wide invalid-value (NaN/Inf) status: print
     /// the solved cross-script taint and its backward provenance chain, then
     /// exit. Accepts the canonical `Root.`-qualified or the bare channel path;
@@ -349,6 +354,81 @@ fn emit_output(project_path: Option<&PathBuf>, json: bool, json_buf: &JsonBuf) {
 /// the backward provenance chain when tainted, a clean note otherwise. A
 /// query, not a check: exits 0 either way; 2 when the project or the channel
 /// is missing.
+/// `--explain-units`: print a channel's base unit and the units of symbols
+/// directly assigned into it across the supplied scripts (#144).
+fn explain_units(project: Option<&Project>, scripts: &[(String, String)], channel: &str) {
+    let Some(p) = project else {
+        eprintln!("m1-typecheck: --explain-units needs a project");
+        process::exit(2);
+    };
+    let canonical = if channel.starts_with("Root.") {
+        channel.to_string()
+    } else {
+        format!("Root.{channel}")
+    };
+    let Some(sym) = p.symbols().get(&canonical) else {
+        eprintln!("m1-typecheck: unknown channel `{channel}`");
+        process::exit(2);
+    };
+    match &sym.unit {
+        Some(u) => println!("{canonical}: base unit {u}"),
+        None => println!("{canonical}: unitless (no Qty declared)"),
+    }
+    for (file, src) in scripts {
+        let cst = m1_core::parse(src);
+        if !cst.syntax_diagnostics().is_empty() {
+            continue;
+        }
+        let group = p.group_for_script(file);
+        let fn_symbol = p.function_symbol_for_script(file);
+        let scope = m1_typecheck::resolve::Scope {
+            locals: std::collections::HashMap::new(),
+            group,
+            project: Some(p),
+            fn_symbol,
+        };
+        for n in cst.root().descendants() {
+            if n.kind() != m1_core::Kind::AssignmentStatement {
+                continue;
+            }
+            let kids = n.named_children();
+            let Some(target) = kids.iter().find(|c| m1_typecheck::typer::is_expr(c.kind())) else {
+                continue;
+            };
+            let resolved =
+                m1_typecheck::resolve::resolve(&m1_typecheck::typer::path_text(*target), &scope);
+            let m1_typecheck::resolve::Resolution::Symbol(t) = resolved else {
+                continue;
+            };
+            if t.path != canonical {
+                continue;
+            }
+            // List every symbol read on the value side with its unit.
+            for c in kids.iter().filter(|c| !std::ptr::eq(*c, target)) {
+                for d in std::iter::once(*c).chain(c.descendants()) {
+                    if !matches!(
+                        d.kind(),
+                        m1_core::Kind::Identifier | m1_core::Kind::MemberExpression
+                    ) {
+                        continue;
+                    }
+                    if let m1_typecheck::resolve::Resolution::Symbol(s) =
+                        m1_typecheck::resolve::resolve(&m1_typecheck::typer::path_text(d), &scope)
+                    {
+                        println!(
+                            "  <- {} ({}) in {} line {}",
+                            s.path,
+                            s.unit.as_deref().unwrap_or("unitless"),
+                            file,
+                            n.range().start.line + 1
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn explain_channel(project: Option<&Project>, taints: &ChannelTaints, channel: &str, json: bool) {
     let Some(p) = project else {
         eprintln!("m1-typecheck: --explain needs a project (no Project.m1prj found)");
@@ -509,6 +589,46 @@ fn main() {
     if let Some(channel) = &args.explain {
         explain_channel(project.as_ref(), &channel_taints, channel, json);
         return;
+    }
+
+    // `--explain-units <CHANNEL>`: the channel's quantity and every direct
+    // contributor's unit (#144).
+    if let Some(channel) = &args.explain_units {
+        explain_units(project.as_ref(), &scripts, channel);
+        return;
+    }
+
+    // Scheduling checks (#145): T088 same-rate circular dependencies always;
+    // T089 rate inversion only when opted in via --select.
+    let schedule_diags: Vec<TypeDiagnostic> = project
+        .as_ref()
+        .map(|p| {
+            m1_typecheck::schedule::check(
+                p,
+                &scripts,
+                filter.select.contains("T088"),
+                filter.select.contains("T089"),
+            )
+        })
+        .unwrap_or_default();
+    for d in &schedule_diags {
+        if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
+            continue;
+        }
+        if json {
+            json_buf.project.push(d.clone());
+        } else {
+            let label = project_path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "<project>".into());
+            println!(
+                "{label}: {}[{}]: {}",
+                severity_str(d.inner.severity),
+                d.code.as_str(),
+                d.inner.message
+            );
+        }
     }
 
     // Per-file checks, then the once-per-run project-level audits.

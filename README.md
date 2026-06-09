@@ -119,6 +119,10 @@ This unlocks four new rules, added to the default rule set
 | T040 | Warning | **channel-multiple-assignment** — a Channel assigned more than once on a single code path (control-flow aware: mutually-exclusive `if`/`else` arms are not a conflict). Implemented as a whole-tree pass in `flow.rs`, not a node-at-a-time rule. |
 | T070 | Error | **when-is-exhaustive** — a `when (subject) { is (…) … }` over an enum-typed subject that does not cover every enumerator (`or` groups enumerators within one arm). One of the remaining §6 compile-time checks M1 Build enforces. An arm naming a non-member label is treated as a catch-all (the `when` is then exhaustive); a non-enum subject is T082's finding. |
 | T080 | Error / Warning | **invalid-value-reaches-finite-sink** — NaN/Inf provenance tracing (see below). Fires only for a value marked `@m1:requires-finite` / `@m1:safety-critical`; otherwise silent. |
+| T085 | Error / Warning | **user-argument-mismatch** — a call to a user function whose `.m1prj` `<Signature>` declares parameters: wrong arity is an Error, an incompatible argument type a Warning. `In.<Param>` reads inside the callee are typed from the same signature. |
+| T086 | Warning | **unit-mismatch** — a direct channel-to-channel copy whose two sides carry different physical quantities (base units from `Props Qty`). Computed right-hand sides are unchecked (arithmetic legitimately changes dimension). |
+| T088 | Warning (opt-in) | **circular-dependency** — same-rate write/read cycles between scripts (manual p.29). Opt-in: real projects contain deliberate same-rate feedback loops M1 Build accepts. |
+| T089 | Hint (opt-in) | **rate-inversion** — a faster script reads a channel written only at a slower rate (stale between writer ticks). Opt-in: often intentional downsampling. |
 | T082 | Error | **when-subject-not-enum** — the manual (p.32) requires the `when` argument to be an enumerated data type; fires when the subject's type is *known* and non-enum. |
 | T083 | Error | **static-local-initialiser** — a `static local`'s initial value must be a literal, enumerator or constant (manual p.34); runtime reads and calls flag. Constant-foldable literal arithmetic (`2 * 60`) is accepted. |
 | T084 | Error | **expand-bounds** — `expand` bounds must be literals or constants, 0 or positive (manual p.33); negative, float and runtime-value bounds flag. |
@@ -252,6 +256,8 @@ m1-typecheck --ignore T041 Scripts/*.m1scr        # silence the cfg-coverage aud
 m1-typecheck --audit-names --ignore-symbol T050:Root.GPS  # allow one naming exception
 m1-typecheck --format json Scripts/*.m1scr        # machine-parsable diagnostics
 m1-typecheck --select T064 Scripts/*.m1scr        # opt into wrong-argument-count
+m1-typecheck --select T088,T089 Scripts/*.m1scr   # scheduling audit (cycles + rate inversions)
+m1-typecheck --explain-units "Driveline.Accumulator.Voltage" Scripts/*.m1scr
 m1-typecheck --rules                              # list every T-code
 m1-typecheck --explain Demo.Rate Scripts/*.m1scr  # trace a channel's NaN provenance
 ```

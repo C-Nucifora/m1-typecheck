@@ -104,6 +104,7 @@ mod tests {
             locals: locals.iter().map(|(n, t)| (n.to_string(), *t)).collect(),
             group: None,
             project: None,
+            fn_symbol: None,
         };
         let mut out = Vec::new();
         walk(cst.root(), &scope, &mut out);

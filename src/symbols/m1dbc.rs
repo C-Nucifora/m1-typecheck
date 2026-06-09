@@ -87,6 +87,7 @@ pub fn augment(
             class,
             classname: Some(classname.to_string()),
             def_line: Some(line_index.line_at(node.range().start) as u32),
+            in_params: None,
             dbc_range,
             can,
             call_rate_hz: None,

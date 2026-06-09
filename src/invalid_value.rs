@@ -660,6 +660,7 @@ mod tests {
             locals: HashMap::new(),
             group: None,
             project: None,
+            fn_symbol: None,
         };
         let mut out = Vec::new();
         check(cst.root(), &scope, &anns, &mut out);

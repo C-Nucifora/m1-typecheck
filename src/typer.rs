@@ -257,6 +257,7 @@ mod tests {
             locals: HashMap::new(),
             group: None,
             project: None,
+            fn_symbol: None,
         };
         type_of(find_call(cst.root()).expect("a call expression"), &scope)
     }
