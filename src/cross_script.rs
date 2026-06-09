@@ -14,6 +14,9 @@
 //! walker, so T080/T081 fire at the sink with the full cross-script story.
 
 use crate::invalid_value::Taint;
+use crate::project::Project;
+use crate::resolve::Scope;
+use std::collections::{BTreeMap, HashSet};
 
 /// Solved per-channel invalid-value state, keyed by canonical symbol path
 /// (`Root.Sensors.Yaw`). Presence in the map means "can be NaN/Inf".
@@ -64,4 +67,191 @@ impl ChannelTaints {
             None => Taint::default(),
         }
     }
+}
+
+/// One summarised write: which script performed it and the taint of the
+/// written value (whose `deps` carry the cross-script read edges).
+struct Writer {
+    script: String,
+    taint: Taint,
+}
+
+/// Solve the project-wide channel taint graph. `scripts` pairs each script's
+/// file name with its source — same convention as
+/// [`Project::infer_return_types`]. Scripts with syntax errors (or
+/// pathologically deep CSTs, #94) are skipped; everything else contributes
+/// its write summary, and the writer→reader graph is iterated to a fixpoint.
+pub fn solve(project: &Project, scripts: &[(String, String)]) -> ChannelTaints {
+    let mut writers: BTreeMap<String, Vec<Writer>> = BTreeMap::new();
+    for (file_name, source) in scripts {
+        let cst = m1_core::parse(source);
+        if !cst.syntax_diagnostics().is_empty() {
+            continue;
+        }
+        // #94 parity: the summary walker recurses over the CST, so probe the
+        // (iteratively computed) depth and skip an over-deep file.
+        if cst.root().max_depth() > m1_core::MAX_RECURSION_DEPTH {
+            continue;
+        }
+        let group = project.group_for_script(file_name);
+        let scope = Scope {
+            locals: crate::rules::collect_locals(cst.root(), Some(project), group.as_deref()),
+            group,
+            project: Some(project),
+        };
+        let anns = m1_core::annotations(&cst, &m1_core::Registry::seed());
+        let fn_symbol = project.function_symbol_for_script(file_name);
+        // Per-file diagnostics are produced by the (later) reporting pass;
+        // here only the write summary matters.
+        let mut discard = Vec::new();
+        let writes = crate::invalid_value::check_with_channels(
+            cst.root(),
+            &scope,
+            &anns,
+            &ChannelTaints::default(),
+            fn_symbol.as_deref(),
+            &mut discard,
+        );
+        for (channel, taint) in writes {
+            writers.entry(channel).or_default().push(Writer {
+                script: file_name.clone(),
+                taint,
+            });
+        }
+    }
+    fixpoint(&writers)
+}
+
+/// How a channel became tainted — the provenance link the chain renderer walks.
+enum Cause {
+    /// The writer's own expression is an invalid-value source.
+    Local { script: String, why: String },
+    /// The taint arrived from an upstream channel the writing script reads.
+    Upstream { channel: String, script: String },
+}
+
+struct State {
+    latched: bool,
+    cause: Cause,
+}
+
+/// Iterate the channel graph to a fixpoint. The per-channel lattice
+/// (untainted < tainted < latched) is finite and [`upgrade`] is monotone, so
+/// the sweep terminates even with feedback loops between scripts.
+fn fixpoint(writers: &BTreeMap<String, Vec<Writer>>) -> ChannelTaints {
+    let mut state: BTreeMap<String, State> = BTreeMap::new();
+    loop {
+        let mut changed = false;
+        for (channel, ws) in writers {
+            for w in ws {
+                if w.taint.invalid && !w.taint.sanitised {
+                    let why = w
+                        .taint
+                        .why
+                        .clone()
+                        .unwrap_or_else(|| "an invalid-value source".into());
+                    upgrade(
+                        &mut state,
+                        channel,
+                        w.taint.latched,
+                        || Cause::Local {
+                            script: w.script.clone(),
+                            why,
+                        },
+                        &mut changed,
+                    );
+                }
+                // A sanitised write contributes nothing (its deps were cleared
+                // too): `@m1:sanitizes` is the cross-script taint barrier.
+                for (dep, latch_en_route) in &w.taint.deps {
+                    let Some(up_latched) = state.get(dep).map(|s| s.latched) else {
+                        continue;
+                    };
+                    upgrade(
+                        &mut state,
+                        channel,
+                        up_latched || *latch_en_route,
+                        || Cause::Upstream {
+                            channel: dep.clone(),
+                            script: w.script.clone(),
+                        },
+                        &mut changed,
+                    );
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    render(&state)
+}
+
+/// Monotone join into `state[channel]`. The first cause to taint a channel is
+/// kept (deterministic: the sweep order is the BTreeMap order); a later latch
+/// escalation flips the bit without rewriting the provenance.
+fn upgrade(
+    state: &mut BTreeMap<String, State>,
+    channel: &str,
+    latched: bool,
+    cause: impl FnOnce() -> Cause,
+    changed: &mut bool,
+) {
+    match state.get_mut(channel) {
+        None => {
+            state.insert(
+                channel.to_string(),
+                State {
+                    latched,
+                    cause: cause(),
+                },
+            );
+            *changed = true;
+        }
+        Some(s) if latched && !s.latched => {
+            s.latched = true;
+            *changed = true;
+        }
+        _ => {}
+    }
+}
+
+/// Render each tainted channel's backward provenance chain. First-cause-wins
+/// makes the cause graph a forest rooted at `Local` causes, so the walk is
+/// acyclic; the visited guard is defensive belt-and-braces.
+fn render(state: &BTreeMap<String, State>) -> ChannelTaints {
+    let mut map = BTreeMap::new();
+    for (channel, s) in state {
+        let mut chain = Vec::new();
+        let mut cur = channel.as_str();
+        let mut visited: HashSet<&str> = HashSet::new();
+        loop {
+            if !visited.insert(cur) {
+                chain.push(format!("`{cur}` closes a feedback loop"));
+                break;
+            }
+            match state.get(cur).map(|s| &s.cause) {
+                Some(Cause::Local { script, why }) => {
+                    chain.push(format!("`{cur}` is written by `{script}`: {why}"));
+                    break;
+                }
+                Some(Cause::Upstream {
+                    channel: up,
+                    script,
+                }) => {
+                    chain.push(format!("`{cur}` is written by `{script}` from `{up}`"));
+                    cur = up;
+                }
+                None => break,
+            }
+        }
+        map.insert(
+            channel.clone(),
+            ChannelTaint {
+                latched: s.latched,
+                chain,
+            },
+        );
+    }
+    ChannelTaints { map }
 }
