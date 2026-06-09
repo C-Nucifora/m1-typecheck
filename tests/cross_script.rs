@@ -238,3 +238,24 @@ fn function_out_taint_reaches_call_sites() {
         d.inner.message
     );
 }
+
+#[test]
+fn explain_resolves_bare_and_canonical_spellings() {
+    use m1_typecheck::cross_script::explain;
+    let p = project();
+    let taints = solve(&p, &scripts(&[TAINTING_WRITER]));
+
+    // Both spellings of the tainted channel resolve to the same explanation.
+    let bare = explain(&p, &taints, "Sensors.Yaw").expect("bare spelling resolves");
+    let full = explain(&p, &taints, "Root.Sensors.Yaw").expect("canonical spelling resolves");
+    assert_eq!(bare.channel, "Root.Sensors.Yaw");
+    assert_eq!(full.channel, "Root.Sensors.Yaw");
+    assert!(bare.taint.is_some(), "tainted channel explains its chain");
+
+    // A known-but-clean channel explains as untainted.
+    let clean = explain(&p, &taints, "Nav.Heading").expect("known channel");
+    assert!(clean.taint.is_none());
+
+    // An unknown symbol is a caller error (the CLI exits 2 on None).
+    assert!(explain(&p, &taints, "Nope.Missing").is_none());
+}

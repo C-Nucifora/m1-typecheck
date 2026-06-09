@@ -69,6 +69,32 @@ impl ChannelTaints {
     }
 }
 
+/// One channel's solved invalid-value status, as reported by [`explain`]
+/// (the `--explain` CLI query). `taint: None` means no invalid-value path
+/// reaches the channel as far as the cross-script analysis can see.
+pub struct Explanation {
+    /// The canonical (`Root.`-qualified) channel path.
+    pub channel: String,
+    pub taint: Option<ChannelTaint>,
+}
+
+/// Look up `channel` — canonical `Root.`-qualified or bare spelling — in the
+/// project and report its solved status. `None` when no such symbol exists.
+pub fn explain(project: &Project, taints: &ChannelTaints, channel: &str) -> Option<Explanation> {
+    let canonical = if project.symbols().get(channel).is_some() {
+        channel.to_string()
+    } else {
+        let q = m1_workspace::qualify_root(channel).into_owned();
+        project.symbols().get(&q)?;
+        q
+    };
+    let taint = taints.get(&canonical).cloned();
+    Some(Explanation {
+        channel: canonical,
+        taint,
+    })
+}
+
 /// One summarised write: which script performed it and the taint of the
 /// written value (whose `deps` carry the cross-script read edges).
 struct Writer {
