@@ -34,32 +34,36 @@ fn t050_flags_only_violators() {
         .map(|d| d.inner.message.clone())
         .collect();
     let all = msgs.join("\n");
-    // Violators present.
+    // Manual p.64 (#153): object names begin with an uppercase letter; spaces
+    // are legal. Lowercase-leading objects flag; locals are L016's concern.
     assert!(
-        all.contains("BrakePressure"),
-        "channel UpperCamel should flag: {all}"
+        all.contains("`brakePressure`"),
+        "lowercase channel should flag: {all}"
     );
     assert!(
-        all.contains("brakeBias"),
-        "parameter lowerCamel should flag"
+        all.contains("`brakeBias`"),
+        "lowercase parameter should flag"
     );
-    assert!(all.contains("trackWidth"), "constant non-caps should flag");
     assert!(
-        all.contains("CheckLimit"),
-        "function UpperCamel should flag"
+        all.contains("`trackWidth`"),
+        "constant non-caps should flag"
     );
-    assert!(all.contains("bad state"), "enum with space should flag");
+    assert!(
+        all.contains("`checkLimit`"),
+        "lowercase function should flag"
+    );
+    assert!(all.contains("bad state"), "lowercase enum name should flag");
     // Conformers absent.
     assert!(
-        !all.contains("`brakePressure`"),
-        "conforming channel must not flag"
+        !all.contains("`BrakePressure`"),
+        "uppercase channel must not flag"
     );
     assert!(
         !all.contains("`BrakeBias`"),
         "conforming parameter must not flag"
     );
     assert!(!all.contains("`TRACKWIDTH`"));
-    assert!(!all.contains("`checkLimit`"));
+    assert!(!all.contains("`CheckLimit`"), "uppercase function fine");
     assert!(!all.contains("`GoodState`"));
 }
 
@@ -124,4 +128,38 @@ fn t010_clean_project_has_none() {
         t010_messages(&proj()).is_empty(),
         "project without constrained classes must produce no T010"
     );
+}
+
+// ---- T087 type-restricted-to-locals (#149) --------------------------------
+
+#[test]
+fn t087_flags_bool_channels_and_parameters() {
+    let p = load("type_restrictions.m1prj");
+    let msgs: Vec<String> = p
+        .audit()
+        .iter()
+        .filter(|d| d.code == TypeCode::T087)
+        .map(|d| d.inner.message.clone())
+        .collect();
+    let all = msgs.join("\n");
+    assert!(all.contains("boolFlag"), "bool channel must flag: {all}");
+    assert!(all.contains("BoolParam"), "bool parameter must flag: {all}");
+    assert!(!all.contains("fineFloat"), "f32 channel must not flag");
+    assert!(!all.contains("fineInt"), "s32 channel must not flag");
+    assert_eq!(msgs.len(), 2, "exactly the two bool symbols: {all}");
+}
+
+#[test]
+fn project_diagnostics_carry_their_subject() {
+    // #151: every project-level (zero-range) finding names the symbol it is
+    // about, so [diagnostics] ignore_symbols can suppress it per-symbol.
+    let p = proj();
+    for d in p.audit() {
+        assert!(
+            d.subject.is_some(),
+            "audit diagnostic without subject: {} {}",
+            d.code.as_str(),
+            d.inner.message
+        );
+    }
 }

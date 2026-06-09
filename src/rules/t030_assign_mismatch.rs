@@ -9,6 +9,10 @@ pub struct Rule;
 
 impl super::Rule for Rule {
     fn check_node(&self, node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>) {
+        if node.kind() == Kind::LocalDeclaration {
+            check_local_declaration(node, scope, out);
+            return;
+        }
         if node.kind() != Kind::AssignmentStatement {
             return;
         }
@@ -48,6 +52,55 @@ impl super::Rule for Rule {
             ));
         }
     }
+}
+
+/// `local <Type> x = init;` — the declared annotation is authoritative (#142),
+/// so an initialiser whose type is incompatible with it is the same class of
+/// bug as a mismatched channel assignment. Also catches the sign error the
+/// annotation makes expressible: a negative initialiser on an
+/// `<Unsigned Integer>` local (numerically "compatible", semantically wrong).
+fn check_local_declaration(node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>) {
+    use m1_core::Field;
+    let Some(declared) = node
+        .child_by_field(Field::TypeAnnotation)
+        .and_then(|a| a.child_by_field(Field::Type))
+        .and_then(|t| crate::types::declared_local_type(t.text()))
+    else {
+        return;
+    };
+    let Some(init) = node.child_by_field(Field::Value) else {
+        return;
+    };
+    if declared == ValueType::Unsigned && is_negative_literal(&init) {
+        out.push(make(
+            TypeCode::T030,
+            node,
+            Severity::Warning,
+            "negative initial value for an `<Unsigned Integer>` local".into(),
+        ));
+        return;
+    }
+    let init_ty = type_of(init, scope);
+    if !init_ty.is_known() {
+        return;
+    }
+    if !compatible(declared, init_ty) {
+        out.push(make(
+            TypeCode::T030,
+            node,
+            Severity::Warning,
+            format!("initialising a local declared {declared:?} with a {init_ty:?} value"),
+        ));
+    }
+}
+
+/// `-<number>` (a unary minus over a numeric literal).
+fn is_negative_literal(n: &Node) -> bool {
+    n.kind() == Kind::UnaryExpression
+        && n.children().iter().any(|c| c.kind() == Kind::Minus)
+        && n.named_children()
+            .into_iter()
+            .any(|c| c.kind() == Kind::Number)
 }
 
 /// Assignment compatibility (conservative).

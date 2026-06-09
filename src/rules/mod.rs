@@ -19,6 +19,8 @@ pub mod t062_deprecated_overload;
 pub mod t063_calibration_only;
 pub mod t064_arg_count;
 pub mod t070_when_exhaustive;
+pub mod t083_static_local_init;
+pub mod t084_expand_bounds;
 
 pub trait Rule: Send + Sync {
     fn check_node(&self, node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>);
@@ -79,6 +81,8 @@ impl Default for Registry {
                 Box::new(t062_deprecated_overload::Rule),
                 Box::new(t063_calibration_only::Rule),
                 Box::new(t070_when_exhaustive::Rule),
+                Box::new(t083_static_local_init::Rule),
+                Box::new(t084_expand_bounds::Rule),
             ],
         }
     }
@@ -120,6 +124,21 @@ pub(crate) fn collect_locals(
             && let Some(name_node) = n.child_by_field(Field::Name)
         {
             let name = name_node.text().to_string();
+            // An explicit `local <Type> x = …;` annotation (manual p.34) is
+            // authoritative: the declared type wins over initialiser inference
+            // (#142 — `local <Float> x = 1;` is Float, not Integer). Unknown
+            // annotation names fall back to inference.
+            if let Some(declared) = n
+                .child_by_field(Field::TypeAnnotation)
+                .and_then(|a| a.child_by_field(Field::Type))
+                .and_then(|t| crate::types::declared_local_type(t.text()))
+            {
+                locals.insert(name, declared);
+                for c in n.children() {
+                    walk(c, locals, project, group);
+                }
+                return;
+            }
             // The `value` field is the initializer expression (the grammar names
             // it; a bare `local x;` has none). Using the field avoids the old
             // kind-exclusion heuristic, which dropped Identifier initialisers
@@ -400,5 +419,40 @@ mod tests {
     fn bare_allow_suppresses_every_code_on_target() {
         let src = "local b = 1.5;\nlocal c = 2.5;\n// @m1:allow\nif (b == c) { }\n";
         assert!(!has(&check_script_no_project(src), "T002"));
+    }
+
+    // ── #142: explicit `local <Type>` annotations are authoritative ────────
+
+    #[test]
+    fn declared_local_type_wins_over_initialiser_inference() {
+        // Both locals are integer-initialised; only the declared <Float> type
+        // makes this a float equality (T002).
+        let src = "local <Float> b = 1;\nlocal <Float> c = 2;\nif (b == c) { }\n";
+        assert!(has(&check_script_no_project(src), "T002"));
+    }
+
+    #[test]
+    fn declared_integer_local_with_float_initialiser_is_t030() {
+        let src = "local <Integer> x = 1.5;\n";
+        assert!(has(&check_script_no_project(src), "T030"));
+    }
+
+    #[test]
+    fn negative_initialiser_on_unsigned_local_is_t030() {
+        let src = "local <Unsigned Integer> x = -1;\n";
+        assert!(has(&check_script_no_project(src), "T030"));
+    }
+
+    #[test]
+    fn corpus_annotation_spellings_are_clean() {
+        // Real-corpus shapes: lowercase <boolean>, <Unsigned Integer> with hex,
+        // <Integer> with a negative literal — all well-typed, no diagnostics.
+        let src = "local <boolean> ok = false;\nlocal <Unsigned Integer> h = 0x00;\nlocal <Integer> i = -1;\nlocal <Float> f = 1;\n";
+        let r = check_script_no_project(src);
+        assert!(
+            r.diagnostics.is_empty(),
+            "expected clean, got {:?}",
+            r.diagnostics
+        );
     }
 }

@@ -35,6 +35,15 @@ struct Args {
     /// Suppress these T-codes (comma-separated, e.g. `T041`).
     #[arg(long, value_delimiter = ',')]
     ignore: Option<Vec<String>>,
+    /// Suppress a project-level code for one symbol (comma-separated
+    /// `CODE:Symbol.Path` entries, e.g. `T050:Root.Engine.Speed`). Overlays
+    /// the `[diagnostics] ignore_symbols` list from m1-tools.toml.
+    #[arg(
+        long = "ignore-symbol",
+        value_name = "CODE:PATH",
+        value_delimiter = ','
+    )]
+    ignore_symbol: Option<Vec<String>>,
     /// Output format.
     #[arg(long, value_enum, default_value_t = Format::Human)]
     format: Format,
@@ -281,7 +290,7 @@ fn audit_project(
     // the build unless the caller opts into fail-on-warning.
     if let Some(p) = project {
         for d in p.missing_cfg_parameters() {
-            if !filter.allows(d.code.as_str()) {
+            if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
                 continue;
             }
             if json {
@@ -301,7 +310,7 @@ fn audit_project(
         match project {
             Some(p) => {
                 for d in p.audit() {
-                    if !filter.allows(d.code.as_str()) {
+                    if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
                         continue;
                     }
                     if json {
@@ -445,10 +454,11 @@ fn main() {
         .and_then(|p| p.parent())
         .or_else(|| args.files.first().and_then(|f| f.parent()))
         .map(Path::to_path_buf);
-    let filter = DiagFilter::resolve(
+    let filter = DiagFilter::resolve_with_symbols(
         filter_root.as_deref(),
         args.select.clone(),
         args.ignore.clone(),
+        args.ignore_symbol.clone(),
     );
 
     // Opt-in rules (e.g. T064) run only when explicitly selected. A code is

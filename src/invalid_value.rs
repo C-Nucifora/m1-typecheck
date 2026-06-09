@@ -18,15 +18,16 @@
 //! - **Sources** (`can-be-invalid`): division (denominator may be 0),
 //!   domain-restricted math (`Calculate.FastSquareRoot`, `Math.Log`,
 //!   `Math.Log10`, `Calculate.InverseSin`, `Calculate.InverseCos`), explicit
-//!   `Calculate.Infinity()`, and reads of a channel/local declared
-//!   `@m1:source`/`@m1:external` (a sensor that can drop out).
-//! - **Sanitiser** that clears the bit: an assignment annotated
-//!   `@m1:sanitizes`/`@m1:clears` (an author-declared taint barrier). Note
-//!   `Math.IsNaN()` is **calibration-only** per the M1 Development Manual (its
-//!   only manual example is inside a Tune calibration method alongside
-//!   `UI.PromptOK`), so it cannot appear in an ECU `.m1scr` — T063 already flags
-//!   it — and is therefore *not* the in-script guard. **Clamps do _not_
-//!   sanitise** either — NaN compares false against everything, so
+//!   `Calculate.Infinity()` / `Calculate.NAN()`, and reads of a channel/local
+//!   declared `@m1:source`/`@m1:external` (a sensor that can drop out).
+//! - **Sanitisers** that clear the bit: an assignment annotated
+//!   `@m1:sanitizes`/`@m1:clears` (an author-declared taint barrier), or the
+//!   real in-script guard `Calculate.IsNAN(x) ? fallback : x` (#143) — the
+//!   ECU-legal NaN predicate, manual p.48. Note `Math.IsNaN()` is
+//!   **calibration-only** per the M1 Development Manual (its only manual
+//!   example is inside a Tune calibration method alongside `UI.PromptOK`), so
+//!   it cannot appear in an ECU `.m1scr` — T063 already flags it. **Clamps do
+//!   _not_ sanitise** — NaN compares false against everything, so
 //!   `Limit.Range`/`Calculate.Min`/`Calculate.Max` pass it straight through.
 //!   This is the dangerous "false safety" the issue calls out.
 //! - **Latching escalation:** a tainted value reaching a stateful function
@@ -54,7 +55,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 pub(crate) struct Taint {
     /// The value can be NaN/Inf.
     pub(crate) invalid: bool,
-    /// An explicit finite guard (`Math.IsNaN` fallback / `@sanitizes`) cleared it.
+    /// An explicit finite guard (`Calculate.IsNAN` ternary / `@sanitizes`) cleared it.
     pub(crate) sanitised: bool,
     /// It flowed through a stateful function that latches NaN — escalate.
     pub(crate) latched: bool,
@@ -351,7 +352,9 @@ fn message(t: &Taint) -> String {
             "; it reaches a stateful function (Filter/Integral/Derivative) that latches NaN",
         );
     }
-    m.push_str(" — guard it with Math.IsNaN() or a finite fallback");
+    m.push_str(
+        " — guard it with a `Calculate.IsNAN(x) ? fallback : x` ternary or a finite fallback",
+    );
     m
 }
 
@@ -420,26 +423,90 @@ fn binary_taint(node: Node, ctx: &Ctx, env: &HashMap<String, Taint>) -> Taint {
 fn ternary_taint(node: Node, ctx: &Ctx, env: &HashMap<String, Taint>) -> Taint {
     // `condition ? consequence : alternative`. The condition is a boolean; the
     // result is whichever branch is selected, so its taint is the join of the
-    // two branches. We deliberately do NOT treat any condition as a sanitiser:
-    // the manual's NaN predicate `Math.IsNaN` is calibration-only and cannot
-    // appear in an ECU script, and a plain finite-range comparison does not
-    // catch NaN (NaN fails every comparison). The in-script taint barrier is an
-    // explicit `@m1:sanitizes`/`@m1:clears` annotation.
-    node.named_children()
+    // two branches.
+    //
+    // One condition IS a real in-script guard (#143): `Calculate.IsNAN(x)` —
+    // the ECU-legal NaN predicate (manual p.48; `Math.IsNaN` is the
+    // calibration-only one). In `Calculate.IsNAN(x) ? fallback : x` the
+    // `x` branch executes only when `x` is not NaN, so that exact occurrence
+    // is cleared (and its cross-script dependency edge dropped — the guard is
+    // a barrier for the fixpoint solver too). A guarded branch that is any
+    // OTHER expression keeps its own taint. Plain finite-range comparisons
+    // still sanitise nothing (NaN fails every comparison); the general
+    // barrier remains `@m1:sanitizes`/`@m1:clears`.
+    let exprs: Vec<Node> = node
+        .named_children()
         .into_iter()
         .filter(|c| is_expr(c.kind()))
+        .collect();
+    if let [cond, consequence, alternative] = exprs[..]
+        && let Some((guarded, negated)) = isnan_guard(cond)
+    {
+        // Plain guard: the NOT-NaN branch is the alternative; `not`/`!` swaps.
+        let (nan_branch, ok_branch) = if negated {
+            (alternative, consequence)
+        } else {
+            (consequence, alternative)
+        };
+        let ok = if ok_branch.text().trim() == guarded.text().trim() {
+            Taint::cleared()
+        } else {
+            expr_taint(ok_branch, ctx, env)
+        };
+        return expr_taint(nan_branch, ctx, env).join(ok);
+    }
+    exprs
+        .into_iter()
         .skip(1) // drop the condition; keep the two branches
         .map(|c| expr_taint(c, ctx, env))
         .fold(Taint::finite(), Taint::join)
+}
+
+/// If `cond` is (possibly parenthesised / boolean-negated) `Calculate.IsNAN(x)`
+/// with exactly one argument, return the guarded argument and whether the
+/// predicate is negated.
+fn isnan_guard(cond: Node) -> Option<(Node, bool)> {
+    let mut n = cond;
+    let mut negated = false;
+    loop {
+        match n.kind() {
+            Kind::ParenthesizedExpression => {
+                n = n.named_children().into_iter().find(|c| is_expr(c.kind()))?;
+            }
+            Kind::UnaryExpression => {
+                let is_not = n
+                    .children()
+                    .iter()
+                    .any(|c| matches!(c.kind(), Kind::Not | Kind::Bang));
+                if !is_not {
+                    return None;
+                }
+                negated = !negated;
+                n = n.named_children().into_iter().find(|c| is_expr(c.kind()))?;
+            }
+            Kind::CallExpression => {
+                if callee_path(n)? != "Calculate.IsNAN" {
+                    return None;
+                }
+                let args = call_args(n);
+                let [arg] = args[..] else { return None };
+                return Some((arg, negated));
+            }
+            _ => return None,
+        }
+    }
 }
 
 fn call_taint(node: Node, ctx: &Ctx, env: &HashMap<String, Taint>) -> Taint {
     let Some(callee) = callee_path(node) else {
         return Taint::finite();
     };
-    // Explicit infinity.
+    // Explicit non-finite constants.
     if callee == "Calculate.Infinity" {
         return Taint::source("`Calculate.Infinity()` (explicit +Inf)");
+    }
+    if callee == "Calculate.NAN" {
+        return Taint::source("`Calculate.NAN()` (explicit NaN)");
     }
     let args: Vec<Taint> = call_args(node)
         .into_iter()
@@ -635,10 +702,46 @@ mod tests {
 
     #[test]
     fn ternary_does_not_sanitise_by_itself() {
-        // A bare ternary is not a sanitiser: its condition cannot be a valid
-        // in-script NaN guard (Math.IsNaN is calibration-only), so a tainted
-        // branch still flags. The in-script barrier is `@m1:sanitizes`.
+        // A bare ternary is not a sanitiser: a plain condition can't catch NaN
+        // (NaN fails every comparison), so a tainted branch still flags. The
+        // barriers are `Calculate.IsNAN` guards and `@m1:sanitizes`.
         let src = "// @m1:requires-finite\nOut = cond ? 0 : a / b;\n";
+        assert!(has_t080(&run(src)));
+    }
+
+    // ── #143: Calculate.IsNAN guard + Calculate.NAN source ────────────────
+
+    #[test]
+    fn isnan_guard_ternary_clears_the_guarded_branch() {
+        let src = "// @m1:requires-finite\nOut = Calculate.IsNAN(a / b) ? 0 : a / b;\n";
+        assert!(!has_t080(&run(src)), "guarded expression must be cleared");
+    }
+
+    #[test]
+    fn negated_isnan_guard_swaps_branches() {
+        let src = "// @m1:requires-finite\nOut = not Calculate.IsNAN(a / b) ? a / b : 0;\n";
+        assert!(!has_t080(&run(src)));
+        let bang = "// @m1:requires-finite\nOut = !Calculate.IsNAN(a / b) ? a / b : 0;\n";
+        assert!(!has_t080(&run(bang)));
+    }
+
+    #[test]
+    fn isnan_guard_does_not_clear_a_different_expression() {
+        // The guard tests `a / b` but the not-NaN branch is `c / d` — unguarded.
+        let src = "// @m1:requires-finite\nOut = Calculate.IsNAN(a / b) ? 0 : c / d;\n";
+        assert!(has_t080(&run(src)));
+    }
+
+    #[test]
+    fn isnan_guard_wrong_branch_still_flags() {
+        // The consequence runs when the value IS NaN — using it there is the bug.
+        let src = "// @m1:requires-finite\nOut = Calculate.IsNAN(a / b) ? a / b : 0;\n";
+        assert!(has_t080(&run(src)));
+    }
+
+    #[test]
+    fn calculate_nan_is_an_explicit_source() {
+        let src = "// @m1:requires-finite\nOut = Calculate.NAN();\n";
         assert!(has_t080(&run(src)));
     }
 
