@@ -1,6 +1,6 @@
 [package]
 name = "m1-typecheck"
-version = "0.25.5"
+version = "0.26.0"
 edition = "2024"
 default-run = "m1-typecheck"
 license = "GPL-3.0-or-later"
