@@ -11,12 +11,26 @@ impl super::Rule for Rule {
         if node.kind() != Kind::WhenStatement {
             return;
         }
-        // The subject must resolve to an enum value type; otherwise stay silent
-        // (conservative, like the other v2 rules).
         let Some(subject) = node.child_by_field(Field::Subject) else {
             return;
         };
-        let ValueType::Enum(id) = type_of(subject, scope) else {
+        let subject_ty = type_of(subject, scope);
+        let ValueType::Enum(id) = subject_ty else {
+            // Manual p.32: "The [argument] used in the when statement must be of
+            // an enumerated data type." A subject of a KNOWN non-enum type is
+            // T082; an Unknown subject stays silent (conservative, like the
+            // other rules).
+            if subject_ty.is_known() {
+                out.push(make(
+                    TypeCode::T082,
+                    &subject,
+                    Severity::Error,
+                    format!(
+                        "`when` subject must be an enumerated type; `{}` is {subject_ty:?}",
+                        subject.text().trim()
+                    ),
+                ));
+            }
             return;
         };
         let Some(project) = scope.project else { return };

@@ -25,6 +25,9 @@ pub enum TypeCode {
     T071, // name-case-collision (project audit)
     T080, // invalid-value-reaches-finite-sink (NaN/Inf provenance; @requires-finite/@safety-critical)
     T081, // nan-to-integer (a possibly NaN/Inf value is stored to an integer channel)
+    T082, // when-subject-not-enum (manual p.32: the when argument must be an enumerated type)
+    T083, // static-local-initialiser (manual p.34: must be a literal, enumerator or constant)
+    T084, // expand-bounds (manual p.33: literals or constants, 0 or positive)
     T090, // expression-nesting-too-deep (analysis skipped to avoid a stack overflow)
 }
 
@@ -53,6 +56,9 @@ impl TypeCode {
             TypeCode::T071 => "T071",
             TypeCode::T080 => "T080",
             TypeCode::T081 => "T081",
+            TypeCode::T082 => "T082",
+            TypeCode::T083 => "T083",
+            TypeCode::T084 => "T084",
             TypeCode::T090 => "T090",
         }
     }
@@ -85,6 +91,9 @@ impl TypeCode {
             TypeCode::T071 => "name-case-collision",
             TypeCode::T080 => "invalid-value-reaches-finite-sink",
             TypeCode::T081 => "nan-to-integer",
+            TypeCode::T082 => "when-subject-not-enum",
+            TypeCode::T083 => "static-local-initialiser",
+            TypeCode::T084 => "expand-bounds",
             TypeCode::T090 => "expression-nesting-too-deep",
         }
     }
@@ -97,7 +106,7 @@ impl TypeCode {
         use TypeCode::*;
         &[
             T001, T002, T003, T004, T010, T020, T021, T030, T031, T040, T041, T042, T050, T060,
-            T061, T062, T063, T064, T070, T071, T080, T081, T090,
+            T061, T062, T063, T064, T070, T071, T080, T081, T082, T083, T084, T090,
         ]
     }
 }
@@ -173,6 +182,6 @@ mod tests {
             );
         }
         // Catalogue size tracks the enum (bump both together).
-        assert_eq!(codes.len(), 23);
+        assert_eq!(codes.len(), 26);
     }
 }

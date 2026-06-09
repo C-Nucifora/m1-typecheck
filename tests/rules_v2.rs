@@ -151,9 +151,27 @@ fn t070_no_flag_when_all_covered_via_or() {
 #[test]
 fn t070_no_flag_non_enum_subject() {
     let p = proj();
-    // `gain` is an f32 channel, not an enum -> rule stays silent.
+    // `gain` is an f32 channel, not an enum -> exhaustiveness stays silent;
+    // the non-enum subject itself is T082's finding (manual p.32).
     let src = "when (gain) {\nis (Off) {\n}\n}\n";
-    assert!(!codes(&p, src).contains(&TypeCode::T070));
+    let got = codes(&p, src);
+    assert!(!got.contains(&TypeCode::T070));
+    assert!(got.contains(&TypeCode::T082), "non-enum subject is T082");
+}
+
+#[test]
+fn t082_no_flag_enum_subject() {
+    let p = proj();
+    let src = "when (SwitchMode.Value) {\nis (Off) {\n}\nis (On) {\n}\n}\n";
+    assert!(!codes(&p, src).contains(&TypeCode::T082));
+}
+
+#[test]
+fn t082_no_flag_unknown_subject() {
+    let p = proj();
+    // An unresolvable subject stays silent (T001 territory, not T082).
+    let src = "when (Mystery Channel) {\nis (Off) {\n}\n}\n";
+    assert!(!codes(&p, src).contains(&TypeCode::T082));
 }
 
 #[test]
