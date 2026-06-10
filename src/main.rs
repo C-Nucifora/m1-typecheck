@@ -329,7 +329,8 @@ fn audit_project(
     filter: &DiagFilter,
     json: bool,
     json_buf: &mut JsonBuf,
-) {
+) -> bool {
+    let mut had_error = false;
     let path_label = || {
         project_path
             .map(|p| p.display().to_string())
@@ -345,6 +346,7 @@ fn audit_project(
             if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
                 continue;
             }
+            had_error |= d.inner.severity == Severity::Error;
             if json {
                 json_buf.project.push(d);
             } else {
@@ -367,6 +369,7 @@ fn audit_project(
             if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
                 continue;
             }
+            had_error |= d.inner.severity == Severity::Error;
             if json {
                 json_buf.project.push(d);
             } else {
@@ -390,6 +393,7 @@ fn audit_project(
             if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
                 continue;
             }
+            had_error |= d.inner.severity == Severity::Error;
             if json {
                 json_buf.project.push(d);
             } else {
@@ -411,6 +415,7 @@ fn audit_project(
                     if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
                         continue;
                     }
+                    had_error |= d.inner.severity == Severity::Error;
                     if json {
                         json_buf.project.push(d);
                     } else {
@@ -427,6 +432,7 @@ fn audit_project(
             None => eprintln!("m1-typecheck: --audit-names needs a project; skipping"),
         }
     }
+    had_error
 }
 
 /// Render the buffered JSON document to stdout (JSON mode only). Human-mode
@@ -715,6 +721,10 @@ fn main() {
     // resolved" (1 cycle each on the real AV-M1 project). T089 (rate inversion)
     // stays OPT-IN — M1 Build does not flag it (downsampled reads are intentional
     // and accepted), so default-on would diverge from M1 Build.
+    // Any kept project-level diagnostic at Error severity must fail the run
+    // (#170): T093/T094 are M1 Build Errors 1627/1631, so CI has to gate on
+    // them exactly as it does on script-level errors.
+    let mut project_had_error = false;
     let schedule_diags: Vec<TypeDiagnostic> = project
         .as_ref()
         .map(|p| {
@@ -725,6 +735,7 @@ fn main() {
         if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
             continue;
         }
+        project_had_error |= d.inner.severity == Severity::Error;
         if json {
             json_buf.project.push(d.clone());
         } else {
@@ -754,6 +765,7 @@ fn main() {
         if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
             continue;
         }
+        project_had_error |= d.inner.severity == Severity::Error;
         if json {
             json_buf.project.push(d.clone());
         } else {
@@ -780,7 +792,7 @@ fn main() {
         json,
         &mut json_buf,
     );
-    audit_project(
+    let audit_had_error = audit_project(
         &args,
         project.as_ref(),
         project_path.as_ref(),
@@ -792,7 +804,7 @@ fn main() {
     // Emit the buffered JSON document (no-op in human mode).
     emit_output(project_path.as_ref(), json, &json_buf);
 
-    if had_error {
+    if had_error || project_had_error || audit_had_error {
         process::exit(1);
     }
 }

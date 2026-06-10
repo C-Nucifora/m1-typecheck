@@ -17,7 +17,7 @@ use crate::project::Project;
 use crate::resolve::{Resolution, Scope, resolve};
 use crate::symbols::SymbolKind;
 use crate::typer::{is_expr, path_text};
-use m1_core::{Kind, Node, Severity};
+use m1_core::{Field, Kind, Node, Severity};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Per-script channel access sets, resolved against the project.
@@ -52,15 +52,65 @@ fn script_io(project: &Project, file_name: &str, source: &str) -> Option<ScriptI
         writes: BTreeSet::new(),
         reads: BTreeSet::new(),
     };
-    collect(cst.root(), &scope, &mut io);
+    collect(cst.root(), &scope, &mut Vec::new(), &mut io);
     Some(io)
 }
 
-fn channel_path(n: Node, scope: &Scope) -> Option<String> {
-    if !matches!(n.kind(), Kind::Identifier | Kind::MemberExpression) {
-        return None;
+/// Active `expand` variable bindings, innermost last: `(name, start, end)`.
+type ExpandBindings = Vec<(String, i64, i64)>;
+
+/// The `(variable, start, end)` binding of an `expand` statement whose bounds
+/// are integer literals. Constant-named bounds (allowed by the manual) are not
+/// evaluated — their bodies keep the pre-#170 behaviour (templated paths stay
+/// unresolved).
+fn expand_binding(n: &Node) -> Option<(String, i64, i64)> {
+    let var = n.child_by_field(Field::Variable)?.text().trim().to_string();
+    let lo: i64 = n.child_by_field(Field::Start)?.text().trim().parse().ok()?;
+    let hi: i64 = n.child_by_field(Field::End)?.text().trim().parse().ok()?;
+    // A degenerate or huge range is not worth enumerating (T084 flags bad
+    // bounds; real corpora use single-digit ranges).
+    (lo <= hi && hi - lo < 256).then_some((var, lo, hi))
+}
+
+/// Every compile-time substitution of `$(VAR)` templates in `text` under the
+/// active `expand` bindings — `expand` is text substitution (manual p.33), so
+/// `Seg $(SEG).Volt` under `expand (SEG = 1 to 2)` accesses `Seg 1.Volt` AND
+/// `Seg 2.Volt`. Text without templates passes through as itself; a runaway
+/// combination count returns empty (treated as unresolvable).
+fn substituted(text: &str, bindings: &ExpandBindings) -> Vec<String> {
+    if !text.contains("$(") {
+        return vec![text.to_string()];
     }
-    resolve_channel(&path_text(n), scope)
+    let mut variants = vec![text.to_string()];
+    for (var, lo, hi) in bindings {
+        let needle = format!("$({var})");
+        if !variants[0].contains(&needle) {
+            continue;
+        }
+        let mut next = Vec::with_capacity(variants.len() * (hi - lo + 1) as usize);
+        for v in &variants {
+            for val in *lo..=*hi {
+                next.push(v.replace(&needle, &val.to_string()));
+            }
+        }
+        variants = next;
+        if variants.len() > 4096 {
+            return Vec::new();
+        }
+    }
+    variants
+}
+
+/// Every channel/parameter symbol path `n` accesses, after `expand`
+/// substitution: one path for a plain reference, several for a templated one.
+fn channel_paths(n: Node, scope: &Scope, bindings: &ExpandBindings) -> Vec<String> {
+    if !matches!(n.kind(), Kind::Identifier | Kind::MemberExpression) {
+        return Vec::new();
+    }
+    substituted(&path_text(n), bindings)
+        .iter()
+        .filter_map(|p| resolve_channel(p, scope))
+        .collect()
 }
 
 /// Resolve `path` to a `Channel`/`Parameter` symbol path, or `None`. Handles the
@@ -86,21 +136,34 @@ fn resolve_channel(path: &str, scope: &Scope) -> Option<String> {
     }
 }
 
-fn collect(n: Node, scope: &Scope, io: &mut ScriptIo) {
+fn collect(n: Node, scope: &Scope, bindings: &mut ExpandBindings, io: &mut ScriptIo) {
+    // `expand` body: bind the loop variable so `$(VAR)` templates in access
+    // paths substitute to the channels M1 Build's compile-time expansion
+    // actually touches (#170 — the EV-M1 T093/T094 false positives).
+    if n.kind() == Kind::ExpandStatement
+        && let Some(b) = expand_binding(&n)
+    {
+        bindings.push(b);
+        for c in n.children() {
+            collect(c, scope, bindings, io);
+        }
+        bindings.pop();
+        return;
+    }
     if n.kind() == Kind::AssignmentStatement {
         let kids = n.named_children();
         let target = kids.iter().find(|c| is_expr(c.kind()));
         let compound = !n.children().iter().any(|c| c.kind() == Kind::Assign);
         if let Some(t) = target {
-            if let Some(path) = channel_path(*t, scope) {
-                io.writes.insert(path.clone());
+            for path in channel_paths(*t, scope, bindings) {
                 if compound {
-                    io.reads.insert(path); // `+=` reads the target first
+                    io.reads.insert(path.clone()); // `+=` reads the target first
                 }
+                io.writes.insert(path);
             }
             // Walk only the value side for reads.
             for c in kids.iter().filter(|c| !std::ptr::eq(*c, t)) {
-                collect(*c, scope, io);
+                collect(*c, scope, bindings, io);
             }
             return;
         }
@@ -117,31 +180,38 @@ fn collect(n: Node, scope: &Scope, io: &mut ScriptIo) {
             .find(|c| matches!(c.kind(), Kind::Identifier | Kind::MemberExpression))
     {
         let text = path_text(callee);
-        if let Some((receiver, method)) = text.rsplit_once('.')
-            && let Some(chan) = resolve_channel(receiver, scope)
-        {
-            if method.starts_with("Set") {
-                io.writes.insert(chan);
-            } else {
-                io.reads.insert(chan);
+        if let Some((receiver, method)) = text.rsplit_once('.') {
+            let chans: Vec<String> = substituted(receiver, bindings)
+                .iter()
+                .filter_map(|r| resolve_channel(r, scope))
+                .collect();
+            if !chans.is_empty() {
+                for chan in chans {
+                    if method.starts_with("Set") {
+                        io.writes.insert(chan);
+                    } else {
+                        io.reads.insert(chan);
+                    }
+                }
+                // Reads in the arguments still count; skip the callee (already handled).
+                if let Some(args) = n
+                    .children()
+                    .into_iter()
+                    .find(|c| c.kind() == Kind::ArgumentList)
+                {
+                    collect(args, scope, bindings, io);
+                }
+                return;
             }
-            // Reads in the arguments still count; skip the callee (already handled).
-            if let Some(args) = n
-                .children()
-                .into_iter()
-                .find(|c| c.kind() == Kind::ArgumentList)
-            {
-                collect(args, scope, io);
-            }
-            return;
         }
     }
-    if let Some(path) = channel_path(n, scope) {
-        io.reads.insert(path);
+    let read_paths = channel_paths(n, scope, bindings);
+    if !read_paths.is_empty() {
+        io.reads.extend(read_paths);
         return; // a member chain resolves as a whole; don't descend
     }
     for c in n.children() {
-        collect(c, scope, io);
+        collect(c, scope, bindings, io);
     }
 }
 
@@ -378,6 +448,12 @@ mod usage_tests {
   <Component Classname="BuiltIn.Parameter" Name="Root.Ctrl.ReadParam"><Props Type="f32" Security="Tune"/></Component>
   <Component Classname="BuiltIn.Parameter" Name="Root.Ctrl.UnreadParam"><Props Type="f32" Security="Tune"/></Component>
   <Component Classname="BuiltIn.Parameter" Name="Root.Ctrl.Debounce"><Props Type="f32" Security="Tune"/></Component>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root.Ctrl.Seg 1"/>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root.Ctrl.Seg 2"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.Seg 1.Volt"><Props Type="f32" Security="Tune"/></Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.Seg 2.Volt"><Props Type="f32" Security="Tune"/></Component>
+  <Component Classname="BuiltIn.Parameter" Name="Root.Ctrl.Seg 1.Gain"><Props Type="f32" Security="Tune"/></Component>
+  <Component Classname="BuiltIn.Parameter" Name="Root.Ctrl.Seg 2.Gain"><Props Type="f32" Security="Tune"/></Component>
 </Project>"#;
 
     fn run(src: &str) -> Vec<String> {
@@ -424,6 +500,22 @@ mod usage_tests {
         assert!(
             !flagged("`Root.Ctrl.Map.Value`"),
             "table value exempt: {msgs:?}"
+        );
+    }
+
+    #[test]
+    fn expand_substituted_access_counts_for_usage_audit() {
+        // EV-M1 pattern (#170): `expand` is compile-time text substitution
+        // (manual p.33), so a write/read whose path embeds `$(VAR)` reaches
+        // every substituted channel — M1 Build sees the assignments and builds.
+        // Both `Seg N.Volt` channels are written and both `Seg N.Gain`
+        // parameters read; none may be flagged.
+        let msgs = run(
+            "Written = 1.0;\nSetWritten.Set(2.0);\nlocal r = ReadParam;\nlocal d = This.Debounce;\nexpand (SEG = 1 to 2)\n{\n\tSeg $(SEG).Volt = Seg $(SEG).Gain;\n}\n",
+        );
+        assert!(
+            !msgs.iter().any(|m| m.contains("`Root.Ctrl.Seg")),
+            "expand-substituted access must count: {msgs:?}"
         );
     }
 

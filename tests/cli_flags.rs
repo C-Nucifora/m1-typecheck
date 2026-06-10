@@ -286,3 +286,22 @@ fn version_flag_prints_version() {
         out_of(&o)
     );
 }
+
+#[test]
+fn project_level_error_sets_exit_code() {
+    // #170: T093/T094 are Errors (M1 Build 1627/1631 fail the build), so a
+    // project-level error must make the run exit non-zero — not just print.
+    // `Root.Foo.Gain.Value` is a parameter no script reads → error[T094].
+    let script = setup("exit-code-project-error", Some(CONFIG));
+    let dir = script.parent().unwrap();
+    let o = run(&[
+        "--project",
+        dir.join("Project.m1prj").to_str().unwrap(),
+        "--select",
+        "T094",
+        script.to_str().unwrap(),
+    ]);
+    let s = out_of(&o);
+    assert!(s.contains("error[T094]"), "got:\n{s}");
+    assert_eq!(o.status.code(), Some(1), "stdout:\n{s}");
+}
