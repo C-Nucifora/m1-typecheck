@@ -187,3 +187,18 @@ fn bare_typo_in_is_clause_state_not_flagged() {
         "is-clause state flagged: {c:?}"
     );
 }
+
+#[test]
+fn t031_is_an_error_like_m1_build_1338() {
+    // M1 Build fails the build on an assignment to a non-existent object
+    // (Errors 1338/1352 "does not exist"), so T031 must be an error
+    // (non-zero exit), not a warning (#174).
+    let p = proj();
+    let diags =
+        check_script(&p, Path::new("Foo Update.m1scr"), "Root.Foo.Missing = 1;\n").diagnostics;
+    let t031 = diags
+        .iter()
+        .find(|d| d.code == TypeCode::T031)
+        .expect("T031 fires");
+    assert_eq!(t031.inner.severity, m1_core::Severity::Error);
+}

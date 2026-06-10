@@ -39,11 +39,17 @@ impl super::Rule for Rule {
         // target before writing, so an unresolved compound target IS a genuine
         // unresolved read and stays T001.
         if is_plain_assignment_target(node) {
+            // M1 Build rejects a write to a non-existent object outright
+            // (Errors 1338/1352 "does not exist"), so this fails the build —
+            // an error, not a warning (#174).
             out.push(make(
                 TypeCode::T031,
                 node,
-                Severity::Warning,
-                format!("assignment to unknown target `{}`", node.text()),
+                Severity::Error,
+                format!(
+                    "assignment to unknown target `{}` (M1 Build Error 1338: \"does not exist\")",
+                    node.text()
+                ),
             ));
         } else {
             out.push(make(
