@@ -94,14 +94,25 @@ fn t021_flags_firmware_enum_vs_integer() {
 
 #[test]
 fn t020_no_flag_on_open_firmware_enum_member() {
-    // A firmware enum's member list is not in the project, so any
-    // `Mode Enumeration.<X>` is a member we cannot disprove — T020 must NOT
-    // fire (it would be a false positive on valid firmware-enum usage) (#104).
+    // A firmware enum the builtin catalogue does NOT document stays an open
+    // placeholder: any `Mystery Enumeration.<X>` is a member we cannot
+    // disprove — T020 must NOT fire (it would be a false positive on valid
+    // firmware-enum usage) (#104).
     let p = proj();
     assert!(
-        !codes(&p, "fwMode = Mode Enumeration.Whatever;\n").contains(&TypeCode::T020),
+        !codes(&p, "fwMystery = Mystery Enumeration.Whatever;\n").contains(&TypeCode::T020),
         "T020 must be suppressed for open (firmware) enums"
     );
+}
+
+#[test]
+fn t020_fires_on_documented_builtin_enum_non_member() {
+    // `Mode Enumeration` IS documented by the builtin catalogue (members
+    // Disabled/Enabled), so a fabricated member is M1 Build Error 1352.
+    let p = proj();
+    let got = codes(&p, "fwMode = Mode Enumeration.Whatever;\n");
+    assert!(got.contains(&TypeCode::T020), "{got:?}");
+    assert!(!codes(&p, "fwMode = Mode Enumeration.Enabled;\n").contains(&TypeCode::T020));
 }
 
 #[test]
