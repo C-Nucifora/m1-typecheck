@@ -12,41 +12,23 @@ use std::collections::HashMap;
 
 /// Register every enum type a `.m1prj` defines into `table`, in two passes:
 ///
-///   * firmware-supplied enums (`MoTeC Types.<N>` / `::Hardware.<N>`) declared
-///     on any channel's `<Props Type>`. Their member lists live in the firmware,
-///     not the project, so they are modelled "open" — channels typed by them
-///     resolve to `Enum(id)` (enabling T021 and enum hover) while T020
-///     enum-non-member is suppressed (a name we don't have can't be proven a
-///     non-member).
 ///   * project-local enums (`<Type Storage="enum">` in `<DataTypes>`), whose
 ///     member list *is* present and therefore authoritative (`open: false`).
+///   * firmware-supplied enums (`MoTeC Types.<N>` / `::Hardware.<N>`) declared
+///     on any channel's `<Props Type>`. When the type is a standard MoTeC one
+///     whose membership the M1 Development Manual documents
+///     ([`documented_firmware_enum`]), it registers closed under its
+///     script-facing display name, so the membership checks M1 Build enforces
+///     on package-typed channels (Errors 1306/1352) fire here too. Otherwise
+///     the member list lives only in the firmware and the enum is modelled
+///     "open" — channels typed by it resolve to `Enum(id)` (enabling T021 and
+///     enum hover) while T020 enum-non-member is suppressed (a name we don't
+///     have can't be proven a non-member).
 ///
-/// Both run before the component pass so the component pass can resolve these
-/// names regardless of document order.
+/// Project-local declarations run first so a project's own `<Type>` of the same
+/// name wins over a documented display name. Both run before the component pass
+/// so the component pass can resolve these names regardless of document order.
 pub(super) fn parse_enums(doc: &roxmltree::Document, table: &mut SymbolTable) {
-    // Firmware-supplied enums declared on a channel's `<Props Type>`.
-    for node in doc.descendants() {
-        if !node.has_tag_name("Component") {
-            continue;
-        }
-        let Some(name) = node
-            .children()
-            .find(|c| c.has_tag_name("Props"))
-            .and_then(|p| p.attribute("Type"))
-            .and_then(firmware_enum_name)
-        else {
-            continue;
-        };
-        if table.enum_by_name(name).is_none() {
-            table.add_enum(EnumType {
-                name: name.to_string(),
-                members: Vec::new(),
-                default: None,
-                open: true,
-            });
-        }
-    }
-
     // Project-local `<Type Storage="enum">` declarations.
     for node in doc.descendants() {
         if !(node.has_tag_name("Type") && node.attribute("Storage") == Some("enum")) {
@@ -72,6 +54,57 @@ pub(super) fn parse_enums(doc: &roxmltree::Document, table: &mut SymbolTable) {
             default,
             open: false, // project-local enum: member list is authoritative
         });
+    }
+
+    // Firmware-supplied enums declared on a channel's `<Props Type>`.
+    for node in doc.descendants() {
+        if !node.has_tag_name("Component") {
+            continue;
+        }
+        let Some(name) = node
+            .children()
+            .find(|c| c.has_tag_name("Props"))
+            .and_then(|p| p.attribute("Type"))
+            .and_then(firmware_enum_name)
+        else {
+            continue;
+        };
+        if let Some((display, members)) = documented_firmware_enum(name) {
+            if table.enum_by_name(display).is_none() {
+                table.add_enum(EnumType {
+                    name: display.to_string(),
+                    members: members.iter().map(|&(m, o)| (m.to_string(), o)).collect(),
+                    default: None,
+                    open: false, // documented membership is authoritative
+                });
+            }
+        } else if table.enum_by_name(name).is_none() {
+            table.add_enum(EnumType {
+                name: name.to_string(),
+                members: Vec::new(),
+                default: None,
+                open: true,
+            });
+        }
+    }
+}
+
+/// The script-facing display name and member set of a standard MoTeC firmware
+/// enum type, when the M1 Development Manual documents them.
+///
+/// M1 Build resolves package (`::Hardware.*` / `MoTeC Types.*`) enum types from
+/// the firmware and enforces exhaustiveness/membership on them (Errors
+/// 1306/1352). The firmware files are not part of a project, but for the
+/// standard types the manual documents the membership, so treating them as
+/// opaque would silently disable those checks on most real channels (switch
+/// inputs etc.). Keyed by the type path's leaf segment (the part after the
+/// package, e.g. `sw_state` in `::Hardware.av_switch.sw_state`).
+fn documented_firmware_enum(name: &str) -> Option<(&'static str, &'static [(&'static str, i64)])> {
+    match name.rsplit('.').next().unwrap_or(name) {
+        // Switch input state — display type "Universal Switch State" (the
+        // manual's "Switch State" enumerated data type): Off / On.
+        "sw_state" => Some(("Universal Switch State", &[("Off", 0), ("On", 1)])),
+        _ => None,
     }
 }
 
@@ -409,11 +442,15 @@ fn resolve_props_type(type_attr: &str, table: &SymbolTable) -> (ValueType, Optio
         return (ValueType::Enum(id), Some(id));
     }
     // Firmware-supplied enum (`MoTeC Types.<N>` / `::Hardware.<N>`): registered
-    // open in the pre-pass, so the lookup resolves to its `Enum(id)`.
-    if let Some(name) = firmware_enum_name(type_attr)
-        && let Some(id) = table.enum_by_name(name)
-    {
-        return (ValueType::Enum(id), Some(id));
+    // in the pre-pass (closed under its display name when documented, otherwise
+    // open under the type path), so the lookup resolves to its `Enum(id)`.
+    if let Some(name) = firmware_enum_name(type_attr) {
+        let registered = documented_firmware_enum(name)
+            .map(|(display, _)| display)
+            .unwrap_or(name);
+        if let Some(id) = table.enum_by_name(registered) {
+            return (ValueType::Enum(id), Some(id));
+        }
     }
     (ValueType::Unknown, None)
 }

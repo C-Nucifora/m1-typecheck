@@ -232,6 +232,29 @@ mod tests {
     }
 
     #[test]
+    fn documented_firmware_enum_registers_closed_under_display_name() {
+        // A firmware enum whose membership the M1 Development Manual documents
+        // (`sw_state` → "Universal Switch State", Off/On) registers CLOSED under
+        // its script-facing display name, so T020/T070 fire on it exactly as
+        // M1 Build does (Errors 1352/1306) — see #167/#168.
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.Channel" Name="Root.S"><Props Type="::Hardware.av_switch.sw_state"/></Component>
+</Project>"#;
+        let parsed = parse(xml).unwrap();
+        let s = parsed.table.get("Root.S").unwrap();
+        let id = s.enum_assoc.expect("documented firmware enum associated");
+        assert_eq!(s.value_type, ValueType::Enum(id));
+        let e = parsed.table.enum_type(id);
+        assert_eq!(e.name, "Universal Switch State");
+        assert!(!e.open, "documented membership is authoritative");
+        assert_eq!(
+            e.members,
+            vec![("Off".to_string(), 0), ("On".to_string(), 1)]
+        );
+    }
+
+    #[test]
     fn channel_with_qty_but_no_type_is_float() {
         // A measured channel declares a physical quantity (Qty) and no explicit
         // storage Type; it is stored as Float. (A bare channel with neither

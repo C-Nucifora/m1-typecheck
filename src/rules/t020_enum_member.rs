@@ -33,12 +33,30 @@ impl super::Rule for Rule {
             && !table.enum_is_open(id)
             && !table.enum_has_member(id, member)
         {
-            out.push(make(
-                TypeCode::T020,
-                node,
-                Severity::Warning,
-                format!("`{member}` is not a member of enum `{head}`"),
-            ));
+            // M1 Build resolves names case-insensitively (manual pp.64-65 — the
+            // same behaviour T091 guards), so a case-variant of a real member
+            // builds fine and is only a style warning; a name with no member
+            // under any casing is M1 Build Error 1352 and fails the build.
+            let case_variant = table
+                .enum_type(id)
+                .members
+                .iter()
+                .find(|(m, _)| m.eq_ignore_ascii_case(member));
+            let (severity, message) = match case_variant {
+                Some((actual, _)) => (
+                    Severity::Warning,
+                    format!(
+                        "`{member}` does not match the case of enum `{head}` member `{actual}` (M1 Build resolves it case-insensitively)"
+                    ),
+                ),
+                None => (
+                    Severity::Error,
+                    format!(
+                        "`{member}` is not a member of enum `{head}` (M1 Build Error 1352: \"does not exist\")"
+                    ),
+                ),
+            };
+            out.push(make(TypeCode::T020, node, severity, message));
         }
     }
 }
