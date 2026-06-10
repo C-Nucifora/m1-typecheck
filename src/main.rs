@@ -759,7 +759,13 @@ fn main() {
     // table/compound `.Value`) keep it false-positive-free on real projects.
     let usage_diags: Vec<TypeDiagnostic> = project
         .as_ref()
-        .map(|p| m1_typecheck::schedule::check_usage(p, &all_scripts, true, true))
+        .map(|p| {
+            let mut v = m1_typecheck::schedule::check_usage(p, &all_scripts, true, true);
+            // T096 (default-on): channel assigned by >1 periodically scheduled
+            // function — M1 Build Error 1022.
+            v.extend(m1_typecheck::schedule::check_multi_writers(p, &all_scripts));
+            v
+        })
         .unwrap_or_default();
     for d in &usage_diags {
         if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
