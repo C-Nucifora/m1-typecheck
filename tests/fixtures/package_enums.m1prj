@@ -8,6 +8,9 @@
    <List>
     <Component Classname="BuiltIn.GroupCompound" Name="Root.Pkg"/>
     <Component Classname="BuiltIn.Channel" Name="Root.Pkg.bspdActive"><Props Type="::Hardware.av_switch.sw_state" Security="Tune"/></Component>
+    <Component Classname="_IOMethod.av_switch" Name="Root.Pkg.ASMS"/>
+    <Component Classname="BuiltIn.Channel" Caps="AutoCreated" Name="Root.Pkg.ASMS.State"><Props Security="Tune"/></Component>
+    <Component Classname="BuiltIn.Channel" Caps="AutoCreated" Name="Root.Pkg.ASMS.Voltage"><Props Security="Tune"/></Component>
     <Component Classname="BuiltIn.FuncUser" Filename="Pkg Update.m1scr" Name="Root.Pkg.Update"/>
    </List>
   </ComponentStream>

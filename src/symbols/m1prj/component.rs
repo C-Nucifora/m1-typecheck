@@ -56,7 +56,9 @@ pub(super) fn parse_enums(doc: &roxmltree::Document, table: &mut SymbolTable) {
         });
     }
 
-    // Firmware-supplied enums declared on a channel's `<Props Type>`.
+    // Firmware-supplied enums declared on a channel's `<Props Type>`, or
+    // carried by a package object's class (`_IOMethod.av_switch` → its value
+    // is the switch state, #173).
     for node in doc.descendants() {
         if !node.has_tag_name("Component") {
             continue;
@@ -66,6 +68,7 @@ pub(super) fn parse_enums(doc: &roxmltree::Document, table: &mut SymbolTable) {
             .find(|c| c.has_tag_name("Props"))
             .and_then(|p| p.attribute("Type"))
             .and_then(firmware_enum_name)
+            .or_else(|| node.attribute("Classname").and_then(class_state_enum))
         else {
             continue;
         };
@@ -106,6 +109,34 @@ fn documented_firmware_enum(name: &str) -> Option<(&'static str, &'static [(&'st
         "sw_state" => Some(("Universal Switch State", &[("Off", 0), ("On", 1)])),
         _ => None,
     }
+}
+
+/// The documented hardware enum a package class's *value* carries, when known:
+/// an `_IOMethod.av_switch` switch object — read directly (`Driver.ASMS eq …`)
+/// or via its auto-created `State` sub-channel — is the switch state, which
+/// M1 Build types as "Universal Switch State" and enforces comparisons on
+/// (Error 1329, #173). Returns the [`documented_firmware_enum`] key.
+fn class_state_enum(class: &str) -> Option<&'static str> {
+    match class {
+        "_IOMethod.av_switch" => Some("sw_state"),
+        _ => None,
+    }
+}
+
+/// The registered enum id of `class`'s documented state enum, if any (the
+/// pre-pass registers it whenever such a component exists).
+fn state_enum_id(class: &str, table: &SymbolTable) -> Option<EnumId> {
+    let key = class_state_enum(class)?;
+    let (display, _) = documented_firmware_enum(key)?;
+    table.enum_by_name(display)
+}
+
+/// [`state_enum_id`] of the package object that owns `path` (for its
+/// auto-created `State` sub-channel).
+fn owner_state_enum_id(path: &str, index: &ProjectXmlIndex, table: &SymbolTable) -> Option<EnumId> {
+    let owner = parent_group(path)?;
+    let class = index.classname_by_path.get(&owner)?;
+    state_enum_id(class, table)
 }
 
 /// The per-component fields derived from a `<Component>` node and its `<Props>`.
@@ -167,6 +198,20 @@ fn component_props(
         // guess an integral type from a unitless `Qty`, which would
         // false-positive on unitless floats (ratios) (#107).
         (ValueType::Float, None)
+    } else if kind == SymbolKind::Object
+        && let Some(id) = state_enum_id(classname, table)
+    {
+        // A package object whose value is a documented state enum, read
+        // directly in scripts (`Driver.ASMS eq Universal Switch State.Off`):
+        // typed as that enum so T021/T030 fire as M1 Build does (#173).
+        (ValueType::Enum(id), Some(id))
+    } else if kind == SymbolKind::Channel
+        && name.rsplit('.').next() == Some("State")
+        && let Some(id) = owner_state_enum_id(name, index, table)
+    {
+        // The auto-created `State` sub-channel of such an object carries the
+        // same enum (its other children — Voltage, Diagnostic — do not).
+        (ValueType::Enum(id), Some(id))
     } else if kind == SymbolKind::Channel {
         // Auto-created output channels carry no inline type/quantity;
         // derive it from the owning object's class (#25), which itself

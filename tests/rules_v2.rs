@@ -255,6 +255,60 @@ fn t020_case_variant_of_member_stays_warning() {
     );
 }
 
+// ---- T021 on package/IO-method enums + Error severity (#173) ---------------
+// `ASMS` is an `_IOMethod.av_switch` object: M1 Build types its value (and its
+// auto-created `State` sub-channel) as "Universal Switch State" and rejects a
+// comparison against a number with build-failing Error 1329.
+
+#[test]
+fn t021_fires_on_io_switch_object_vs_number() {
+    // Probe from #173: `Driver.ASMS eq 0` → M1 Build Errors 1329/1351.
+    let p = pkg_proj();
+    let got = pkg_codes(&p, "if (ASMS eq 0) {\n}\n");
+    assert!(got.contains(&TypeCode::T021), "{got:?}");
+}
+
+#[test]
+fn t021_fires_on_io_switch_state_subchannel_vs_number() {
+    let p = pkg_proj();
+    let got = pkg_codes(&p, "if (ASMS.State eq 1) {\n}\n");
+    assert!(got.contains(&TypeCode::T021), "{got:?}");
+}
+
+#[test]
+fn t021_no_flag_io_switch_vs_its_enum_member() {
+    // The valid form from the corpus: `Driver.ASMS eq Universal Switch
+    // State.Off` — both sides the same enum, no finding.
+    let p = pkg_proj();
+    let got = pkg_codes(&p, "if (ASMS eq Universal Switch State.Off) {\n}\n");
+    assert!(!got.contains(&TypeCode::T021), "{got:?}");
+    assert!(!got.contains(&TypeCode::T030), "{got:?}");
+}
+
+#[test]
+fn t021_io_switch_voltage_subchannel_stays_float() {
+    // The object's other auto-created children must not be mistyped as the
+    // switch enum: `Voltage` is a measured float, so comparing it to a number
+    // is fine (no T021).
+    let p = pkg_proj();
+    let got = pkg_codes(&p, "if (ASMS.Voltage > 2.5) {\n}\n");
+    assert!(!got.contains(&TypeCode::T021), "{got:?}");
+}
+
+#[test]
+fn t021_is_an_error_like_m1_build_1329() {
+    // M1 Build fails the build on an enum-vs-number comparison (Error 1329),
+    // so T021 must be an error (non-zero exit), not a warning.
+    let p = pkg_proj();
+    let diags =
+        check_script(&p, Path::new("Pkg Update.m1scr"), "if (ASMS eq 0) {\n}\n").diagnostics;
+    let t021 = diags
+        .iter()
+        .find(|d| d.code == TypeCode::T021)
+        .expect("T021 fires");
+    assert_eq!(t021.inner.severity, m1_core::Severity::Error);
+}
+
 #[test]
 fn t082_no_flag_enum_subject() {
     let p = proj();
