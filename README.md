@@ -127,6 +127,8 @@ This unlocks four new rules, added to the default rule set
 | T083 | Error | **static-local-initialiser** — a `static local`'s initial value must be a literal, enumerator or constant (manual p.34); runtime reads and calls flag. Constant-foldable literal arithmetic (`2 * 60`) is accepted. |
 | T084 | Error | **expand-bounds** — `expand` bounds must be literals or constants, 0 or positive (manual p.33); negative, float and runtime-value bounds flag. |
 | T087 | Warning | **type-restricted-to-locals** — project audit: a Channel/Parameter declared `bool`/`string`, which the manual (p.24) restricts to local variables. CAN/DBC signals are exempt. |
+| T091 | Warning | **local-object-case-ambiguity** — a `local` whose name matches the leaf of a project object referenced in the same script, identically or differing only by case (manual pp.64–65: "don't distinguish local variable names from other object names only by uppercase/lowercase writing"). Package-object internals are exempt. |
+| T092 | Warning (opt-in) | **untagged-component** — M1 Build tag-warning parity (manual p.67): a user Channel/Parameter whose effective tag set (own `SelectedTags` ∪ inherited group tags) has no System tag (Engine/Vehicle/Driver) and/or no Type tag (Normal/Diagnostic/Advanced/Pin/Tune/Setup); one finding per missing group. Opt-in: the real corpora use no tags at all. |
 
 Every v2 rule keeps the v1 invariant: it fires only when every type/enum it needs
 is **known**, and stays silent under `Unknown` — so the m1-example corpus stays free of
@@ -235,7 +237,7 @@ if (b == c) { }            // T002 (float ==) not reported here
 
 It attaches **leading** (the next statement, stacking on consecutive lines) or
 **trailing** (a statement it follows on the same line); suppression is
-line-scoped to the target construct. Project-level findings (T010/T041/T050/T071/T087, not tied
+line-scoped to the target construct. Project-level findings (T010/T041/T050/T071/T087/T092, not tied
 to a source construct) are **not** suppressible this way — quiet a whole code
 with `--ignore` / the `[diagnostics]` config, or suppress a single symbol with
 `[diagnostics] ignore_symbols = ["T050:Root.Engine.Speed"]` in `m1-tools.toml`
@@ -257,6 +259,7 @@ m1-typecheck --audit-names --ignore-symbol T050:Root.GPS  # allow one naming exc
 m1-typecheck --format json Scripts/*.m1scr        # machine-parsable diagnostics
 m1-typecheck --select T064 Scripts/*.m1scr        # opt into wrong-argument-count
 m1-typecheck --select T088,T089 Scripts/*.m1scr   # scheduling audit (cycles + rate inversions)
+m1-typecheck --select T092 Scripts/*.m1scr        # M1 Build tag-warning parity (untagged components)
 m1-typecheck --explain-units "Driveline.Accumulator.Voltage" Scripts/*.m1scr
 m1-typecheck --rules                              # list every T-code
 m1-typecheck --explain Demo.Rate Scripts/*.m1scr  # trace a channel's NaN provenance
@@ -272,9 +275,11 @@ m1-typecheck --explain Demo.Rate Scripts/*.m1scr  # trace a channel's NaN proven
 - When both a project **and** a `.m1cfg` are loaded, the run also emits **T041**
   (`missing-cfg-parameter`) once per `BuiltIn.Parameter` that the `.m1prj`
   declares but the `.m1cfg` omits — M1-Build falls back to its default value for
-  those. Warning severity, so it annotates without failing the build (unless the
-  caller opts into fail-on-warning); this is what surfaces calibration-coverage
-  gaps in CI. (The same set is what `m1-cfg-export --missing-only` prints.)
+  those. Hint severity (#156): riding the default is normal, supported M1
+  behaviour — most parameters in a real project intentionally stay uncalibrated
+  — so at hundreds per healthy project a Warning would bury every actionable
+  diagnostic. Teams that require full calibration coverage can still surface the
+  set via `--select T041` or `m1-cfg-export --missing-only` (same set).
 - `.m1dbc` files under the project directory are auto-loaded, so CAN signals
   resolve. **T042** (`dbc-signal-range`) then flags a **literal** value assigned
   to a signal that falls outside its physical range (derived from the signal's

@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "m1-typecheck"
-version = "0.28.0"
+version = "0.29.0"
 dependencies = [
  "clap",
  "m1-core",
@@ -187,8 +187,8 @@ dependencies = [
 
 [[package]]
 name = "m1-workspace"
-version = "0.7.0"
-source = "git+https://github.com/nedlane/m1-workspace.git?tag=v0.7.0#9d595a955c682d5aaa0bc14404e2a4f969ab6e87"
+version = "0.8.0"
+source = "git+https://github.com/nedlane/m1-workspace.git?tag=v0.8.0#fd7986d19d272e5e4f4fbfe015efa120866edb8b"
 dependencies = [
  "serde",
  "toml 0.8.23",

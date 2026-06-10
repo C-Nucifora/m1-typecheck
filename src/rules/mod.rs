@@ -23,6 +23,7 @@ pub mod t083_static_local_init;
 pub mod t084_expand_bounds;
 pub mod t085_user_arg_mismatch;
 pub mod t086_unit_mismatch;
+pub mod t091_local_case;
 
 pub trait Rule: Send + Sync {
     fn check_node(&self, node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>);
@@ -39,12 +40,13 @@ impl Registry {
 
     /// The opt-in T-codes — rules that run only when explicitly selected (via
     /// `--select`/`[diagnostics] select`), never by default: T064 (a per-node
-    /// rule) and T088/T089 (project-level scheduling checks in
-    /// `schedule::check` — the real corpora contain deliberate same-rate
-    /// feedback loops, so neither is safe default-on).
+    /// rule), T088/T089 (project-level scheduling checks in `schedule::check`
+    /// — the real corpora contain deliberate same-rate feedback loops, so
+    /// neither is safe default-on) and T092 (the tags audit in
+    /// `audit::audit_tags` — the real corpora use no tags at all).
     pub fn opt_in_codes() -> &'static [crate::diagnostics::TypeCode] {
         use crate::diagnostics::TypeCode::*;
-        &[T064, T088, T089]
+        &[T064, T088, T089, T092]
     }
 
     /// The default rule set plus any opt-in rules whose code is in `enabled`. Used
@@ -307,6 +309,7 @@ pub fn run_with(
     let mut diagnostics = Vec::new();
     walk(cst.root(), registry, &scope, &mut diagnostics);
     crate::flow::single_assignment(cst.root(), &scope, &mut diagnostics);
+    t091_local_case::check(cst.root(), &scope, &mut diagnostics);
 
     // Parse `@m1:` annotations once and drive both consumers: the invalid-value
     // (NaN/Inf) provenance analysis (T080/T081, #78) reads the finiteness

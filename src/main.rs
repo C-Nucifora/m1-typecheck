@@ -291,8 +291,8 @@ fn audit_project(
 
     // Project-level audit: parameters declared in the .m1prj but missing from the
     // loaded .m1cfg (T041). Emitted on every run that has a project + cfg so CI
-    // validates calibration coverage. Warning severity — annotates without failing
-    // the build unless the caller opts into fail-on-warning.
+    // validates calibration coverage. Hint severity (#156) — riding the default
+    // is normal M1 behaviour, so it informs without drowning real findings.
     if let Some(p) = project {
         for d in p.missing_cfg_parameters() {
             if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
@@ -302,8 +302,32 @@ fn audit_project(
                 json_buf.project.push(d);
             } else {
                 println!(
-                    "{}: warning[{}]: {}",
+                    "{}: {}[{}]: {}",
                     path_label(),
+                    severity_str(d.inner.severity),
+                    d.code.as_str(),
+                    d.inner.message
+                );
+            }
+        }
+    }
+
+    // Opt-in tags audit (T092): M1 Build tag-warning parity. Runs only when
+    // explicitly selected — the real corpora use no tags at all (#158).
+    if filter.select.contains("T092")
+        && let Some(p) = project
+    {
+        for d in p.audit_tags() {
+            if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
+                continue;
+            }
+            if json {
+                json_buf.project.push(d);
+            } else {
+                println!(
+                    "{}: {}[{}]: {}",
+                    path_label(),
+                    severity_str(d.inner.severity),
                     d.code.as_str(),
                     d.inner.message
                 );

@@ -1,38 +1,53 @@
 //! Project-wide symbol-name audit (T050) against the m1-example naming conventions.
 use crate::diagnostics::{TypeCode, TypeDiagnostic, make_project_for};
 use crate::project::Project;
-use crate::symbols::SymbolKind;
+use crate::symbols::{SymbolKind, SymbolTable};
 use m1_core::Severity;
+
+/// Recognises symbols owned by a package-defined object class instance —
+/// their member names (and tags) are MoTeC's choice, not the user's, so the
+/// audits exempt them. Shared by the naming (T050), tags (T092) and
+/// local-case (T091) checks.
+pub(crate) struct ObjectOwnership<'a> {
+    /// path -> kind, so any ancestor can be tested for being an Object.
+    kind_by_path: std::collections::HashMap<&'a str, SymbolKind>,
+}
+
+impl<'a> ObjectOwnership<'a> {
+    pub(crate) fn new(table: &'a SymbolTable) -> Self {
+        ObjectOwnership {
+            kind_by_path: table.iter().map(|s| (s.path.as_str(), s.kind)).collect(),
+        }
+    }
+
+    /// Walk every ancestor: a package-object instance anywhere up the
+    /// chain means this whole subtree is MoTeC-defined structure
+    /// (`TSAL Buzzer.Output.Pin.Drive.Value`).
+    pub(crate) fn owned_by_object(&self, path: &str) -> bool {
+        let mut p = path;
+        while let Some((parent, _)) = p.rsplit_once('.') {
+            if self.kind_by_path.get(parent) == Some(&SymbolKind::Object) {
+                return true;
+            }
+            p = parent;
+        }
+        false
+    }
+}
 
 /// Audit the project's own symbol + enum-type names. Empty unless violations.
 pub fn audit_project(project: &Project) -> Vec<TypeDiagnostic> {
     let table = project.symbols();
     let mut out = Vec::new();
 
-    // path -> kind, to recognise symbols owned by a package-defined object
-    // class instance (their member names are MoTeC's choice, not the user's).
-    let kind_by_path: std::collections::HashMap<&str, SymbolKind> =
-        table.iter().map(|s| (s.path.as_str(), s.kind)).collect();
-    let owned_by_object = |path: &str| {
-        // Walk every ancestor: a package-object instance anywhere up the
-        // chain means this whole subtree is MoTeC-defined structure
-        // (`TSAL Buzzer.Output.Pin.Drive.Value`).
-        let mut p = path;
-        while let Some((parent, _)) = p.rsplit_once('.') {
-            if kind_by_path.get(parent) == Some(&SymbolKind::Object) {
-                return true;
-            }
-            p = parent;
-        }
-        false
-    };
+    let ownership = ObjectOwnership::new(table);
 
     for sym in table.iter() {
         let leaf = leaf_of(&sym.path);
         // Members of a package-object instance (`Debounce.Value`,
         // `CAN Bus.Bus`) carry MoTeC-defined names — auditing them only
         // produces unactionable noise (#153).
-        if owned_by_object(&sym.path) {
+        if ownership.owned_by_object(&sym.path) {
             continue;
         }
         // Manual p.64 "Naming Objects": every object name begins with an
@@ -226,7 +241,66 @@ pub fn audit_name_collisions(project: &Project) -> Vec<TypeDiagnostic> {
     out
 }
 
-fn leaf_of(path: &str) -> &str {
+/// Opt-in project-level tags audit (T092) — M1 Build tag-warning parity.
+///
+/// Manual p.67 (*Tags*): every object can carry tags in three groups — System
+/// (`Engine`/`Vehicle`/`Driver`), Type (`Normal`/`Diagnostic`/`Advanced`/
+/// `Pin`/`Tune`/`Setup`) and the optional I/O group — and *"If a tag in this
+/// group is not selected, M1 Build will emit a warning"* for the first two.
+/// This mirrors those two warnings per user-defined Channel/Parameter, using
+/// each symbol's **effective** tag set ([`crate::symbols::Symbol::tags`]: own
+/// `SelectedTags` ∪ inherited group tags, #170). Package-object internals are
+/// exempt (same `ObjectOwnership` rule as the naming audit).
+///
+/// Opt-in via `--select T092` / `[diagnostics] select`: the real corpora use
+/// no tags at all, so default-on would flood every untagged-by-choice project.
+pub fn audit_tags(project: &Project) -> Vec<TypeDiagnostic> {
+    const SYSTEM_TAGS: [&str; 3] = ["Engine", "Vehicle", "Driver"];
+    const TYPE_TAGS: [&str; 6] = ["Normal", "Diagnostic", "Advanced", "Pin", "Tune", "Setup"];
+    let table = project.symbols();
+    let ownership = ObjectOwnership::new(table);
+    let mut out = Vec::new();
+    for sym in table.iter() {
+        if !matches!(sym.kind, SymbolKind::Channel | SymbolKind::Parameter) {
+            continue;
+        }
+        if ownership.owned_by_object(&sym.path) {
+            continue;
+        }
+        let has_tag_in = |group: &[&str]| {
+            sym.tags
+                .iter()
+                .any(|t| group.iter().any(|g| g.eq_ignore_ascii_case(t)))
+        };
+        if !has_tag_in(&SYSTEM_TAGS) {
+            out.push(make_project_for(
+                TypeCode::T092,
+                Severity::Warning,
+                format!(
+                    "{:?} `{}` has no System tag selected (Engine/Vehicle/Driver) — M1 Build will warn",
+                    sym.kind, sym.path
+                ),
+                &sym.path,
+            ));
+        }
+        if !has_tag_in(&TYPE_TAGS) {
+            out.push(make_project_for(
+                TypeCode::T092,
+                Severity::Warning,
+                format!(
+                    "{:?} `{}` has no Type tag selected (Normal/Diagnostic/Advanced/Pin/Tune/Setup) — M1 Build will warn",
+                    sym.kind, sym.path
+                ),
+                &sym.path,
+            ));
+        }
+    }
+    // Deterministic order for stable CI output.
+    out.sort_by(|a, b| a.inner.message.cmp(&b.inner.message));
+    out
+}
+
+pub(crate) fn leaf_of(path: &str) -> &str {
     path.rsplit_once('.').map(|(_, l)| l).unwrap_or(path)
 }
 

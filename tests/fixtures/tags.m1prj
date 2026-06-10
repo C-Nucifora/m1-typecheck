@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<MoTeCM1BuildSession>
+ <Project Name="Tags" TargetHardware="ecu120">
+  <SelectedModuleSets><File Name="MoTeC Comms"/></SelectedModuleSets>
+  <ComponentStream>
+   <List>
+    <Component Classname="BuiltIn.GroupCompound" Name="Root.Tagged"><Props SelectedTags="Engine"/></Component>
+    <Component Classname="BuiltIn.Channel" Name="Root.Tagged.FullyTagged"><Props SelectedTags="Normal"/></Component>
+    <Component Classname="BuiltIn.Channel" Name="Root.Tagged.NoTypeTag"><Props/></Component>
+    <Component Classname="BuiltIn.GroupCompound" Name="Root.Bare"/>
+    <Component Classname="BuiltIn.Channel" Name="Root.Bare.Untagged"><Props/></Component>
+    <Component Classname="BuiltIn.Parameter" Name="Root.Bare.TunedParam"><Props SelectedTags="Vehicle Tune"/></Component>
+   </List>
+  </ComponentStream>
+ </Project>
+</MoTeCM1BuildSession>
