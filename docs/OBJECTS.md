@@ -110,3 +110,24 @@ no extra feature code (just the re-vendor + the new `Resolution` arm).
 4. `src/resolve.rs` — consult `Builtins`, add `Resolution::Builtin`.
 5. `src/typer.rs` — return type from the builtin method; optional arity/type rule.
 6. Re-vendor into m1-lsp; add hover/completion/signature-help handling.
+
+## 2026-06-11 — help-pane capture integration
+
+`assets/m1-intrinsics.json` now also carries, merged from the M1 Build
+help-pane captures (`M1_LIBRARIES_ENUMS_TYPES`, reconstructed 2026-06-11) via
+`assets/merge-help-captures.py`:
+
+- **8 additional libraries / 129 additional functions** (J1939, LTC, MDD,
+  MPSE, Switch, TC, UnixTime, VCS + gaps in the existing 15) with full
+  signatures and per-argument docs. Existing curated entries win on conflict
+  (they carry stateful/deprecated/calibrationOnly flags and overload unions).
+- **`enums`** — the builtin enumeration catalogue: 130 MoTeC firmware/module
+  enumerated data types with authoritative members (value, name, M1 Tune
+  severity, doc). Registered closed into every project's symbol table
+  (`add_builtin_enum`, member-index-bypassing) so script literals resolve and
+  T020/T021/T030/T070 enforce membership exactly as M1 Build does
+  (Errors 1306/1329/1352). Project-local `<Type>` declarations always win.
+- **`classes`** — 110 package class help summaries for editor hover.
+
+To refresh after a new capture set:
+`python3 assets/merge-help-captures.py <captures-dir>`.

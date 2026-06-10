@@ -206,11 +206,12 @@ mod tests {
 
     #[test]
     fn firmware_enum_props_type_resolves_to_open_enum() {
-        // A channel typed with a firmware-supplied enum — `MoTeC Types.<N>` or
-        // `::Hardware.<N>` — resolves to an Enum value type (so T021 and enum
-        // hover work) rather than Unknown. The enum is registered "open": its
-        // member list is firmware-supplied and not present in the project, so
-        // membership-based checks (T020) must not fire on it.
+        // A channel typed with a firmware-supplied enum resolves to an Enum
+        // value type (so T021 and enum hover work) rather than Unknown. A type
+        // the builtin help-capture catalogue documents (`MoTeC Types.Mode
+        // Enumeration`) registers CLOSED with its members; an undocumented one
+        // (`::Hardware.relay.state`) stays an "open" placeholder, so
+        // membership-based checks (T020/T070) must not fire on it.
         let xml = r#"<?xml version="1.0"?>
 <Project>
   <Component Classname="BuiltIn.Channel" Name="Root.M"><Props Type="MoTeC Types.Mode Enumeration"/></Component>
@@ -222,13 +223,18 @@ mod tests {
         let mid = m.enum_assoc.expect("firmware enum associated");
         assert_eq!(m.value_type, ValueType::Enum(mid));
         assert_eq!(parsed.table.enum_type(mid).name, "Mode Enumeration");
-        assert!(parsed.table.enum_is_open(mid), "firmware enum is open");
+        assert!(
+            !parsed.table.enum_is_open(mid),
+            "catalogue-documented firmware enum is closed"
+        );
+        assert!(parsed.table.enum_has_member(mid, "Disabled"));
+        assert!(parsed.table.enum_has_member(mid, "Enabled"));
 
         let h = parsed.table.get("Root.H").unwrap();
         let hid = h.enum_assoc.expect("firmware enum associated");
         assert_eq!(h.value_type, ValueType::Enum(hid));
         assert_eq!(parsed.table.enum_type(hid).name, "relay.state");
-        assert!(parsed.table.enum_is_open(hid));
+        assert!(parsed.table.enum_is_open(hid), "undocumented stays open");
     }
 
     #[test]

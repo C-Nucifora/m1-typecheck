@@ -10,24 +10,25 @@ use crate::types::{ValueType, primitive_type};
 use m1_workspace::LineIndex;
 use std::collections::HashMap;
 
-/// Register every enum type a `.m1prj` defines into `table`, in two passes:
+/// Register every enum type a `.m1prj` can reference into `table`, in three
+/// passes:
 ///
 ///   * project-local enums (`<Type Storage="enum">` in `<DataTypes>`), whose
-///     member list *is* present and therefore authoritative (`open: false`).
-///   * firmware-supplied enums (`MoTeC Types.<N>` / `::Hardware.<N>`) declared
-///     on any channel's `<Props Type>`. When the type is a standard MoTeC one
-///     whose membership the M1 Development Manual documents
-///     ([`documented_firmware_enum`]), it registers closed under its
-///     script-facing display name, so the membership checks M1 Build enforces
-///     on package-typed channels (Errors 1306/1352) fire here too. Otherwise
-///     the member list lives only in the firmware and the enum is modelled
-///     "open" — channels typed by it resolve to `Enum(id)` (enabling T021 and
-///     enum hover) while T020 enum-non-member is suppressed (a name we don't
-///     have can't be proven a non-member).
+///     member list *is* present and therefore authoritative (`open: false`);
+///   * the builtin firmware/module enumeration catalogue from the intrinsics
+///     (M1 Build help captures) — every documented MoTeC enum, closed under
+///     its script-facing display name, so literals like
+///     `Output Drive Enumeration.High Side` resolve and the membership checks
+///     M1 Build enforces (Errors 1306/1329/1352) fire here too;
+///   * firmware enum types declared on a channel's `<Props Type>` (or implied
+///     by a package class) that the catalogue does NOT document: registered as
+///     open placeholders — channels typed by them resolve to `Enum(id)`
+///     (enabling T021 and enum hover) while T020/T070 stay suppressed (a name
+///     we don't have can't be proven a non-member).
 ///
 /// Project-local declarations run first so a project's own `<Type>` of the same
-/// name wins over a documented display name. Both run before the component pass
-/// so the component pass can resolve these names regardless of document order.
+/// name wins. All run before the component pass so the component pass can
+/// resolve these names regardless of document order.
 pub(super) fn parse_enums(doc: &roxmltree::Document, table: &mut SymbolTable) {
     // Project-local `<Type Storage="enum">` declarations.
     for node in doc.descendants() {
@@ -56,9 +57,30 @@ pub(super) fn parse_enums(doc: &roxmltree::Document, table: &mut SymbolTable) {
         });
     }
 
+    // Builtin firmware/module enumerations (the intrinsics help-capture
+    // catalogue): registered closed under their script-facing display names,
+    // AFTER project-local declarations so a project's own redefinition wins.
+    // Members deliberately bypass the member index — see `add_builtin_enum`.
+    for def in &crate::intrinsics::get().enums {
+        if table.enum_by_name(&def.name).is_none() {
+            table.add_builtin_enum(EnumType {
+                name: def.name.clone(),
+                members: def
+                    .members
+                    .iter()
+                    .map(|m| (m.name.clone(), m.value))
+                    .collect(),
+                default: None,
+                open: false, // capture membership is authoritative
+            });
+        }
+    }
+
     // Firmware-supplied enums declared on a channel's `<Props Type>`, or
     // carried by a package object's class (`_IOMethod.av_switch` → its value
-    // is the switch state, #173).
+    // is the switch state, #173). Documented hardware types already resolved
+    // above via their display name; anything else registers as an open
+    // placeholder (membership unknown, T020/T070 suppressed).
     for node in doc.descendants() {
         if !node.has_tag_name("Component") {
             continue;
@@ -72,18 +94,10 @@ pub(super) fn parse_enums(doc: &roxmltree::Document, table: &mut SymbolTable) {
         else {
             continue;
         };
-        if let Some((display, members)) = documented_firmware_enum(name) {
-            if table.enum_by_name(display).is_none() {
-                table.add_enum(EnumType {
-                    name: display.to_string(),
-                    members: members.iter().map(|&(m, o)| (m.to_string(), o)).collect(),
-                    default: None,
-                    open: false, // documented membership is authoritative
-                });
-            }
-        } else if table.enum_by_name(name).is_none() {
+        let registered = hardware_display_name(name).unwrap_or(name);
+        if table.enum_by_name(registered).is_none() {
             table.add_enum(EnumType {
-                name: name.to_string(),
+                name: registered.to_string(),
                 members: Vec::new(),
                 default: None,
                 open: true,
@@ -92,21 +106,18 @@ pub(super) fn parse_enums(doc: &roxmltree::Document, table: &mut SymbolTable) {
     }
 }
 
-/// The script-facing display name and member set of a standard MoTeC firmware
-/// enum type, when the M1 Development Manual documents them.
-///
-/// M1 Build resolves package (`::Hardware.*` / `MoTeC Types.*`) enum types from
-/// the firmware and enforces exhaustiveness/membership on them (Errors
-/// 1306/1352). The firmware files are not part of a project, but for the
-/// standard types the manual documents the membership, so treating them as
-/// opaque would silently disable those checks on most real channels (switch
-/// inputs etc.). Keyed by the type path's leaf segment (the part after the
+/// The script-facing display name of a documented hardware (`::Hardware.*`)
+/// enum type, keyed by the type path's leaf segment (the part after the
 /// package, e.g. `sw_state` in `::Hardware.av_switch.sw_state`).
-fn documented_firmware_enum(name: &str) -> Option<(&'static str, &'static [(&'static str, i64)])> {
+///
+/// M1 Build resolves these from the firmware system file (which is signed and
+/// not parseable); the membership itself comes from the intrinsics builtin
+/// catalogue under the display name, so this map only bridges the hardware
+/// path spelling to that catalogue entry.
+fn hardware_display_name(name: &str) -> Option<&'static str> {
     match name.rsplit('.').next().unwrap_or(name) {
-        // Switch input state — display type "Universal Switch State" (the
-        // manual's "Switch State" enumerated data type): Off / On.
-        "sw_state" => Some(("Universal Switch State", &[("Off", 0), ("On", 1)])),
+        // Switch input state — Off / On (probe-verified, #167/#168).
+        "sw_state" => Some("Universal Switch State"),
         _ => None,
     }
 }
@@ -115,7 +126,7 @@ fn documented_firmware_enum(name: &str) -> Option<(&'static str, &'static [(&'st
 /// an `_IOMethod.av_switch` switch object — read directly (`Driver.ASMS eq …`)
 /// or via its auto-created `State` sub-channel — is the switch state, which
 /// M1 Build types as "Universal Switch State" and enforces comparisons on
-/// (Error 1329, #173). Returns the [`documented_firmware_enum`] key.
+/// (Error 1329, #173). Returns the [`hardware_display_name`] key.
 fn class_state_enum(class: &str) -> Option<&'static str> {
     match class {
         "_IOMethod.av_switch" => Some("sw_state"),
@@ -127,7 +138,7 @@ fn class_state_enum(class: &str) -> Option<&'static str> {
 /// pre-pass registers it whenever such a component exists).
 fn state_enum_id(class: &str, table: &SymbolTable) -> Option<EnumId> {
     let key = class_state_enum(class)?;
-    let (display, _) = documented_firmware_enum(key)?;
+    let display = hardware_display_name(key)?;
     table.enum_by_name(display)
 }
 
@@ -490,9 +501,7 @@ fn resolve_props_type(type_attr: &str, table: &SymbolTable) -> (ValueType, Optio
     // in the pre-pass (closed under its display name when documented, otherwise
     // open under the type path), so the lookup resolves to its `Enum(id)`.
     if let Some(name) = firmware_enum_name(type_attr) {
-        let registered = documented_firmware_enum(name)
-            .map(|(display, _)| display)
-            .unwrap_or(name);
+        let registered = hardware_display_name(name).unwrap_or(name);
         if let Some(id) = table.enum_by_name(registered) {
             return (ValueType::Enum(id), Some(id));
         }

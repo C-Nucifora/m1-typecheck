@@ -74,6 +74,28 @@ pub struct DiagRule {
     pub source: String,
 }
 
+/// One member of a builtin (firmware/module) enumeration.
+#[derive(Debug, Deserialize)]
+pub struct EnumMember {
+    pub name: String,
+    pub value: i64,
+    /// M1 Tune indicator (`Information` / `Warning` / `Fault`), when assigned.
+    #[serde(default)]
+    pub severity: String,
+    #[serde(default)]
+    pub doc: String,
+}
+
+/// A builtin enumeration: a MoTeC firmware/module enumerated data type with
+/// its authoritative member set (from the M1 Build help captures). These are
+/// the types M1 Build resolves and enforces membership/exhaustiveness on
+/// (Errors 1306/1329/1352) that the `.m1prj` alone does not declare.
+#[derive(Debug, Deserialize)]
+pub struct EnumDef {
+    pub name: String,
+    pub members: Vec<EnumMember>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Intrinsics {
     pub version: u32,
@@ -94,6 +116,16 @@ pub struct Intrinsics {
     pub language: Language,
     #[serde(default)]
     pub diagnostics: Vec<DiagRule>,
+    /// Builtin firmware/module enumerations with authoritative membership
+    /// (M1 Build help captures): registered into every project's symbol table
+    /// so script-side literals (`Output Drive Enumeration.High Side`) resolve
+    /// and the membership checks (T020/T021/T030/T070) fire as M1 Build does.
+    #[serde(default)]
+    pub enums: Vec<EnumDef>,
+    /// Package class name -> help summary (first paragraph), for hover docs on
+    /// project objects (`MoTeC Input.Sensor`, …).
+    #[serde(default)]
+    pub classes: HashMap<String, String>,
 }
 
 static INTRINSICS_JSON: &str = include_str!("../assets/m1-intrinsics.json");
@@ -139,6 +171,15 @@ impl Intrinsics {
     pub fn unsupported_c_token(&self, token: &str) -> Option<&str> {
         self.language.unsupported.get(token).map(String::as_str)
     }
+    /// The builtin enumeration named `name`, if the catalogue documents it.
+    pub fn builtin_enum(&self, name: &str) -> Option<&EnumDef> {
+        self.enums.iter().find(|e| e.name == name)
+    }
+    /// The help summary for package class `name` (`MoTeC Input.Sensor` matches
+    /// its leaf `Sensor`… callers pass the class display name as captured).
+    pub fn class_doc(&self, name: &str) -> Option<&str> {
+        self.classes.get(name).map(String::as_str)
+    }
 }
 
 #[cfg(test)]
@@ -148,13 +189,40 @@ mod tests {
     #[test]
     fn loads_and_has_the_library() {
         let i = get();
-        // 13 ECU library objects + 2 calibration-only objects (Math, UI).
-        assert_eq!(i.library.len(), 15, "15 library objects");
+        // 13 ECU library objects + 2 calibration-only objects (Math, UI) + the
+        // 8 libraries from the help-pane captures (J1939, LTC, MDD, MPSE,
+        // Switch, TC, UnixTime, VCS).
+        assert_eq!(i.library.len(), 23, "23 library objects");
         let total: usize = i.library.values().map(|o| o.functions.len()).sum();
-        assert_eq!(total, 150, "150 library overloads");
+        assert_eq!(total, 279, "279 library overloads");
         assert!(i.library_object("Calculate").is_some());
         assert!(i.library_object("CanComms").is_some());
+        assert!(i.library_object("J1939").is_some(), "capture library loads");
         assert!(i.library_object("NotAnObject").is_none());
+    }
+
+    #[test]
+    fn builtin_enum_catalogue_loads() {
+        let i = get();
+        assert!(i.enums.len() >= 130, "130 captured enumerations");
+        let uss = i.builtin_enum("Universal Switch State").expect("USS");
+        let names: Vec<&str> = uss.members.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["Off", "On"]);
+        assert!(i.builtin_enum("No Such Enumeration").is_none());
+        // Class help summaries load too.
+        assert!(i.classes.len() >= 110, "110 captured classes");
+        assert!(i.class_doc("Absolute Pressure").is_some());
+    }
+
+    #[test]
+    fn capture_functions_have_signatures() {
+        // A capture-sourced function carries a full signature for T064
+        // arg-count checking and LSP signature help.
+        let i = get();
+        let sync = i.library_overloads("VCS", "Synchronise");
+        assert!(!sync.is_empty());
+        assert_eq!(sync[0].params.len(), 2);
+        assert_eq!(sync[0].returns, "Integer");
     }
 
     #[test]

@@ -254,6 +254,16 @@ impl SymbolTable {
         self.enums.push(e);
         id
     }
+    /// Register a builtin (firmware/module) enum WITHOUT indexing its members
+    /// in `member_index`. The index drives the `.m1cfg` enum-cell association,
+    /// which must keep resolving against project-declared enums only: builtin
+    /// member names (`On`, `OK`, `Normal`, …) recur across dozens of builtin
+    /// enums and would otherwise make every association ambiguous.
+    pub fn add_builtin_enum(&mut self, e: EnumType) -> EnumId {
+        let id = self.enums.len();
+        self.enums.push(e);
+        id
+    }
     pub fn enums(&self) -> &[EnumType] {
         &self.enums
     }
