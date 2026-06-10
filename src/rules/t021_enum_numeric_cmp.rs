@@ -38,11 +38,14 @@ impl super::Rule for Rule {
         let (lt, rt) = (type_of(*l, scope), type_of(*r, scope));
         let enum_vs_num = (lt.is_enum() && is_numeric(rt)) || (rt.is_enum() && is_numeric(lt));
         if enum_vs_num {
+            // M1 Build rejects the comparison outright (Error 1329
+            // "Incompatible data types for binary operation"), so this is an
+            // error: the build fails, not a style nit (#173).
             out.push(make(
                 TypeCode::T021,
                 node,
-                Severity::Warning,
-                "comparing an enum to a number; compare against an enum member instead".into(),
+                Severity::Error,
+                "comparing an enum to a number; compare against an enum member instead (M1 Build Error 1329: incompatible data types)".into(),
             ));
         }
     }
