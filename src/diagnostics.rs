@@ -34,6 +34,8 @@ pub enum TypeCode {
     T088, // circular-dependency (same-rate write/read cycle between scripts; manual p.29)
     T089, // rate-inversion (opt-in: a faster script reads a channel written only at a slower rate)
     T090, // expression-nesting-too-deep (analysis skipped to avoid a stack overflow)
+    T091, // local-object-case-ambiguity (a local's name matches a referenced object leaf modulo case; manual pp.64-65)
+    T092, // untagged-component (opt-in; M1 Build parity: no System / Type tag selected, manual p.67)
 }
 
 impl TypeCode {
@@ -70,6 +72,8 @@ impl TypeCode {
             TypeCode::T088 => "T088",
             TypeCode::T089 => "T089",
             TypeCode::T090 => "T090",
+            TypeCode::T091 => "T091",
+            TypeCode::T092 => "T092",
         }
     }
 
@@ -110,6 +114,8 @@ impl TypeCode {
             TypeCode::T088 => "circular-dependency",
             TypeCode::T089 => "rate-inversion",
             TypeCode::T090 => "expression-nesting-too-deep",
+            TypeCode::T091 => "local-object-case-ambiguity",
+            TypeCode::T092 => "untagged-component",
         }
     }
 
@@ -122,7 +128,7 @@ impl TypeCode {
         &[
             T001, T002, T003, T004, T010, T020, T021, T030, T031, T040, T041, T042, T050, T060,
             T061, T062, T063, T064, T070, T071, T080, T081, T082, T083, T084, T085, T086, T087,
-            T088, T089, T090,
+            T088, T089, T090, T091, T092,
         ]
     }
 }
@@ -219,6 +225,6 @@ mod tests {
             );
         }
         // Catalogue size tracks the enum (bump both together).
-        assert_eq!(codes.len(), 31);
+        assert_eq!(codes.len(), 33);
     }
 }

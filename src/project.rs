@@ -93,6 +93,13 @@ impl Project {
     /// Project-level audit (T041): every `BuiltIn.Parameter` declared in the
     /// `.m1prj` that has no entry in the loaded `.m1cfg` — M1-Build will fall back
     /// to its default value. Empty when no cfg is loaded (nothing to compare).
+    ///
+    /// Hint severity (#156): riding the default is *normal, supported* M1
+    /// behaviour — most parameters in a real project are intentionally
+    /// uncalibrated (EV-M1: 305, AV-M1: 173), so a Warning per parameter buries
+    /// every actionable diagnostic. Teams that require full calibration
+    /// coverage can still gate on it via `--select T041` + fail-on-warning
+    /// policy of their choice.
     pub fn missing_cfg_parameters(&self) -> Vec<TypeDiagnostic> {
         let Some(cfg_params) = &self.cfg_params else {
             return Vec::new();
@@ -104,7 +111,7 @@ impl Project {
             .map(|s| {
                 make_project_for(
                     TypeCode::T041,
-                    Severity::Warning,
+                    Severity::Hint,
                     format!(
                         "parameter `{}` is declared in the project but has no entry in the .m1cfg (will use its default value)",
                         s.path
@@ -154,6 +161,12 @@ impl Project {
     /// Audit the project's own symbol names (T050).
     pub fn audit(&self) -> Vec<crate::diagnostics::TypeDiagnostic> {
         crate::audit::audit_project(self)
+    }
+
+    /// Opt-in tags audit (T092): M1 Build tag-warning parity — see
+    /// [`crate::audit::audit_tags`].
+    pub fn audit_tags(&self) -> Vec<crate::diagnostics::TypeDiagnostic> {
+        crate::audit::audit_tags(self)
     }
 
     /// Infer user-function/method return types from their script bodies (#110).
@@ -419,6 +432,9 @@ mod tests {
         assert_eq!(diags.len(), 1, "exactly one missing parameter");
         assert_eq!(diags[0].code, TypeCode::T041);
         assert!(diags[0].inner.message.contains("Root.A.Missing"));
+        // #156: Hint, not Warning — riding the default is normal M1 behaviour,
+        // and at hundreds per healthy project a Warning buries real findings.
+        assert_eq!(diags[0].inner.severity, Severity::Hint);
         let _ = std::fs::remove_file(&prj);
         let _ = std::fs::remove_file(&cfg);
     }
