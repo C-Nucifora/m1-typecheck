@@ -81,6 +81,9 @@ pub fn augment(
             value_type,
             declared_type: None,
             unit,
+            // CAN signals carry no `.m1prj` quantity / display unit.
+            qty: None,
+            display_unit: None,
             security: None,
             filename: Some(rel_filename.to_string()),
             enum_assoc: None,

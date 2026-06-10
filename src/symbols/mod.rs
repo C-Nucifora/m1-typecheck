@@ -75,6 +75,19 @@ pub struct Symbol {
     /// the project actually wrote, which `.m1cfg` export needs.
     pub declared_type: Option<String>,
     pub unit: Option<String>,
+    /// Raw physical quantity from `<Props Qty="…">`, verbatim (an SI unit string
+    /// like `rad/s`, `Pa`, `K`, `ratio`). Unlike [`Symbol::unit`] (the base unit,
+    /// with the SI→base exceptions applied) this is the *quantity key* — it matches
+    /// a `<Quantity Symbol>` in MoTeC's units database, so the display-unit check
+    /// (T095 / Error 1017) can look up which display units are valid. `None` when
+    /// the project declares no quantity (or it is a `$(…)` template reference).
+    pub qty: Option<String>,
+    /// Raw display unit from `<Props><Locale><Default Unit="…">`, verbatim (e.g.
+    /// `rpm`, `kPa`, `%`, `C`). This is the *display* unit, distinct from the stored
+    /// base [`Symbol::unit`]; it must be one of the units valid for [`Symbol::qty`]
+    /// (else M1 Build Error 1017). `None` when the object sets no explicit display
+    /// unit (it then displays in the quantity's base unit, always valid).
+    pub display_unit: Option<String>,
     /// Security / access level for this symbol, from the `.m1prj`
     /// `<Props Security="…">` (e.g. `Tune`, `Calibration`, `Master Calibration`,
     /// `Resource`). `None` when the project declares none. Surfaced in hover.

@@ -283,6 +283,18 @@ mod tests {
         assert_eq!(unit("Root.Coolant Temp").as_deref(), Some("C"));
         assert_eq!(unit("Root.Battery").as_deref(), Some("V"));
         assert_eq!(unit("Root.NoQty"), None);
+        // The raw quantity and *display* unit are captured separately (for the
+        // T095 display-unit check): `unit` is the base unit, `display_unit` is
+        // verbatim from `<Locale><Default Unit>`, and `qty` is the raw `Props@Qty`.
+        let sym = |p: &str| parsed.table.get(p).unwrap();
+        assert_eq!(sym("Root.Motor Speed").qty.as_deref(), Some("rad/s"));
+        assert_eq!(sym("Root.Motor Speed").display_unit.as_deref(), Some("rpm"));
+        assert_eq!(sym("Root.Coolant Temp").qty.as_deref(), Some("K"));
+        assert_eq!(sym("Root.Coolant Temp").display_unit.as_deref(), Some("C"));
+        // A quantity with no explicit display unit carries `None` (shows in base).
+        assert_eq!(sym("Root.Battery").qty.as_deref(), Some("V"));
+        assert_eq!(sym("Root.Battery").display_unit, None);
+        assert_eq!(sym("Root.NoQty").qty, None);
     }
 
     #[test]

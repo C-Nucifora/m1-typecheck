@@ -81,6 +81,10 @@ struct ComponentProps {
     enum_assoc: Option<EnumId>,
     declared_type: Option<String>,
     unit: Option<String>,
+    /// Raw `<Props Qty>` (the quantity key for the display-unit check).
+    qty: Option<String>,
+    /// Raw `<Props><Locale><Default Unit>` (the display unit to validate).
+    display_unit: Option<String>,
     security: Option<String>,
     call_rate_hz: Option<f64>,
     log_rate_hz: Option<f64>,
@@ -158,6 +162,22 @@ fn component_props(
     let unit = props
         .and_then(|p| p.attribute("Qty"))
         .and_then(crate::units::base_unit_of_qty);
+    // Raw quantity + display unit for the T095 display-unit check (Error 1017).
+    // `Qty` is the quantity key (matches a `<Quantity Symbol>` in MoTeC's units
+    // database); skip `$(…)` template references (inherited, not a literal). The
+    // display unit lives on the nested `<Locale><Default Unit="…">`.
+    let qty = props
+        .and_then(|p| p.attribute("Qty"))
+        .map(str::trim)
+        .filter(|q| !q.is_empty() && !q.contains("$("))
+        .map(str::to_string);
+    let display_unit = props
+        .and_then(|p| p.children().find(|c| c.has_tag_name("Locale")))
+        .and_then(|loc| loc.children().find(|c| c.has_tag_name("Default")))
+        .and_then(|d| d.attribute("Unit"))
+        .map(str::trim)
+        .filter(|u| !u.is_empty() && !u.contains("$("))
+        .map(str::to_string);
     // Security / access level (#77): `<Props Security="Tune">`.
     let security = props
         .and_then(|p| p.attribute("Security"))
@@ -208,6 +228,8 @@ fn component_props(
         enum_assoc,
         declared_type,
         unit,
+        qty,
+        display_unit,
         security,
         call_rate_hz,
         log_rate_hz,
@@ -266,6 +288,8 @@ pub(super) fn symbol_from_component(
         value_type: props.value_type,
         declared_type: props.declared_type,
         unit: props.unit,
+        qty: props.qty,
+        display_unit: props.display_unit,
         security: props.security,
         filename,
         enum_assoc: props.enum_assoc,

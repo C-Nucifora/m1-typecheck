@@ -102,6 +102,62 @@ pub fn audit_project(project: &Project) -> Vec<TypeDiagnostic> {
     out
 }
 
+/// Project-wide display-unit audit (T095, default-on) — M1 Build Error 1017
+/// "Invalid display unit" parity.
+///
+/// Manual (*Quantities and Base Units*): every floating-point channel/parameter/
+/// table has a physical *quantity*, and its `<Locale><Default Unit>` display unit
+/// must be a unit *of that quantity* (conversion to the base unit is handled by
+/// the M1 System). Choosing a display unit from a different dimension — e.g.
+/// quantity `rad/s` (Angular Speed) displayed as `%` — is M1 Build Error 1017.
+///
+/// We mirror that exactly: for each symbol carrying both a `Qty` and a
+/// `<Default Unit>`, look the quantity up in MoTeC's units database
+/// ([`crate::unit_table`], generated from `units.xml`) and flag a display unit
+/// that is not one of that quantity's units. A quantity absent from the database
+/// can't be checked (skipped, no false positive); a symbol with no explicit
+/// display unit shows in the quantity's base unit (always valid, skipped).
+/// Package-object internals are exempt (their quantity/unit are MoTeC-defined,
+/// same `ObjectOwnership` rule as the other audits).
+///
+/// Default-on: M1 Build emits 1017 as an Error, so this is parity, not noise.
+pub fn audit_display_units(project: &Project) -> Vec<TypeDiagnostic> {
+    let table = project.symbols();
+    let ownership = ObjectOwnership::new(table);
+    let mut out = Vec::new();
+    for sym in table.iter() {
+        if !matches!(
+            sym.kind,
+            SymbolKind::Channel | SymbolKind::Parameter | SymbolKind::Table
+        ) {
+            continue;
+        }
+        if ownership.owned_by_object(&sym.path) {
+            continue;
+        }
+        let (Some(qty), Some(unit)) = (sym.qty.as_deref(), sym.display_unit.as_deref()) else {
+            continue;
+        };
+        let Some(valid) = crate::unit_table::valid_display_units(qty) else {
+            continue; // quantity not in MoTeC's units database — can't validate
+        };
+        if valid.contains(&unit) {
+            continue; // a valid display unit for this quantity
+        }
+        out.push(make_project_for(
+            TypeCode::T095,
+            Severity::Error,
+            format!(
+                "{:?} `{}` has display unit `{unit}`, which is not a unit of its quantity `{qty}` (M1 Build Error 1017: \"Invalid display unit\")",
+                sym.kind, sym.path
+            ),
+            &sym.path,
+        ));
+    }
+    out.sort_by(|a, b| a.inner.message.cmp(&b.inner.message));
+    out
+}
+
 /// Project-wide data-type restriction audit (T087): the manual (p.24)
 /// restricts Boolean and String data types to local variables — a channel or
 /// parameter declared with a `bool`/`string` storage type cannot exist as an
@@ -317,4 +373,84 @@ fn capitalised(s: &str) -> bool {
         && s.chars()
             .filter(|c| c.is_ascii_alphabetic())
             .all(|c| c.is_ascii_uppercase())
+}
+
+#[cfg(test)]
+mod display_unit_tests {
+    use super::audit_display_units;
+    use crate::diagnostics::TypeCode;
+    use crate::project::Project;
+    use m1_core::Severity;
+
+    fn t095_subjects(xml: &str) -> Vec<String> {
+        let project = Project::from_xml(xml).expect("parse project");
+        audit_display_units(&project)
+            .into_iter()
+            .inspect(|d| {
+                assert_eq!(d.code, TypeCode::T095);
+                // M1 Build reports 1017 as an Error.
+                assert_eq!(d.inner.severity, Severity::Error);
+            })
+            .filter_map(|d| d.subject)
+            .collect()
+    }
+
+    #[test]
+    fn flags_a_display_unit_from_the_wrong_dimension() {
+        // Qty rad/s (Angular Speed) displayed as `%` is M1 Build Error 1017;
+        // displayed as `rpm` (a unit of rad/s) is valid; with no display unit it
+        // shows in the base unit (valid). A duty-cycle Qty `ratio` shown as `%`
+        // is valid (`%` is a unit of `ratio`).
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.Bad Speed">
+    <Props Qty="rad/s"><Locale><Default Unit="%"/></Locale></Props>
+  </Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.Good Speed">
+    <Props Qty="rad/s"><Locale><Default Unit="rpm"/></Locale></Props>
+  </Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.No Display">
+    <Props Qty="rad/s"/>
+  </Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.Duty">
+    <Props Qty="ratio"><Locale><Default Unit="%"/></Locale></Props>
+  </Component>
+</Project>"#;
+        assert_eq!(t095_subjects(xml), vec!["Root.Bad Speed".to_string()]);
+    }
+
+    #[test]
+    fn skips_quantities_absent_from_the_units_database() {
+        // A quantity symbol not in MoTeC's units.xml can't be validated — we must
+        // not guess (no false positive), even with a nonsense display unit.
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.Weird">
+    <Props Qty="zorkmids/fortnight"><Locale><Default Unit="banana"/></Locale></Props>
+  </Component>
+</Project>"#;
+        assert!(t095_subjects(xml).is_empty());
+    }
+
+    #[test]
+    fn temperature_celsius_and_fahrenheit_are_valid() {
+        // Qty K (Temperature) accepts C and F (its base unit is Celsius); kPa is
+        // a pressure unit and must flag.
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>
+  <Component Classname="BuiltIn.Parameter" Name="Root.Coolant">
+    <Props Qty="K"><Locale><Default Unit="C"/></Locale></Props>
+  </Component>
+  <Component Classname="BuiltIn.Parameter" Name="Root.Ambient">
+    <Props Qty="K"><Locale><Default Unit="F"/></Locale></Props>
+  </Component>
+  <Component Classname="BuiltIn.Parameter" Name="Root.Confused">
+    <Props Qty="K"><Locale><Default Unit="kPa"/></Locale></Props>
+  </Component>
+</Project>"#;
+        assert_eq!(t095_subjects(xml), vec!["Root.Confused".to_string()]);
+    }
 }

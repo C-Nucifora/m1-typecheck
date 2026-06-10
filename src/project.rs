@@ -169,6 +169,15 @@ impl Project {
         crate::audit::audit_tags(self)
     }
 
+    /// Display-unit audit (T095, default-on): M1 Build Error 1017 parity — see
+    /// [`crate::audit::audit_display_units`]. Exposed separately from
+    /// [`Self::audit`] (the `--audit-names` convention audit) because it is an
+    /// M1-Build-parity check that should run on every default run, like
+    /// [`Self::audit_tags`].
+    pub fn audit_display_units(&self) -> Vec<crate::diagnostics::TypeDiagnostic> {
+        crate::audit::audit_display_units(self)
+    }
+
     /// Infer user-function/method return types from their script bodies (#110).
     ///
     /// `scripts` pairs each script's file name (e.g. `"Engine.Update.m1scr"`) with
