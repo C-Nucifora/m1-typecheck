@@ -250,7 +250,7 @@ pub fn audit_name_collisions(project: &Project) -> Vec<TypeDiagnostic> {
 /// This mirrors those two warnings per user-defined Channel/Parameter, using
 /// each symbol's **effective** tag set ([`crate::symbols::Symbol::tags`]: own
 /// `SelectedTags` ∪ inherited group tags, #170). Package-object internals are
-/// exempt (same [`ObjectOwnership`] rule as the naming audit).
+/// exempt (same `ObjectOwnership` rule as the naming audit).
 ///
 /// Opt-in via `--select T092` / `[diagnostics] select`: the real corpora use
 /// no tags at all, so default-on would flood every untagged-by-choice project.

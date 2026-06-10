@@ -11,7 +11,7 @@
 //! where the two spellings actually sit side by side and confuse maintenance.
 //! Symbols owned by a package-defined object instance are exempt (their
 //! `Value`/`State` leaves are MoTeC's naming, not the user's — the same
-//! [`crate::audit::ObjectOwnership`] rule the project audits apply).
+//! `crate::audit::ObjectOwnership` rule the project audits apply).
 //!
 //! Whole-tree pass (like `flow.rs`), not a node-at-a-time rule: it needs the
 //! full set of references in the file before it can judge any declaration.
