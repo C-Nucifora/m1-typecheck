@@ -14,6 +14,7 @@ pub mod schedule;
 pub mod symbols;
 pub mod typer;
 pub mod types;
+pub mod unit_table;
 pub mod units;
 
 pub use diagnostics::{CheckResult, TypeCode, TypeDiagnostic};

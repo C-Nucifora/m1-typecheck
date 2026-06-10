@@ -381,6 +381,29 @@ fn audit_project(
         }
     }
 
+    // Display-unit audit (T095, default-on): M1 Build Error 1017 parity ("Invalid
+    // display unit" — a `<Default Unit>` from a different dimension than the
+    // object's `Qty`). Runs whenever a project is loaded, like the tags audit;
+    // `allows_subject` honours `--select`/`--ignore`.
+    if let Some(p) = project {
+        for d in p.audit_display_units() {
+            if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
+                continue;
+            }
+            if json {
+                json_buf.project.push(d);
+            } else {
+                println!(
+                    "{}: {}[{}]: {}",
+                    path_label(),
+                    severity_str(d.inner.severity),
+                    d.code.as_str(),
+                    d.inner.message
+                );
+            }
+        }
+    }
+
     if args.audit_names {
         match project {
             Some(p) => {
