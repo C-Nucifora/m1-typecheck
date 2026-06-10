@@ -42,11 +42,14 @@ impl Registry {
     /// `--select`/`[diagnostics] select`), never by default: T064 (a per-node
     /// rule), T088/T089 (project-level scheduling checks in `schedule::check`
     /// — the real corpora contain deliberate same-rate feedback loops, so
-    /// neither is safe default-on) and T092 (the tags audit in
-    /// `audit::audit_tags` — the real corpora use no tags at all).
+    /// neither is safe default-on), T092 (the tags audit in
+    /// `audit::audit_tags` — the real corpora use no tags at all) and T093/T094
+    /// (the usage audit in `schedule::check_usage` — real channels/parameters are
+    /// legitimately valued/read by tables, hardware and firmware this static pass
+    /// can't see, so neither is safe default-on).
     pub fn opt_in_codes() -> &'static [crate::diagnostics::TypeCode] {
         use crate::diagnostics::TypeCode::*;
-        &[T064, T088, T089, T092]
+        &[T064, T088, T089, T092, T093, T094]
     }
 
     /// The default rule set plus any opt-in rules whose code is in `enabled`. Used

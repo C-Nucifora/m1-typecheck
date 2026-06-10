@@ -655,6 +655,40 @@ fn main() {
         }
     }
 
+    // Usage audit (opt-in): channels never assigned (T093) / parameters never read
+    // (T094) by any script — M1 Build Errors 1627/1631. Off by default (some real
+    // channels are valued by tables/hardware this static pass can't see).
+    let usage_diags: Vec<TypeDiagnostic> = project
+        .as_ref()
+        .map(|p| {
+            m1_typecheck::schedule::check_usage(
+                p,
+                &scripts,
+                filter.select.contains("T093"),
+                filter.select.contains("T094"),
+            )
+        })
+        .unwrap_or_default();
+    for d in &usage_diags {
+        if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
+            continue;
+        }
+        if json {
+            json_buf.project.push(d.clone());
+        } else {
+            let label = project_path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "<project>".into());
+            println!(
+                "{label}: {}[{}]: {}",
+                severity_str(d.inner.severity),
+                d.code.as_str(),
+                d.inner.message
+            );
+        }
+    }
+
     // Per-file checks, then the once-per-run project-level audits.
     let had_error = check_files(
         &args,

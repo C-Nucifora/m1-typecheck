@@ -36,6 +36,8 @@ pub enum TypeCode {
     T090, // expression-nesting-too-deep (analysis skipped to avoid a stack overflow)
     T091, // local-object-case-ambiguity (a local's name matches a referenced object leaf modulo case; manual pp.64-65)
     T092, // untagged-component (opt-in; M1 Build parity: no System / Type tag selected, manual p.67)
+    T093, // unassigned-channel (opt-in; M1 Build Error 1627: a channel no script writes)
+    T094, // unread-parameter (opt-in; M1 Build Error 1631: a parameter no script reads)
 }
 
 impl TypeCode {
@@ -74,6 +76,8 @@ impl TypeCode {
             TypeCode::T090 => "T090",
             TypeCode::T091 => "T091",
             TypeCode::T092 => "T092",
+            TypeCode::T093 => "T093",
+            TypeCode::T094 => "T094",
         }
     }
 
@@ -116,6 +120,8 @@ impl TypeCode {
             TypeCode::T090 => "expression-nesting-too-deep",
             TypeCode::T091 => "local-object-case-ambiguity",
             TypeCode::T092 => "untagged-component",
+            TypeCode::T093 => "unassigned-channel",
+            TypeCode::T094 => "unread-parameter",
         }
     }
 
@@ -128,7 +134,7 @@ impl TypeCode {
         &[
             T001, T002, T003, T004, T010, T020, T021, T030, T031, T040, T041, T042, T050, T060,
             T061, T062, T063, T064, T070, T071, T080, T081, T082, T083, T084, T085, T086, T087,
-            T088, T089, T090, T091, T092,
+            T088, T089, T090, T091, T092, T093, T094,
         ]
     }
 }
@@ -225,6 +231,6 @@ mod tests {
             );
         }
         // Catalogue size tracks the enum (bump both together).
-        assert_eq!(codes.len(), 33);
+        assert_eq!(codes.len(), 35);
     }
 }
