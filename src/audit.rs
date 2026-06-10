@@ -241,7 +241,7 @@ pub fn audit_name_collisions(project: &Project) -> Vec<TypeDiagnostic> {
     out
 }
 
-/// Opt-in project-level tags audit (T092) — M1 Build tag-warning parity.
+/// Project-level tags audit (T092, default-on) — M1 Build tag-warning parity.
 ///
 /// Manual p.67 (*Tags*): every object can carry tags in three groups — System
 /// (`Engine`/`Vehicle`/`Driver`), Type (`Normal`/`Diagnostic`/`Advanced`/
@@ -252,8 +252,9 @@ pub fn audit_name_collisions(project: &Project) -> Vec<TypeDiagnostic> {
 /// `SelectedTags` ∪ inherited group tags, #170). Package-object internals are
 /// exempt (same `ObjectOwnership` rule as the naming audit).
 ///
-/// Opt-in via `--select T092` / `[diagnostics] select`: the real corpora use
-/// no tags at all, so default-on would flood every untagged-by-choice project.
+/// Default-on: M1 Build emits exactly these warnings itself (the real AV-M1
+/// project has hundreds), so surfacing them is parity, not noise. (Severity stays
+/// Warning; teams that don't tag can `--ignore T092`.)
 pub fn audit_tags(project: &Project) -> Vec<TypeDiagnostic> {
     const SYSTEM_TAGS: [&str; 3] = ["Engine", "Vehicle", "Driver"];
     const TYPE_TAGS: [&str; 6] = ["Normal", "Diagnostic", "Advanced", "Pin", "Tune", "Setup"];

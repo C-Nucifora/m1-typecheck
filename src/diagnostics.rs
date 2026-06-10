@@ -35,9 +35,9 @@ pub enum TypeCode {
     T089, // rate-inversion (opt-in: a faster script reads a channel written only at a slower rate)
     T090, // expression-nesting-too-deep (analysis skipped to avoid a stack overflow)
     T091, // local-object-case-ambiguity (a local's name matches a referenced object leaf modulo case; manual pp.64-65)
-    T092, // untagged-component (opt-in; M1 Build parity: no System / Type tag selected, manual p.67)
-    T093, // unassigned-channel (opt-in; M1 Build Error 1627: a channel no script writes)
-    T094, // unread-parameter (opt-in; M1 Build Error 1631: a parameter no script reads)
+    T092, // untagged-component (M1 Build parity 1142/1549: no System / Type tag selected, manual p.67)
+    T093, // unassigned-channel (M1 Build Error 1627: a channel no script writes)
+    T094, // unread-parameter (M1 Build Error 1631: a parameter no script reads)
 }
 
 impl TypeCode {
