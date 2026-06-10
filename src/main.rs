@@ -11,6 +11,53 @@ use output::{JsonFile, json_str, render_json, severity_str};
 use std::path::{Path, PathBuf};
 use std::process;
 
+/// Every `.m1scr` under the project's revision directory (the folder containing
+/// `Project.m1prj`), as `(file_name, source)` — the COMPLETE script set the
+/// project-wide cross-script passes (T088/T089/T093/T094, taint solve, return-type
+/// inference) need to be sound regardless of which files were passed on the command
+/// line. Walks recursively with a depth cap and skips symlinks (a crafted in-tree
+/// symlink must not pull in out-of-tree files; mirrors the LSP's `walk_scripts`).
+/// Rooted at the open revision dir, so sibling backup revisions are not included.
+fn gather_project_scripts(project_path: &Path) -> Vec<(String, String)> {
+    const MAX_DEPTH: usize = 64;
+    fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+        if depth > MAX_DEPTH {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let Ok(ft) = e.file_type() else {
+                continue;
+            };
+            if ft.is_symlink() {
+                continue;
+            }
+            let p = e.path();
+            if ft.is_dir() {
+                walk(&p, depth + 1, out);
+            } else if p.extension().and_then(|x| x.to_str()) == Some("m1scr") {
+                out.push(p);
+            }
+        }
+    }
+    let Some(root) = project_path.parent() else {
+        return Vec::new();
+    };
+    let mut files = Vec::new();
+    walk(root, 0, &mut files);
+    files.sort();
+    files
+        .iter()
+        .filter_map(|f| {
+            let name = f.file_name()?.to_str()?.to_string();
+            let src = m1_workspace::read_text(f).ok()?;
+            Some((name, src))
+        })
+        .collect()
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "m1-typecheck",
@@ -312,11 +359,10 @@ fn audit_project(
         }
     }
 
-    // Opt-in tags audit (T092): M1 Build tag-warning parity. Runs only when
-    // explicitly selected — the real corpora use no tags at all (#158).
-    if filter.select.contains("T092")
-        && let Some(p) = project
-    {
+    // Tags audit (T092, default-on): M1 Build tag-warning parity (Warning 1142/
+    // 1549). Runs whenever a project is loaded; `allows_subject` still honours
+    // `--select`/`--ignore`. Mirrors M1 Build, which emits these warnings itself.
+    if let Some(p) = project {
         for d in p.audit_tags() {
             if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
                 continue;
@@ -594,11 +640,30 @@ fn main() {
         })
         .collect();
 
+    // The project-wide cross-script passes (return-type inference, invalid-value
+    // solve, scheduling T088/T089, usage T093/T094) are only sound over the WHOLE
+    // project's scripts: a channel written by a script the user didn't pass on the
+    // command line would otherwise look never-assigned (a false positive). So for
+    // those passes use every `.m1scr` under the project's revision directory, not
+    // just the files in `args.files`. Per-file diagnostics still use `args.files`.
+    // Falls back to the command-line files when there is no project (or none found).
+    let all_scripts: Vec<(String, String)> = match project_path.as_ref() {
+        Some(p) => {
+            let walked = gather_project_scripts(p);
+            if walked.is_empty() {
+                scripts.clone()
+            } else {
+                walked
+            }
+        }
+        None => scripts.clone(),
+    };
+
     // Infer user-function/method return types from the script bodies on the
     // command line, so call sites in other scripts type-check (#110). Scripts
     // that back no function symbol are simply ignored by the pass.
     if let Some(p) = project.as_mut() {
-        p.infer_return_types(&scripts);
+        p.infer_return_types(&all_scripts);
     }
 
     // Solve the project-wide channel taint graph so cross-script invalid
@@ -606,7 +671,7 @@ fn main() {
     // channel identity to propagate through, so the map stays empty).
     let channel_taints = project
         .as_ref()
-        .map(|p| cross_script::solve(p, &scripts))
+        .map(|p| cross_script::solve(p, &all_scripts))
         .unwrap_or_default();
 
     // `--explain <CHANNEL>`: report that channel's solved status and exit.
@@ -618,21 +683,19 @@ fn main() {
     // `--explain-units <CHANNEL>`: the channel's quantity and every direct
     // contributor's unit (#144).
     if let Some(channel) = &args.explain_units {
-        explain_units(project.as_ref(), &scripts, channel);
+        explain_units(project.as_ref(), &all_scripts, channel);
         return;
     }
 
-    // Scheduling checks (#145): T088 same-rate circular dependencies always;
-    // T089 rate inversion only when opted in via --select.
+    // Scheduling checks (#145). T088 (same-rate circular dependency) is default-on:
+    // it matches M1 Build's Warning 1640 "circular schedule dependency found and
+    // resolved" (1 cycle each on the real AV-M1 project). T089 (rate inversion)
+    // stays OPT-IN — M1 Build does not flag it (downsampled reads are intentional
+    // and accepted), so default-on would diverge from M1 Build.
     let schedule_diags: Vec<TypeDiagnostic> = project
         .as_ref()
         .map(|p| {
-            m1_typecheck::schedule::check(
-                p,
-                &scripts,
-                filter.select.contains("T088"),
-                filter.select.contains("T089"),
-            )
+            m1_typecheck::schedule::check(p, &all_scripts, true, filter.select.contains("T089"))
         })
         .unwrap_or_default();
     for d in &schedule_diags {
@@ -655,19 +718,14 @@ fn main() {
         }
     }
 
-    // Usage audit (opt-in): channels never assigned (T093) / parameters never read
-    // (T094) by any script — M1 Build Errors 1627/1631. Off by default (some real
-    // channels are valued by tables/hardware this static pass can't see).
+    // Usage audit (default-on): channels never assigned (T093) / parameters never
+    // read (T094) by any script — M1 Build Errors 1627/1631. Run over the COMPLETE
+    // project script set (`all_scripts`) so it matches M1 Build; `allows_subject`
+    // still honours `--select`/`--ignore`. Exemptions (CAN, package objects,
+    // table/compound `.Value`) keep it false-positive-free on real projects.
     let usage_diags: Vec<TypeDiagnostic> = project
         .as_ref()
-        .map(|p| {
-            m1_typecheck::schedule::check_usage(
-                p,
-                &scripts,
-                filter.select.contains("T093"),
-                filter.select.contains("T094"),
-            )
-        })
+        .map(|p| m1_typecheck::schedule::check_usage(p, &all_scripts, true, true))
         .unwrap_or_default();
     for d in &usage_diags {
         if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {

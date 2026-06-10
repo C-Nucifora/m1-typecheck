@@ -1,20 +1,17 @@
 //! Scheduling analysis (#145) — project-wide checks over the script
 //! write/read graph and each script's call rate (`SelectedTrigger`).
 //!
-//! Both checks are OPT-IN (`--select T088` / `--select T089`): the real
-//! corpora contain deliberate same-rate feedback loops (CAN transceive <->
-//! control updates) that M1 Build accepts — a reader simply sees the previous
-//! tick's value — so neither check is safe as default-on. They are
-//! exploration/audit tools:
-//!
-//! - **T088 circular-dependency:** the manual (p.29, Scheduling) calls a
-//!   circular dependency "the most common error"; this surfaces every
-//!   same-rate write/read cycle between scripts for review. Cross-rate
-//!   feedback (a 100 Hz script reading back a 1000 Hz result) is never
-//!   flagged.
-//! - **T089 rate-inversion:** a faster script reading a channel written only
-//!   by a slower one sees stale values between writer ticks. Often
-//!   intentional (downsampled inputs).
+//! - **T088 circular-dependency (default-on):** the manual (p.29, Scheduling)
+//!   calls a circular dependency "the most common error"; this surfaces every
+//!   same-rate write/read cycle between scripts. It mirrors M1 Build's Warning
+//!   1640 "circular schedule dependency found and resolved" (one cycle each on
+//!   the real AV-M1 project), so it is default-on. Cross-rate feedback (a 100 Hz
+//!   script reading back a 1000 Hz result) is never flagged.
+//! - **T089 rate-inversion (OPT-IN, `--select T089`):** a faster script reading
+//!   a channel written only by a slower one sees stale values between writer
+//!   ticks. M1 Build does NOT flag this — downsampled inputs are intentional and
+//!   accepted — so default-on would diverge from M1 Build; it stays an opt-in
+//!   exploration aid.
 use crate::diagnostics::{TypeCode, TypeDiagnostic, make_project_for};
 use crate::project::Project;
 use crate::resolve::{Resolution, Scope, resolve};
@@ -253,18 +250,22 @@ pub fn check(
     out
 }
 
-/// Project-wide usage audit (opt-in): channels no script writes (T093, mirroring
-/// M1 Build Error 1627 "Channel value not assigned") and parameters no script
-/// reads (T094, M1 Build Error 1631 "Parameter value not read").
+/// Project-wide usage audit (default-on): channels no script writes (T093,
+/// mirroring M1 Build Error 1627 "Channel value not assigned") and parameters no
+/// script reads (T094, M1 Build Error 1631 "Parameter value not read").
 ///
-/// OPT-IN audit aids, not default-on (same rationale as T088/T089): a real project
-/// legitimately has channels valued by sources this static pass cannot see — tables,
-/// hardware/IO resources, firmware — so some entries are expected and warrant review
-/// rather than being hard errors. Exemptions remove the obvious non-script sources:
-/// CAN signals (`BuiltIn.CAN.*`) and members of a package-object instance (MoTeC
-/// Input/Output sensors, etc., via `crate::audit::ObjectOwnership`); only plain
-/// `BuiltIn.Channel` / `BuiltIn.Parameter` are considered. Pass every project script
-/// in `scripts` so the union of writes/reads is complete.
+/// Matches M1 Build (0 on the real AV-M1 project, like M1 Build) once writes/reads
+/// are detected correctly — `Channel.Set*(…)` and `This.`-qualified access count
+/// (see `script_io`) — and the obvious non-script value sources are exempt: CAN
+/// signals (`BuiltIn.CAN.*`), package-object members (MoTeC Input/Output sensors,
+/// via `crate::audit::ObjectOwnership`), and a Table / value-compound's
+/// auto-created `.Value` child. Only plain `BuiltIn.Channel`/`BuiltIn.Parameter`
+/// are considered.
+///
+/// IMPORTANT: `scripts` must be the COMPLETE set of project scripts (the CLI gathers
+/// every `.m1scr` under the project, not just the files on the command line) — a
+/// missing script would make the channels it writes look never-assigned. The `t093`/
+/// `t094` flags let a caller still scope to one code.
 pub fn check_usage(
     project: &Project,
     scripts: &[(String, String)],
@@ -427,8 +428,9 @@ mod usage_tests {
     }
 
     #[test]
-    fn off_by_default_flags() {
-        // Neither code selected → no work, no findings.
+    fn flags_gate_each_code_independently() {
+        // The t093/t094 flags scope the audit to one code (e.g. for `--select`);
+        // neither selected → no work, no findings.
         let project = Project::from_xml(XML).unwrap();
         let scripts = vec![("Ctrl.Update.m1scr".to_string(), String::new())];
         assert!(check_usage(&project, &scripts, false, false).is_empty());

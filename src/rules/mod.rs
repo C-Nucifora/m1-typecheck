@@ -39,17 +39,20 @@ impl Registry {
     }
 
     /// The opt-in T-codes — rules that run only when explicitly selected (via
-    /// `--select`/`[diagnostics] select`), never by default: T064 (a per-node
-    /// rule), T088/T089 (project-level scheduling checks in `schedule::check`
-    /// — the real corpora contain deliberate same-rate feedback loops, so
-    /// neither is safe default-on), T092 (the tags audit in
-    /// `audit::audit_tags` — the real corpora use no tags at all) and T093/T094
-    /// (the usage audit in `schedule::check_usage` — real channels/parameters are
-    /// legitimately valued/read by tables, hardware and firmware this static pass
-    /// can't see, so neither is safe default-on).
+    /// `--select`/`[diagnostics] select`), never by default:
+    /// - **T064** (a per-node arg-count rule).
+    /// - **T089** rate-inversion (`schedule::check`): M1 Build does NOT flag a
+    ///   faster script reading a slower-written channel — downsampled reads are
+    ///   intentional and accepted — so default-on would diverge from M1 Build.
+    ///
+    /// T088 (circular dependency = M1 Build 1640), T092 (untagged = M1 Build
+    /// 1142/1549) and T093/T094 (unassigned/unread = M1 Build 1627/1631) are now
+    /// **default-on**: each mirrors a finding M1 Build itself emits, and the
+    /// cross-script checks source the whole project's scripts so they no longer
+    /// false-positive under a partial invocation.
     pub fn opt_in_codes() -> &'static [crate::diagnostics::TypeCode] {
         use crate::diagnostics::TypeCode::*;
-        &[T064, T088, T089, T092, T093, T094]
+        &[T064, T089]
     }
 
     /// The default rule set plus any opt-in rules whose code is in `enabled`. Used
