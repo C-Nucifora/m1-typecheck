@@ -429,6 +429,47 @@ pub fn check_usage(
     out
 }
 
+/// Cross-script writer audit (default-on, T096): a channel assigned by more
+/// than one *periodically scheduled* function — M1 Build Error 1022 "Object
+/// assigned to from multiple periodically scheduled functions", which fails
+/// the build. The intra-script complement is T040 (multiple assignments on
+/// one code path). Only functions with a known trigger rate count: a Startup
+/// or event function initialising a channel one scheduled function owns is
+/// not a 1022 (and an unparseable rate conservatively stays silent).
+pub fn check_multi_writers(project: &Project, scripts: &[(String, String)]) -> Vec<TypeDiagnostic> {
+    let ios: Vec<ScriptIo> = scripts
+        .iter()
+        .filter_map(|(f, s)| script_io(project, f, s))
+        .filter(|io| io.rate_hz.is_some())
+        .collect();
+    let mut writers: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for io in &ios {
+        for w in &io.writes {
+            writers.entry(w).or_default().insert(io.fn_path.as_str());
+        }
+    }
+    let mut out = Vec::new();
+    for (chan, fns) in &writers {
+        if fns.len() < 2 {
+            continue;
+        }
+        let list = fns
+            .iter()
+            .map(|f| format!("`{f}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push(make_project_for(
+            TypeCode::T096,
+            Severity::Error,
+            format!(
+                "channel `{chan}` is assigned by multiple periodically scheduled functions: {list} (M1 Build Error 1022)"
+            ),
+            *chan,
+        ));
+    }
+    out
+}
+
 #[cfg(test)]
 mod usage_tests {
     use super::*;
@@ -537,6 +578,66 @@ mod usage_tests {
             );
         }
     }
+
+    #[test]
+    fn multi_writer_channel_is_flagged_across_scheduled_functions() {
+        // Probe from #177: `Root.Ctrl.Written` assigned by two periodically
+        // scheduled functions → M1 Build Error 1022 (build fails). A channel
+        // with a single scheduled writer must not be flagged.
+        let project = Project::from_xml(XML_TWO_FNS).unwrap();
+        let scripts = vec![
+            (
+                "Ctrl.Update.m1scr".to_string(),
+                "Written = 1.0;\nOnly Mine = 2.0;\n".to_string(),
+            ),
+            (
+                "Aux.Update.m1scr".to_string(),
+                "Ctrl.Written = 3.0;\n".to_string(),
+            ),
+        ];
+        let diags = check_multi_writers(&project, &scripts);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        let d = &diags[0];
+        assert_eq!(d.inner.severity, Severity::Error);
+        assert!(
+            d.inner.message.contains("`Root.Ctrl.Written`")
+                && d.inner.message.contains("Root.Ctrl.Update")
+                && d.inner.message.contains("Root.Aux.Update"),
+            "{}",
+            d.inner.message
+        );
+    }
+
+    #[test]
+    fn unscheduled_second_writer_is_not_1022() {
+        // M1 Build 1022 is specific to *periodically scheduled* functions: a
+        // Startup function (no trigger rate) initialising a channel that one
+        // scheduled function owns is fine.
+        let project = Project::from_xml(XML_TWO_FNS).unwrap();
+        let scripts = vec![
+            (
+                "Ctrl.Update.m1scr".to_string(),
+                "Written = 1.0;\n".to_string(),
+            ),
+            (
+                "Aux.Startup.m1scr".to_string(),
+                "Ctrl.Written = 0.0;\n".to_string(),
+            ),
+        ];
+        assert!(check_multi_writers(&project, &scripts).is_empty());
+    }
+
+    const XML_TWO_FNS: &str = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root.Ctrl"/>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root.Aux"/>
+  <Component Classname="BuiltIn.FuncUser" Filename="Ctrl.Update.m1scr" Name="Root.Ctrl.Update"><Props SelectedTrigger="Root.Events.On 100Hz"/></Component>
+  <Component Classname="BuiltIn.FuncUser" Filename="Aux.Update.m1scr" Name="Root.Aux.Update"><Props SelectedTrigger="Root.Events.On 50Hz"/></Component>
+  <Component Classname="BuiltIn.FuncUser" Filename="Aux.Startup.m1scr" Name="Root.Aux.Startup"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.Written"><Props Type="f32" Security="Tune"/></Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.Only Mine"><Props Type="f32" Security="Tune"/></Component>
+</Project>"#;
 
     #[test]
     fn flags_gate_each_code_independently() {
