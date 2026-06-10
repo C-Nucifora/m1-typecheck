@@ -159,6 +159,102 @@ fn t070_no_flag_non_enum_subject() {
     assert!(got.contains(&TypeCode::T082), "non-enum subject is T082");
 }
 
+// ---- package (`::Hardware.*`) enums with manual-documented membership ------
+// In `package_enums.m1prj`, `bspdActive` is typed `::Hardware.av_switch.sw_state`
+// — the standard "Universal Switch State" firmware enum, whose Off/On membership
+// the M1 Development Manual documents. M1 Build resolves it and enforces
+// membership checks (Errors 1306/1352), so the toolchain must too (#167/#168).
+
+fn pkg_proj() -> Project {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    Project::load(&dir.join("package_enums.m1prj")).unwrap()
+}
+
+fn pkg_codes(p: &Project, src: &str) -> Vec<TypeCode> {
+    check_script(p, Path::new("Pkg Update.m1scr"), src)
+        .diagnostics
+        .iter()
+        .map(|d| d.code)
+        .collect()
+}
+
+#[test]
+fn t070_flags_missing_enumerator_on_package_enum() {
+    // Probe from #167: `when` covering only Off → M1 Build Error 1306
+    // ("missing 'is' statement for enumerator 'On'").
+    let p = pkg_proj();
+    let src = "when (bspdActive) {\nis (Off) {\n}\n}\n";
+    assert!(pkg_codes(&p, src).contains(&TypeCode::T070));
+}
+
+#[test]
+fn t070_no_flag_package_enum_all_covered() {
+    let p = pkg_proj();
+    let src = "when (bspdActive) {\nis (Off) {\n}\nis (On) {\n}\n}\n";
+    assert!(!pkg_codes(&p, src).contains(&TypeCode::T070));
+}
+
+#[test]
+fn t020_flags_non_member_on_package_enum() {
+    // Probe from #168: typo'd enumerator → M1 Build Errors 1352/1320.
+    let p = pkg_proj();
+    let got = pkg_codes(&p, "bspdActive = Universal Switch State.Nonexistent;\n");
+    assert!(got.contains(&TypeCode::T020), "{got:?}");
+}
+
+#[test]
+fn t020_t030_no_flag_for_documented_package_enum_member() {
+    // The channel's declared type and the typed member path resolve to the SAME
+    // enum id, so neither membership (T020) nor assignment (T030) fires.
+    let p = pkg_proj();
+    let got = pkg_codes(&p, "bspdActive = Universal Switch State.On;\n");
+    assert!(!got.contains(&TypeCode::T020), "{got:?}");
+    assert!(!got.contains(&TypeCode::T030), "{got:?}");
+}
+
+#[test]
+fn t020_is_an_error_like_m1_build_1352() {
+    // M1 Build fails the build on a non-member enumerator (Error 1352), so
+    // T020 must be an error (non-zero exit), not a warning.
+    let p = pkg_proj();
+    let diags = check_script(
+        &p,
+        Path::new("Pkg Update.m1scr"),
+        "bspdActive = Universal Switch State.Nonexistent;\n",
+    )
+    .diagnostics;
+    let t020 = diags
+        .iter()
+        .find(|d| d.code == TypeCode::T020)
+        .expect("T020 fires");
+    assert_eq!(t020.inner.severity, m1_core::Severity::Error);
+}
+
+#[test]
+fn t020_case_variant_of_member_stays_warning() {
+    // M1 Build resolves names case-insensitively (manual pp.64-65), so a
+    // case-variant of a real member ("OFf" for "Off") builds with 0 errors —
+    // it must stay a Warning (style), not the Error-1352 parity error.
+    // Mirrors `ASSI.OFf` in the AV-M1 corpus, which Validate Project accepts.
+    let p = pkg_proj();
+    let diags = check_script(
+        &p,
+        Path::new("Pkg Update.m1scr"),
+        "bspdActive = Universal Switch State.OFf;\n",
+    )
+    .diagnostics;
+    let t020 = diags
+        .iter()
+        .find(|d| d.code == TypeCode::T020)
+        .expect("case variant still flagged");
+    assert_eq!(t020.inner.severity, m1_core::Severity::Warning);
+    assert!(
+        t020.inner.message.contains("case"),
+        "{}",
+        t020.inner.message
+    );
+}
+
 #[test]
 fn t082_no_flag_enum_subject() {
     let p = proj();

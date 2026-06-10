@@ -8,9 +8,11 @@ pub struct EnumType {
     pub default: Option<String>,
     /// `true` when the member list is *not* exhaustively known — a
     /// firmware-supplied enum (`MoTeC Types.<N>` / `::Hardware.<N>`) whose
-    /// members are defined by the firmware, not the project. Membership-based
-    /// checks (T020 enum-non-member) must be suppressed for open enums, since a
-    /// name absent from `members` is not provably a non-member; type-level
-    /// checks (T021 enum-vs-number, enum hover) still apply.
+    /// members are defined by the firmware, not the project, and are not among
+    /// the standard types the M1 Development Manual documents (those register
+    /// closed under their display name). Membership-based checks (T020
+    /// enum-non-member, T070 exhaustiveness) must be suppressed for open enums,
+    /// since a name absent from `members` is not provably a non-member;
+    /// type-level checks (T021 enum-vs-number, enum hover) still apply.
     pub open: bool,
 }
