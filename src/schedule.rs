@@ -325,7 +325,7 @@ pub fn check_usage(
             if !written.contains(s.path.as_str()) {
                 out.push(make_project_for(
                     TypeCode::T093,
-                    Severity::Warning,
+                    Severity::Error,
                     format!(
                         "channel `{}` is never assigned by any script (M1 Build Error 1627: \"Channel value not assigned\")",
                         s.path
@@ -345,7 +345,7 @@ pub fn check_usage(
             if !read.contains(s.path.as_str()) {
                 out.push(make_project_for(
                     TypeCode::T094,
-                    Severity::Warning,
+                    Severity::Error,
                     format!(
                         "parameter `{}` is never read by any script (M1 Build Error 1631: \"Parameter value not read\")",
                         s.path
@@ -425,6 +425,25 @@ mod usage_tests {
             !flagged("`Root.Ctrl.Map.Value`"),
             "table value exempt: {msgs:?}"
         );
+    }
+
+    #[test]
+    fn t093_t094_are_errors_like_m1_build_1627_1631() {
+        // M1 Build fails the build on 1627/1631, so the parity diagnostics
+        // must be Errors (non-zero exit), not Warnings.
+        let project = Project::from_xml(XML).unwrap();
+        let scripts = vec![("Ctrl.Update.m1scr".to_string(), String::new())];
+        let diags = check_usage(&project, &scripts, true, true);
+        assert!(!diags.is_empty(), "empty script must flag orphans");
+        for d in &diags {
+            assert_eq!(
+                d.inner.severity,
+                Severity::Error,
+                "{:?} must be Error: {}",
+                d.inner.code,
+                d.inner.message
+            );
+        }
     }
 
     #[test]
