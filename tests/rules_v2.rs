@@ -242,6 +242,51 @@ fn t020_is_an_error_like_m1_build_1352() {
 }
 
 #[test]
+fn t020_head_case_variant_resolves_and_warns() {
+    // M1 Build resolves the enum *type name* case-insensitively too: AV-M1's
+    // `… eq universal Switch State.On` validates with 0 errors. The case-variant
+    // head must resolve to the enum — so the member is still checked — and the
+    // head spelling itself gets the style Warning, mirroring the member
+    // carve-out below. (#183)
+    let p = pkg_proj();
+    let diags = check_script(
+        &p,
+        Path::new("Pkg Update.m1scr"),
+        "bspdActive = universal Switch State.On;\n",
+    )
+    .diagnostics;
+    let t020 = diags
+        .iter()
+        .find(|d| d.code == TypeCode::T020)
+        .expect("case-variant head must resolve and be flagged");
+    assert_eq!(t020.inner.severity, m1_core::Severity::Warning);
+    assert!(
+        t020.inner.message.contains("case"),
+        "{}",
+        t020.inner.message
+    );
+}
+
+#[test]
+fn t020_head_case_variant_nonmember_still_error() {
+    // A name that is no member under any casing is M1 Build Error 1352 even
+    // when the head is itself a case variant — resolution must not weaken the
+    // membership check. (#183)
+    let p = pkg_proj();
+    let diags = check_script(
+        &p,
+        Path::new("Pkg Update.m1scr"),
+        "bspdActive = universal Switch State.Nope;\n",
+    )
+    .diagnostics;
+    let t020 = diags
+        .iter()
+        .find(|d| d.code == TypeCode::T020)
+        .expect("non-member behind a case-variant head must be flagged");
+    assert_eq!(t020.inner.severity, m1_core::Severity::Error);
+}
+
+#[test]
 fn t020_case_variant_of_member_stays_warning() {
     // M1 Build resolves names case-insensitively (manual pp.64-65), so a
     // case-variant of a real member ("OFf" for "Off") builds with 0 errors —

@@ -267,9 +267,25 @@ impl SymbolTable {
     pub fn enums(&self) -> &[EnumType] {
         &self.enums
     }
-    /// The enum type whose *name* equals `name`, if any.
+    /// The enum type `name` resolves to, if any. Exact name match wins; failing
+    /// that, a *unique* ASCII-case-insensitive match resolves, because M1 Build
+    /// resolves names case-insensitively (manual pp.64-65 — the behaviour
+    /// T020's member carve-out and T091 already encode). An ambiguous
+    /// case-variant (several enums differing only by case) resolves to nothing.
+    /// (#183)
     pub fn enum_by_name(&self, name: &str) -> Option<EnumId> {
-        self.enums.iter().position(|e| e.name == name)
+        if let Some(id) = self.enums.iter().position(|e| e.name == name) {
+            return Some(id);
+        }
+        let mut variants = self
+            .enums
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.name.eq_ignore_ascii_case(name));
+        match (variants.next(), variants.next()) {
+            (Some((id, _)), None) => Some(id),
+            _ => None,
+        }
     }
     /// Enum type ids that declare a member of this exact name.
     pub fn enums_with_member(&self, member: &str) -> &[EnumId] {
@@ -336,5 +352,45 @@ impl SymbolTable {
                     .is_some_and(|leaf| !leaf.contains('.'))
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn enum_named(name: &str) -> EnumType {
+        EnumType {
+            name: name.to_string(),
+            members: vec![("Off".to_string(), 0), ("On".to_string(), 1)],
+            default: None,
+            open: false,
+        }
+    }
+
+    // M1 Build resolves names case-insensitively (manual pp.64-65): a unique
+    // case-variant of an enum type name must resolve to that enum. (#183)
+    #[test]
+    fn enum_by_name_falls_back_to_unique_case_insensitive_match() {
+        let mut t = SymbolTable::default();
+        let id = t.add_enum(enum_named("Universal Switch State"));
+        assert_eq!(t.enum_by_name("universal Switch State"), Some(id));
+        assert_eq!(t.enum_by_name("UNIVERSAL SWITCH STATE"), Some(id));
+    }
+
+    #[test]
+    fn enum_by_name_exact_match_wins_over_case_variants() {
+        let mut t = SymbolTable::default();
+        let _upper = t.add_enum(enum_named("State"));
+        let lower = t.add_enum(enum_named("state"));
+        assert_eq!(t.enum_by_name("state"), Some(lower));
+    }
+
+    #[test]
+    fn enum_by_name_ambiguous_case_variants_resolve_to_none() {
+        let mut t = SymbolTable::default();
+        let _a = t.add_enum(enum_named("State"));
+        let _b = t.add_enum(enum_named("state"));
+        assert_eq!(t.enum_by_name("STATE"), None);
     }
 }
