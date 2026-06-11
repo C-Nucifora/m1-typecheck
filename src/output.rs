@@ -132,3 +132,107 @@ fn diag_json(d: &TypeDiagnostic) -> String {
     out.push('}');
     out
 }
+
+/// SARIF 2.1.0 output (`--format sarif`, #185) — the interchange format GitHub
+/// code scanning ingests natively, mirroring `m1-lint --format sarif`. One run;
+/// one reportingDescriptor per T-code (plus the synthetic `syntax` rule); one
+/// result per finding. Project-level diagnostics (zero-range audits such as
+/// T041/T050/T092/T095) anchor to the project file at line 1 so every result
+/// has a valid physical location.
+pub fn render_sarif(files: &[JsonFile], project: &[TypeDiagnostic], project_label: &str) -> String {
+    use m1_typecheck::diagnostics::TypeCode;
+    use serde_json::json;
+
+    fn level(s: Severity) -> &'static str {
+        match s {
+            Severity::Error => "error",
+            Severity::Warning => "warning",
+            Severity::Info | Severity::Hint => "note",
+        }
+    }
+
+    let mut rules: Vec<serde_json::Value> = TypeCode::all_codes()
+        .iter()
+        .map(|c| {
+            json!({
+                "id": c.as_str(),
+                "name": c.name(),
+                "helpUri": format!("https://github.com/C-Nucifora/m1-typecheck#{}", c.name()),
+            })
+        })
+        .collect();
+    rules.push(json!({"id": "syntax", "name": "syntax-error"}));
+
+    let mut results: Vec<serde_json::Value> = Vec::new();
+    for f in files {
+        for d in &f.syntax_errors {
+            results.push(json!({
+                "ruleId": "syntax",
+                "level": "error",
+                "message": {"text": d.message},
+                "locations": [{"physicalLocation": {
+                    "artifactLocation": {"uri": f.path},
+                    "region": {
+                        "startLine": d.range.start.line + 1,
+                        "startColumn": d.range.start.column + 1,
+                    },
+                }}],
+            }));
+        }
+        for d in &f.diagnostics {
+            results.push(json!({
+                "ruleId": d.code.as_str(),
+                "level": level(d.inner.severity),
+                "message": {"text": d.inner.message},
+                "locations": [{"physicalLocation": {
+                    "artifactLocation": {"uri": f.path},
+                    "region": {
+                        "startLine": d.inner.range.start.line + 1,
+                        "startColumn": d.inner.range.start.column + 1,
+                        "endLine": d.inner.range.end.line + 1,
+                        "endColumn": d.inner.range.end.column + 1,
+                    },
+                }}],
+            }));
+        }
+    }
+    for d in project {
+        // Zero-range project audits anchor to the project file, line 1 — the
+        // `+1` below maps their 0,0 range there naturally.
+        let mut message = d.inner.message.clone();
+        if let Some(subject) = &d.subject {
+            // The subject symbol is part of the finding's identity; keep it in
+            // the text since the anchor is the whole project file.
+            if !message.contains(subject.as_str()) {
+                message = format!("{subject}: {message}");
+            }
+        }
+        results.push(json!({
+            "ruleId": d.code.as_str(),
+            "level": level(d.inner.severity),
+            "message": {"text": message},
+            "locations": [{"physicalLocation": {
+                "artifactLocation": {"uri": project_label},
+                "region": {
+                    "startLine": d.inner.range.start.line + 1,
+                    "startColumn": d.inner.range.start.column + 1,
+                },
+            }}],
+        }));
+    }
+
+    json!({
+        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {
+                "name": "m1-typecheck",
+                "version": env!("CARGO_PKG_VERSION"),
+                "informationUri": "https://github.com/C-Nucifora/m1-typecheck",
+                "rules": rules,
+            }},
+            "results": results,
+        }],
+    })
+    .to_string()
+}
