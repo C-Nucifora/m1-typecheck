@@ -15,40 +15,14 @@ use std::process;
 /// `Project.m1prj`), as `(file_name, source)` — the COMPLETE script set the
 /// project-wide cross-script passes (T088/T089/T093/T094, taint solve, return-type
 /// inference) need to be sound regardless of which files were passed on the command
-/// line. Walks recursively with a depth cap and skips symlinks (a crafted in-tree
-/// symlink must not pull in out-of-tree files; mirrors the LSP's `walk_scripts`).
+/// line. Discovery goes through the shared hardened walk
+/// ([`m1_workspace::find_scripts`]: symlink-skip, depth cap, sorted — #190).
 /// Rooted at the open revision dir, so sibling backup revisions are not included.
 fn gather_project_scripts(project_path: &Path) -> Vec<(String, String)> {
-    const MAX_DEPTH: usize = 64;
-    fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
-        if depth > MAX_DEPTH {
-            return;
-        }
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for e in entries.flatten() {
-            let Ok(ft) = e.file_type() else {
-                continue;
-            };
-            if ft.is_symlink() {
-                continue;
-            }
-            let p = e.path();
-            if ft.is_dir() {
-                walk(&p, depth + 1, out);
-            } else if p.extension().and_then(|x| x.to_str()) == Some("m1scr") {
-                out.push(p);
-            }
-        }
-    }
     let Some(root) = project_path.parent() else {
         return Vec::new();
     };
-    let mut files = Vec::new();
-    walk(root, 0, &mut files);
-    files.sort();
-    files
+    m1_workspace::find_scripts(root)
         .iter()
         .filter_map(|f| {
             let name = f.file_name()?.to_str()?.to_string();
