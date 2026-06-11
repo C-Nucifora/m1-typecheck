@@ -18,7 +18,40 @@ use crate::resolve::{Resolution, Scope, resolve};
 use crate::symbols::SymbolKind;
 use crate::typer::{is_expr, path_text};
 use m1_core::{Field, Kind, Node, Severity};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+
+/// Maximum DFS path length explored by [`find_cycles`] — a guard against
+/// pathological fan-out on large graphs (T088/T097 only need short cycles).
+const MAX_CYCLE_DEPTH: usize = 16;
+
+/// Iterative DFS that finds every cycle returning to one of `edges`' keys, one
+/// per distinct start node. Each returned `Vec` is the path *from* `start` back
+/// *to* `start` exclusive of the closing edge (i.e. `[start, …]`); the caller
+/// appends `start` again when rendering the cycle. The visited check is a
+/// `HashSet` (O(1) per edge) while the ordered path `Vec` is kept for reporting.
+///
+/// Shared by T088 (same-rate dependency graph) and T097 (user-function call
+/// graph) — see the call sites in [`check`].
+fn find_cycles(edges: &BTreeMap<usize, BTreeSet<usize>>) -> Vec<Vec<usize>> {
+    let mut cycles = Vec::new();
+    for &start in edges.keys() {
+        let mut stack = vec![(start, vec![start], HashSet::from([start]))];
+        while let Some((node, path, seen)) = stack.pop() {
+            for &next in edges.get(&node).into_iter().flatten() {
+                if next == start {
+                    cycles.push(path.clone());
+                } else if !seen.contains(&next) && path.len() < MAX_CYCLE_DEPTH {
+                    let mut p = path.clone();
+                    p.push(next);
+                    let mut s = seen.clone();
+                    s.insert(next);
+                    stack.push((next, p, s));
+                }
+            }
+        }
+    }
+    cycles
+}
 
 /// Per-script channel access sets, resolved against the project.
 struct ScriptIo {
@@ -304,32 +337,21 @@ pub fn check(
     if !t088 {
         deps.clear();
     }
-    for &start in deps.keys() {
-        let mut stack = vec![(start, vec![start])];
-        while let Some((node, path)) = stack.pop() {
-            for &next in deps.get(&node).into_iter().flatten() {
-                if next == start {
-                    let mut names: Vec<&str> =
-                        path.iter().map(|&i| ios[i].fn_path.as_str()).collect();
-                    let anchor = names.iter().min().unwrap_or(&"").to_string();
-                    if reported.insert(anchor.clone()) {
-                        names.push(ios[start].fn_path.as_str());
-                        out.push(make_project_for(
-                            TypeCode::T088,
-                            Severity::Warning,
-                            format!(
-                                "circular write/read dependency at the same rate: {}",
-                                names.join(" -> ")
-                            ),
-                            anchor,
-                        ));
-                    }
-                } else if !path.contains(&next) && path.len() < 16 {
-                    let mut p = path.clone();
-                    p.push(next);
-                    stack.push((next, p));
-                }
-            }
+    for path in find_cycles(&deps) {
+        let start = path[0];
+        let mut names: Vec<&str> = path.iter().map(|&i| ios[i].fn_path.as_str()).collect();
+        let anchor = names.iter().min().unwrap_or(&"").to_string();
+        if reported.insert(anchor.clone()) {
+            names.push(ios[start].fn_path.as_str());
+            out.push(make_project_for(
+                TypeCode::T088,
+                Severity::Warning,
+                format!(
+                    "circular write/read dependency at the same rate: {}",
+                    names.join(" -> ")
+                ),
+                anchor,
+            ));
         }
     }
     // T097: cycles in the user-function CALL graph (manual: scripts are
@@ -351,32 +373,18 @@ pub fn check(
             }
         }
         let mut reported: BTreeSet<String> = BTreeSet::new();
-        for &start in call_edges.keys() {
-            let mut stack = vec![(start, vec![start])];
-            while let Some((node, path)) = stack.pop() {
-                for &next in call_edges.get(&node).into_iter().flatten() {
-                    if next == start {
-                        let mut names: Vec<&str> =
-                            path.iter().map(|&i| ios[i].fn_path.as_str()).collect();
-                        let anchor = names.iter().min().unwrap_or(&"").to_string();
-                        if reported.insert(anchor.clone()) {
-                            names.push(ios[start].fn_path.as_str());
-                            out.push(make_project_for(
-                                TypeCode::T097,
-                                Severity::Error,
-                                format!(
-                                    "recursive user-function call cycle: {}",
-                                    names.join(" -> ")
-                                ),
-                                anchor,
-                            ));
-                        }
-                    } else if !path.contains(&next) && path.len() < 16 {
-                        let mut p = path.clone();
-                        p.push(next);
-                        stack.push((next, p));
-                    }
-                }
+        for path in find_cycles(&call_edges) {
+            let start = path[0];
+            let mut names: Vec<&str> = path.iter().map(|&i| ios[i].fn_path.as_str()).collect();
+            let anchor = names.iter().min().unwrap_or(&"").to_string();
+            if reported.insert(anchor.clone()) {
+                names.push(ios[start].fn_path.as_str());
+                out.push(make_project_for(
+                    TypeCode::T097,
+                    Severity::Error,
+                    format!("recursive user-function call cycle: {}", names.join(" -> ")),
+                    anchor,
+                ));
             }
         }
     }
