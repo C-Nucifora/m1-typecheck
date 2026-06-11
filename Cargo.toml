@@ -1,6 +1,6 @@
 [package]
 name = "m1-typecheck"
-version = "0.33.0"
+version = "0.34.0"
 edition = "2024"
 default-run = "m1-typecheck"
 license = "GPL-3.0-or-later"
@@ -20,7 +20,7 @@ name = "m1_typecheck"
 path = "src/lib.rs"
 
 [dependencies]
-m1-core = { git = "https://github.com/C-Nucifora/m1-core.git", tag = "v0.8.0" }
+m1-core = { git = "https://github.com/C-Nucifora/m1-core.git", tag = "v0.9.0" }
 m1-workspace = { git = "https://github.com/nedlane/m1-workspace.git", tag = "v0.8.0" }
 roxmltree = "0.21"
 serde = { version = "1", features = ["derive"] }
