@@ -248,7 +248,7 @@ with `--ignore` / the `[diagnostics]` config, or suppress a single symbol with
 ```
 m1-typecheck [--project <Project.m1prj>] [--config <parameters.m1cfg>]
              [--audit-names] [--select <CODES>] [--ignore <CODES>] [--ignore-symbol <CODE:PATH>]
-             [--format human|json] [--rules] [--explain <CHANNEL>] <file.m1scr>...
+             [--format human|json|sarif] [--rules] [--explain <CHANNEL>] <file.m1scr>...
 ```
 
 ```sh
@@ -257,6 +257,7 @@ m1-typecheck --project Project.m1prj --audit-names
 m1-typecheck --ignore T041 Scripts/*.m1scr        # silence the cfg-coverage audit
 m1-typecheck --audit-names --ignore-symbol T050:Root.GPS  # allow one naming exception
 m1-typecheck --format json Scripts/*.m1scr        # machine-parsable diagnostics
+m1-typecheck --format sarif Scripts/*.m1scr       # SARIF 2.1.0 for code scanning
 m1-typecheck --select T064 Scripts/*.m1scr        # opt into wrong-argument-count
 m1-typecheck --select T088,T089 Scripts/*.m1scr   # scheduling audit (cycles + rate inversions)
 m1-typecheck --select T092 Scripts/*.m1scr        # M1 Build tag-warning parity (untagged components)
@@ -309,6 +310,10 @@ m1-typecheck --explain Demo.Rate Scripts/*.m1scr  # trace a channel's NaN proven
   `{"version":1,"explain":{"channel":…,"invalid":…,"latched":…,"chain":[…]}}`.
   A query, not a check: exits `0` either way, `2` for a missing project or an
   unknown channel.
+- `--format sarif` emits a SARIF 2.1.0 document (the format GitHub code
+  scanning ingests, mirroring `m1-lint --format sarif`): one reportingDescriptor
+  per T-code, one result per finding; project-level audits (T041/T050/T092/…)
+  anchor to the `.m1prj` at line 1.
 - `--format json` emits one machine-parsable document
   (`{"version":1,"files":[…],"project":[…],"summary":{…}}`) instead of the human
   lines; syntax errors and project audits are included.

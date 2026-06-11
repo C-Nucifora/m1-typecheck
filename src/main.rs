@@ -7,7 +7,7 @@ use m1_typecheck::diagnostics::{TypeCode, TypeDiagnostic};
 use m1_typecheck::filter::DiagFilter;
 use m1_typecheck::project::Project;
 use m1_typecheck::rules::check_script_with_channels;
-use output::{JsonFile, json_str, render_json, severity_str};
+use output::{JsonFile, json_str, render_json, render_sarif, severity_str};
 use std::path::{Path, PathBuf};
 use std::process;
 
@@ -114,13 +114,16 @@ struct Args {
 enum Format {
     Human,
     Json,
+    Sarif,
 }
 
 /// Print the T-code catalogue (the single source of truth tools enumerate),
 /// mirroring `m1-lint --rules`. JSON: `{"version":1,"rules":[{code,name},…]}`.
 fn print_rules(format: Format) {
     match format {
-        Format::Json => {
+        // SARIF is a findings format, not a catalogue one; the JSON catalogue
+        // is the machine-readable shape either way.
+        Format::Json | Format::Sarif => {
             let mut out = String::from("{\"version\":1,\"rules\":[");
             for (i, code) in TypeCode::all_codes().iter().enumerate() {
                 if i > 0 {
@@ -437,16 +440,19 @@ fn audit_project(
 
 /// Render the buffered JSON document to stdout (JSON mode only). Human-mode
 /// diagnostics are printed as they are produced, so this is a no-op there.
-fn emit_output(project_path: Option<&PathBuf>, json: bool, json_buf: &JsonBuf) {
-    if json {
-        let label = project_path
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "<project>".into());
-        println!(
-            "{}",
-            render_json(&json_buf.files, &json_buf.project, &label)
-        );
+fn emit_output(project_path: Option<&PathBuf>, format: Format, json_buf: &JsonBuf) {
+    if format == Format::Human {
+        return;
     }
+    let label = project_path
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<project>".into());
+    let doc = match format {
+        Format::Json => render_json(&json_buf.files, &json_buf.project, &label),
+        Format::Sarif => render_sarif(&json_buf.files, &json_buf.project, &label),
+        Format::Human => unreachable!(),
+    };
+    println!("{doc}");
 }
 
 /// `--explain <CHANNEL>`: print the channel's solved invalid-value status —
@@ -649,9 +655,9 @@ fn main() {
             .filter(|c| filter.select.contains(c))
             .collect();
 
-    // In JSON mode diagnostics are buffered and rendered as one document at the
-    // end; human mode prints as it goes.
-    let json = args.format == Format::Json;
+    // In JSON/SARIF mode diagnostics are buffered and rendered as one document
+    // at the end; human mode prints as it goes.
+    let json = args.format != Format::Human;
     let mut json_buf = JsonBuf::default();
 
     // Load the project model (config + DBCs) and emit degraded-run notes.
@@ -705,7 +711,12 @@ fn main() {
 
     // `--explain <CHANNEL>`: report that channel's solved status and exit.
     if let Some(channel) = &args.explain {
-        explain_channel(project.as_ref(), &channel_taints, channel, json);
+        explain_channel(
+            project.as_ref(),
+            &channel_taints,
+            channel,
+            args.format == Format::Json,
+        );
         return;
     }
 
@@ -808,7 +819,7 @@ fn main() {
     );
 
     // Emit the buffered JSON document (no-op in human mode).
-    emit_output(project_path.as_ref(), json, &json_buf);
+    emit_output(project_path.as_ref(), args.format, &json_buf);
 
     if had_error || project_had_error || audit_had_error {
         process::exit(1);
