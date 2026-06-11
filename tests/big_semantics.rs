@@ -112,12 +112,12 @@ fn t086_unitless_side_is_clean() {
 // ---- #145: scheduling -------------------------------------------------------
 
 fn schedule(p: &Project, t089: bool, scripts: &[(&str, &str)]) -> Vec<(TypeCode, String)> {
-    // T088 always on in these tests; T089 per the flag.
+    // T088/T097 always on in these tests; T089 per the flag.
     let owned: Vec<(String, String)> = scripts
         .iter()
         .map(|(f, s)| (f.to_string(), s.to_string()))
         .collect();
-    m1_typecheck::schedule::check(p, &owned, true, t089)
+    m1_typecheck::schedule::check(p, &owned, true, t089, true)
         .into_iter()
         .map(|d| (d.code, d.inner.message))
         .collect()
@@ -137,6 +137,59 @@ fn t088_flags_same_rate_cycle() {
     assert!(
         got.iter().any(|(c, _)| *c == TypeCode::T088),
         "100Hz<->100Hz write/read cycle flags: {got:?}"
+    );
+}
+
+// ---- T097: recursive-call ---------------------------------------------------
+
+#[test]
+fn t097_flags_direct_self_recursion() {
+    let p = proj();
+    let got = schedule(
+        &p,
+        false,
+        &[("Ctrl.Scale.m1scr", "A Out = Scale(In.Input, 2);\n")],
+    );
+    assert!(
+        got.iter()
+            .any(|(c, m)| *c == TypeCode::T097 && m.contains("Root.Ctrl.Scale")),
+        "a user function calling itself flags T097: {got:?}"
+    );
+}
+
+#[test]
+fn t097_flags_mutual_recursion_once() {
+    let p = proj();
+    let got = schedule(
+        &p,
+        false,
+        &[
+            ("Ctrl.Scale.m1scr", "A Out = Helper(1.0);\n"),
+            ("Ctrl.Helper.m1scr", "B Out = Scale(1.0, 2);\n"),
+        ],
+    );
+    let hits: Vec<_> = got.iter().filter(|(c, _)| *c == TypeCode::T097).collect();
+    assert_eq!(hits.len(), 1, "one cycle, one report: {got:?}");
+    assert!(
+        hits[0].1.contains("Root.Ctrl.Helper") && hits[0].1.contains("Root.Ctrl.Scale"),
+        "the cycle names both functions: {got:?}"
+    );
+}
+
+#[test]
+fn t097_plain_user_function_call_is_clean() {
+    let p = proj();
+    let got = schedule(
+        &p,
+        false,
+        &[
+            ("Ctrl.Alpha.m1scr", "A Out = Scale(1.0, 2);\n"),
+            ("Ctrl.Scale.m1scr", "B Out = In.Input * 2.0;\n"),
+        ],
+    );
+    assert!(
+        !got.iter().any(|(c, _)| *c == TypeCode::T097),
+        "an acyclic call is not recursion: {got:?}"
     );
 }
 

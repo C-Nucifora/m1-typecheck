@@ -731,7 +731,9 @@ fn main() {
     // it matches M1 Build's Warning 1640 "circular schedule dependency found and
     // resolved" (1 cycle each on the real AV-M1 project). T089 (rate inversion)
     // stays OPT-IN — M1 Build does not flag it (downsampled reads are intentional
-    // and accepted), so default-on would diverge from M1 Build.
+    // and accepted), so default-on would diverge from M1 Build. T097 (recursive
+    // user-function call cycle) is default-on at Error severity: a call cycle
+    // can never complete on the fixed-stack runtime.
     // Any kept project-level diagnostic at Error severity must fail the run
     // (#170): T093/T094 are M1 Build Errors 1627/1631, so CI has to gate on
     // them exactly as it does on script-level errors.
@@ -739,7 +741,13 @@ fn main() {
     let schedule_diags: Vec<TypeDiagnostic> = project
         .as_ref()
         .map(|p| {
-            m1_typecheck::schedule::check(p, &all_scripts, true, filter.select.contains("T089"))
+            m1_typecheck::schedule::check(
+                p,
+                &all_scripts,
+                true,
+                filter.select.contains("T089"),
+                true,
+            )
         })
         .unwrap_or_default();
     for d in &schedule_diags {

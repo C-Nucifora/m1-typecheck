@@ -21,6 +21,13 @@
       </Params>
      </Signature>
     </Component>
+    <Component Classname="BuiltIn.FuncUserParam" Filename="Ctrl.Helper.m1scr" Name="Root.Ctrl.Helper">
+     <Signature Name="" ReturnType="f32">
+      <Params>
+       <Param Name="Input" Type="f32" Attrs="0"/>
+      </Params>
+     </Signature>
+    </Component>
     <Component Classname="BuiltIn.FuncUser" Filename="Ctrl.Alpha.m1scr" Name="Root.Ctrl.Alpha">
      <Props SelectedTrigger="Parent.Events.On 100Hz"/>
     </Component>
