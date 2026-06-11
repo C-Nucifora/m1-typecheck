@@ -32,10 +32,12 @@ fn report(p: &Project, file: &str, src: &str, taints: &ChannelTaints) -> Vec<Typ
         .diagnostics
 }
 
-fn scripts(list: &[(&str, &str)]) -> Vec<(String, String)> {
-    list.iter()
+fn scripts(list: &[(&str, &str)]) -> Vec<m1_typecheck::parsed::ParsedScript> {
+    let owned: Vec<(String, String)> = list
+        .iter()
         .map(|(f, s)| (f.to_string(), s.to_string()))
-        .collect()
+        .collect();
+    m1_typecheck::parsed::parse_all(&owned)
 }
 
 fn find_code(diags: &[TypeDiagnostic], code: TypeCode) -> Option<&TypeDiagnostic> {

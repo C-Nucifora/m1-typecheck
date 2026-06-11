@@ -180,21 +180,23 @@ impl Project {
 
     /// Infer user-function/method return types from their script bodies (#110).
     ///
-    /// `scripts` pairs each script's file name (e.g. `"Engine.Update.m1scr"`) with
-    /// its source. For every script that backs a `Function`/`Method` symbol, type
-    /// each `Out = <expr>` right-hand side (the manual's return-value object); when
-    /// they all agree on one *known* type, store it as that symbol's `return_type`.
-    /// No `Out`, disagreeing types, a syntax error, or an Unknown result leaves the
-    /// type `None` — never a guess. Call this after the project (and any
+    /// `scripts` carries each script's file name (e.g. `"Engine.Update.m1scr"`)
+    /// with its already-parsed CST (parsed once per run — #192). For every script
+    /// that backs a `Function`/`Method` symbol, type each `Out = <expr>`
+    /// right-hand side (the manual's return-value object); when they all agree on
+    /// one *known* type, store it as that symbol's `return_type`. No `Out`,
+    /// disagreeing types, a syntax error, or an Unknown result leaves the type
+    /// `None` — never a guess. Call this after the project (and any
     /// `.m1cfg`/`.m1dbc`) is loaded and *before* checking callers, so user-function
     /// call sites resolve to a concrete type in `type_of_call`.
     ///
     /// Two-phase to avoid a borrow conflict: phase 1 types the bodies against
     /// `&self` (the in-progress table, where not-yet-inferred callees stay
     /// Unknown — conservative); phase 2 writes the results back via `&mut self`.
-    pub fn infer_return_types(&mut self, scripts: &[(String, String)]) {
+    pub fn infer_return_types(&mut self, scripts: &[crate::parsed::ParsedScript]) {
         let mut inferred: Vec<(String, ValueType)> = Vec::new();
-        for (file_name, source) in scripts {
+        for script in scripts {
+            let file_name = &script.name;
             let Some(sym_path) = self.function_symbol_for_script(file_name) else {
                 continue;
             };
@@ -207,7 +209,7 @@ impl Project {
             {
                 continue;
             }
-            let cst = m1_core::parse(source);
+            let cst = &script.cst;
             if !cst.syntax_diagnostics().is_empty() {
                 continue;
             }
@@ -305,8 +307,10 @@ mod tests {
   <Component Classname="BuiltIn.FuncUser" Name="Root.Demo.Compute"/>
 </Project>"#;
         let mut project = Project::from_xml(xml).unwrap();
-        project
-            .infer_return_types(&[("Demo.Compute.m1scr".to_string(), "Out = 1.5;\n".to_string())]);
+        project.infer_return_types(&crate::parsed::parse_all(&[(
+            "Demo.Compute.m1scr".to_string(),
+            "Out = 1.5;\n".to_string(),
+        )]));
         assert_eq!(
             project
                 .symbols()
@@ -331,8 +335,10 @@ mod tests {
   <Component Classname="BuiltIn.FuncUser" Name="Root.Demo.Compute"/>
 </Project>"#;
         let mut project = Project::from_xml(xml).unwrap();
-        project
-            .infer_return_types(&[("Demo.Compute.m1scr".to_string(), "Out = 1.5;\n".to_string())]);
+        project.infer_return_types(&crate::parsed::parse_all(&[(
+            "Demo.Compute.m1scr".to_string(),
+            "Out = 1.5;\n".to_string(),
+        )]));
         let caller = "local r = Demo.Compute();\nDemo.Widget Count = r;\n";
         let result = check_script(&project, Path::new("Demo.Caller.m1scr"), caller);
         assert!(
@@ -353,13 +359,13 @@ mod tests {
   <Component Classname="BuiltIn.FuncUser" Name="Root.Mixed"/>
 </Project>"#;
         let mut project = Project::from_xml(xml).unwrap();
-        project.infer_return_types(&[
+        project.infer_return_types(&crate::parsed::parse_all(&[
             ("NoOut.m1scr".to_string(), "local x = 1;\n".to_string()),
             (
                 "Mixed.m1scr".to_string(),
                 "Out = 1.5;\nOut = 1;\n".to_string(),
             ),
-        ]);
+        ]));
         assert_eq!(
             project.symbols().get("Root.NoOut").unwrap().return_type,
             None
@@ -395,7 +401,10 @@ mod tests {
         let mut project = Project::from_xml(xml).unwrap();
         // Must return (not SIGABRT). If m1-core rejects the depth as a syntax
         // error, inference simply skips the file; either way it does not crash.
-        project.infer_return_types(&[("Deep.m1scr".to_string(), body)]);
+        project.infer_return_types(&crate::parsed::parse_all(&[(
+            "Deep.m1scr".to_string(),
+            body,
+        )]));
     }
 
     #[test]

@@ -67,9 +67,8 @@ struct ScriptIo {
 /// Walk one script, resolving every project-symbol reference into the
 /// read/write sets. Assignment targets are writes (compound assignments are
 /// both); everything else in expression position is a read.
-fn script_io(project: &Project, file_name: &str, source: &str) -> Option<ScriptIo> {
+fn script_io(project: &Project, file_name: &str, cst: &m1_core::Cst) -> Option<ScriptIo> {
     let fn_path = project.function_symbol_for_script(file_name)?;
-    let cst = m1_core::parse(source);
     if !cst.syntax_diagnostics().is_empty() || cst.root().max_depth() > m1_core::MAX_RECURSION_DEPTH
     {
         return None;
@@ -268,7 +267,7 @@ fn collect(n: Node, scope: &Scope, bindings: &mut ExpandBindings, io: &mut Scrip
 /// check in (both are off by default — see the module docs).
 pub fn check(
     project: &Project,
-    scripts: &[(String, String)],
+    scripts: &[crate::parsed::ParsedScript],
     t088: bool,
     t089: bool,
     t097: bool,
@@ -278,7 +277,7 @@ pub fn check(
     }
     let ios: Vec<ScriptIo> = scripts
         .iter()
-        .filter_map(|(f, s)| script_io(project, f, s))
+        .filter_map(|s| script_io(project, &s.name, &s.cst))
         .collect();
     let mut out = Vec::new();
 
@@ -410,7 +409,7 @@ pub fn check(
 /// `t094` flags let a caller still scope to one code.
 pub fn check_usage(
     project: &Project,
-    scripts: &[(String, String)],
+    scripts: &[crate::parsed::ParsedScript],
     t093: bool,
     t094: bool,
 ) -> Vec<TypeDiagnostic> {
@@ -419,7 +418,7 @@ pub fn check_usage(
     }
     let ios: Vec<ScriptIo> = scripts
         .iter()
-        .filter_map(|(f, s)| script_io(project, f, s))
+        .filter_map(|s| script_io(project, &s.name, &s.cst))
         .collect();
     let mut written: BTreeSet<&str> = BTreeSet::new();
     let mut read: BTreeSet<&str> = BTreeSet::new();
@@ -508,10 +507,13 @@ pub fn check_usage(
 /// one code path). Only functions with a known trigger rate count: a Startup
 /// or event function initialising a channel one scheduled function owns is
 /// not a 1022 (and an unparseable rate conservatively stays silent).
-pub fn check_multi_writers(project: &Project, scripts: &[(String, String)]) -> Vec<TypeDiagnostic> {
+pub fn check_multi_writers(
+    project: &Project,
+    scripts: &[crate::parsed::ParsedScript],
+) -> Vec<TypeDiagnostic> {
     let ios: Vec<ScriptIo> = scripts
         .iter()
-        .filter_map(|(f, s)| script_io(project, f, s))
+        .filter_map(|s| script_io(project, &s.name, &s.cst))
         .filter(|io| io.rate_hz.is_some())
         .collect();
     let mut writers: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
@@ -571,7 +573,8 @@ mod usage_tests {
 
     fn run(src: &str) -> Vec<String> {
         let project = Project::from_xml(XML).unwrap();
-        let scripts = vec![("Ctrl.Update.m1scr".to_string(), src.to_string())];
+        let scripts =
+            crate::parsed::parse_all(&[("Ctrl.Update.m1scr".to_string(), src.to_string())]);
         check_usage(&project, &scripts, true, true)
             .into_iter()
             .map(|d| d.inner.message)
@@ -637,7 +640,7 @@ mod usage_tests {
         // M1 Build fails the build on 1627/1631, so the parity diagnostics
         // must be Errors (non-zero exit), not Warnings.
         let project = Project::from_xml(XML).unwrap();
-        let scripts = vec![("Ctrl.Update.m1scr".to_string(), String::new())];
+        let scripts = crate::parsed::parse_all(&[("Ctrl.Update.m1scr".to_string(), String::new())]);
         let diags = check_usage(&project, &scripts, true, true);
         assert!(!diags.is_empty(), "empty script must flag orphans");
         for d in &diags {
@@ -657,7 +660,7 @@ mod usage_tests {
         // scheduled functions → M1 Build Error 1022 (build fails). A channel
         // with a single scheduled writer must not be flagged.
         let project = Project::from_xml(XML_TWO_FNS).unwrap();
-        let scripts = vec![
+        let scripts = crate::parsed::parse_all(&[
             (
                 "Ctrl.Update.m1scr".to_string(),
                 "Written = 1.0;\nOnly Mine = 2.0;\n".to_string(),
@@ -666,7 +669,7 @@ mod usage_tests {
                 "Aux.Update.m1scr".to_string(),
                 "Ctrl.Written = 3.0;\n".to_string(),
             ),
-        ];
+        ]);
         let diags = check_multi_writers(&project, &scripts);
         assert_eq!(diags.len(), 1, "{diags:?}");
         let d = &diags[0];
@@ -686,7 +689,7 @@ mod usage_tests {
         // Startup function (no trigger rate) initialising a channel that one
         // scheduled function owns is fine.
         let project = Project::from_xml(XML_TWO_FNS).unwrap();
-        let scripts = vec![
+        let scripts = crate::parsed::parse_all(&[
             (
                 "Ctrl.Update.m1scr".to_string(),
                 "Written = 1.0;\n".to_string(),
@@ -695,7 +698,7 @@ mod usage_tests {
                 "Aux.Startup.m1scr".to_string(),
                 "Ctrl.Written = 0.0;\n".to_string(),
             ),
-        ];
+        ]);
         assert!(check_multi_writers(&project, &scripts).is_empty());
     }
 
@@ -716,7 +719,7 @@ mod usage_tests {
         // The t093/t094 flags scope the audit to one code (e.g. for `--select`);
         // neither selected → no work, no findings.
         let project = Project::from_xml(XML).unwrap();
-        let scripts = vec![("Ctrl.Update.m1scr".to_string(), String::new())];
+        let scripts = crate::parsed::parse_all(&[("Ctrl.Update.m1scr".to_string(), String::new())]);
         assert!(check_usage(&project, &scripts, false, false).is_empty());
     }
 }

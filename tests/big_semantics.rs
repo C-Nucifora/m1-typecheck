@@ -117,7 +117,8 @@ fn schedule(p: &Project, t089: bool, scripts: &[(&str, &str)]) -> Vec<(TypeCode,
         .iter()
         .map(|(f, s)| (f.to_string(), s.to_string()))
         .collect();
-    m1_typecheck::schedule::check(p, &owned, true, t089, true)
+    let parsed = m1_typecheck::parsed::parse_all(&owned);
+    m1_typecheck::schedule::check(p, &parsed, true, t089, true)
         .into_iter()
         .map(|d| (d.code, d.inner.message))
         .collect()
