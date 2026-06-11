@@ -217,6 +217,14 @@ pub struct SymbolTable {
     member_index: HashMap<String, Vec<EnumId>>,
     /// tag name -> indices of symbols that carry that tag (own or inherited).
     tag_index: HashMap<String, Vec<usize>>,
+    /// script file name -> index of the Function/Method symbol it backs, for
+    /// `function_symbol_for_script`'s explicit-`Filename=` lookup. First writer
+    /// wins, preserving the previous declaration-order `iter().find()` result.
+    by_filename: HashMap<String, usize>,
+    /// parent path (everything before a symbol's final `.` segment) -> indices
+    /// of that parent's immediate children, in declaration order. Backs
+    /// `immediate_children` (LSP hover/completion member enumeration).
+    by_parent: HashMap<String, Vec<usize>>,
 }
 
 impl SymbolTable {
@@ -225,6 +233,19 @@ impl SymbolTable {
         self.by_path.insert(sym.path.clone(), idx);
         for tag in &sym.tags {
             self.tag_index.entry(tag.clone()).or_default().push(idx);
+        }
+        if matches!(sym.kind, SymbolKind::Function | SymbolKind::Method)
+            && let Some(file) = &sym.filename
+        {
+            // First writer wins: matches the previous declaration-order
+            // `iter().find()` in `function_symbol_for_script`.
+            self.by_filename.entry(file.clone()).or_insert(idx);
+        }
+        if let Some((parent, _leaf)) = sym.path.rsplit_once('.') {
+            self.by_parent
+                .entry(parent.to_string())
+                .or_default()
+                .push(idx);
         }
         self.symbols.push(sym);
     }
@@ -330,6 +351,15 @@ impl SymbolTable {
             .unwrap_or_default()
     }
 
+    /// The path of the Function/Method symbol whose explicit `Filename=` is
+    /// `file_name`, if any (declaration-order first match). O(1) via the
+    /// `by_filename` index; backs `Project::function_symbol_for_script`.
+    pub fn function_path_for_filename(&self, file_name: &str) -> Option<&str> {
+        self.by_filename
+            .get(file_name)
+            .map(|&i| self.symbols[i].path.as_str())
+    }
+
     /// True if `path` exists as a symbol with a direct child of the given leaf
     /// name (e.g. a group `…Drive State` that contains `…Drive State.Value`).
     /// Used to recognise value-bearing enum/channel compounds, whose members
@@ -343,21 +373,102 @@ impl SymbolTable {
     /// separated by `.`; a segment may contain spaces). Used to enumerate an
     /// object's members for hover/completion.
     pub fn immediate_children(&self, path: &str) -> Vec<&Symbol> {
-        let prefix = format!("{path}.");
-        self.symbols
-            .iter()
-            .filter(|s| {
-                s.path
-                    .strip_prefix(&prefix)
-                    .is_some_and(|leaf| !leaf.contains('.'))
-            })
-            .collect()
+        self.by_parent
+            .get(path)
+            .map(|idxs| idxs.iter().map(|&i| &self.symbols[i]).collect())
+            .unwrap_or_default()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sym(path: &str, kind: SymbolKind, filename: Option<&str>) -> Symbol {
+        Symbol {
+            path: path.to_string(),
+            kind,
+            value_type: ValueType::Unknown,
+            declared_type: None,
+            unit: None,
+            qty: None,
+            display_unit: None,
+            security: None,
+            filename: filename.map(str::to_string),
+            enum_assoc: None,
+            class: None,
+            classname: None,
+            def_line: None,
+            dbc_range: None,
+            can: None,
+            call_rate_hz: None,
+            log_rate_hz: None,
+            tags: Vec::new(),
+            return_type: None,
+            in_params: None,
+            table_meta: None,
+        }
+    }
+
+    // `by_filename` resolves a Function/Method symbol by its `Filename=` in O(1),
+    // first declared writer wins (matching the previous declaration-order
+    // `iter().find()`), and non-function symbols are not indexed by filename.
+    #[test]
+    fn by_filename_index_is_first_function_for_that_file() {
+        let mut t = SymbolTable::default();
+        t.push(sym(
+            "Root.Engine.Update",
+            SymbolKind::Function,
+            Some("Engine.Update.m1scr"),
+        ));
+        t.push(sym(
+            "Root.Engine.Update2",
+            SymbolKind::Function,
+            Some("Engine.Update.m1scr"),
+        ));
+        // A channel sharing a filename must not shadow or be returned.
+        t.push(sym(
+            "Root.Engine.Chan",
+            SymbolKind::Channel,
+            Some("Engine.Update.m1scr"),
+        ));
+        assert_eq!(
+            t.function_path_for_filename("Engine.Update.m1scr"),
+            Some("Root.Engine.Update")
+        );
+        assert_eq!(t.function_path_for_filename("Missing.m1scr"), None);
+    }
+
+    // `immediate_children` (via `by_parent`) returns only direct children, keeps
+    // declaration order, and tolerates segments that contain spaces.
+    #[test]
+    fn immediate_children_are_direct_in_declaration_order() {
+        let mut t = SymbolTable::default();
+        t.push(sym("Root", SymbolKind::Group, None));
+        t.push(sym("Root.Ctrl", SymbolKind::Group, None));
+        t.push(sym("Root.Ctrl.Seg 1", SymbolKind::Group, None));
+        t.push(sym("Root.Ctrl.Seg 1.Volt", SymbolKind::Channel, None));
+        t.push(sym("Root.Ctrl.Beta", SymbolKind::Channel, None));
+        t.push(sym("Root.Ctrl.Alpha", SymbolKind::Channel, None));
+        let children: Vec<&str> = t
+            .immediate_children("Root.Ctrl")
+            .iter()
+            .map(|s| s.path.as_str())
+            .collect();
+        // Direct children only (grandchild `Seg 1.Volt` excluded), declaration order.
+        assert_eq!(
+            children,
+            ["Root.Ctrl.Seg 1", "Root.Ctrl.Beta", "Root.Ctrl.Alpha"]
+        );
+        // The space-containing segment is itself a parent of its child.
+        let grand: Vec<&str> = t
+            .immediate_children("Root.Ctrl.Seg 1")
+            .iter()
+            .map(|s| s.path.as_str())
+            .collect();
+        assert_eq!(grand, ["Root.Ctrl.Seg 1.Volt"]);
+        assert!(t.immediate_children("Root.Nope").is_empty());
+    }
 
     fn enum_named(name: &str) -> EnumType {
         EnumType {

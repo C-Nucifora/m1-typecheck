@@ -243,12 +243,8 @@ impl Project {
     /// real projects use (`Engine.Update.m1scr` → `Root.Engine.Update`).
     pub fn function_symbol_for_script(&self, file_name: &str) -> Option<String> {
         let is_fn = |s: &&Symbol| matches!(s.kind, SymbolKind::Function | SymbolKind::Method);
-        if let Some(s) = self
-            .table
-            .iter()
-            .find(|s| is_fn(s) && s.filename.as_deref() == Some(file_name))
-        {
-            return Some(s.path.clone());
+        if let Some(path) = self.table.function_path_for_filename(file_name) {
+            return Some(path.to_string());
         }
         let stem = file_name.strip_suffix(".m1scr")?;
         let path = format!("Root.{stem}");
