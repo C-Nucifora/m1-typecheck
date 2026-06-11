@@ -123,6 +123,7 @@ This unlocks four new rules, added to the default rule set
 | T086 | Warning | **unit-mismatch** — a direct channel-to-channel copy whose two sides carry different physical quantities (base units from `Props Qty`). Computed right-hand sides are unchecked (arithmetic legitimately changes dimension). |
 | T088 | Warning (opt-in) | **circular-dependency** — same-rate write/read cycles between scripts (manual p.29). Opt-in: real projects contain deliberate same-rate feedback loops M1 Build accepts. |
 | T089 | Hint (opt-in) | **rate-inversion** — a faster script reads a channel written only at a slower rate (stale between writer ticks). Opt-in: often intentional downsampling. |
+| T097 | Error | **recursive-call** — a cycle in the user-function call graph: a script calling its own function, or mutual recursion through other user functions (self-calls included). Scripts are event-scheduled functions on a fixed-stack runtime; a call cycle can never complete. |
 | T082 | Error | **when-subject-not-enum** — the manual (p.32) requires the `when` argument to be an enumerated data type; fires when the subject's type is *known* and non-enum. |
 | T083 | Error | **static-local-initialiser** — a `static local`'s initial value must be a literal, enumerator or constant (manual p.34); runtime reads and calls flag. Constant-foldable literal arithmetic (`2 * 60`) is accepted. |
 | T084 | Error | **expand-bounds** — `expand` bounds must be literals or constants, 0 or positive (manual p.33); negative, float and runtime-value bounds flag. |

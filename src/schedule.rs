@@ -26,6 +26,9 @@ struct ScriptIo {
     rate_hz: Option<f64>,
     writes: BTreeSet<String>,
     reads: BTreeSet<String>,
+    /// User functions/methods this script calls (resolved symbol paths) — the
+    /// edges of the T097 call graph.
+    calls: BTreeSet<String>,
 }
 
 /// Walk one script, resolving every project-symbol reference into the
@@ -51,6 +54,7 @@ fn script_io(project: &Project, file_name: &str, source: &str) -> Option<ScriptI
         rate_hz,
         writes: BTreeSet::new(),
         reads: BTreeSet::new(),
+        calls: BTreeSet::new(),
     };
     collect(cst.root(), &scope, &mut Vec::new(), &mut io);
     Some(io)
@@ -180,6 +184,17 @@ fn collect(n: Node, scope: &Scope, bindings: &mut ExpandBindings, io: &mut Scrip
             .find(|c| matches!(c.kind(), Kind::Identifier | Kind::MemberExpression))
     {
         let text = path_text(callee);
+        // T097: a callee that resolves to a user function/method is a call-graph
+        // edge. Recorded in addition to (not instead of) the read/write logic
+        // below — `Chan.Set(…)` still counts as a channel write, and the
+        // arguments are still walked for reads either way.
+        for variant in substituted(&text, bindings) {
+            if let Resolution::Symbol(s) = resolve(&variant, scope)
+                && matches!(s.kind, SymbolKind::Function | SymbolKind::Method)
+            {
+                io.calls.insert(s.path.clone());
+            }
+        }
         if let Some((receiver, method)) = text.rsplit_once('.') {
             let chans: Vec<String> = substituted(receiver, bindings)
                 .iter()
@@ -223,8 +238,9 @@ pub fn check(
     scripts: &[(String, String)],
     t088: bool,
     t089: bool,
+    t097: bool,
 ) -> Vec<TypeDiagnostic> {
-    if !t088 && !t089 {
+    if !t088 && !t089 && !t097 {
         return Vec::new();
     }
     let ios: Vec<ScriptIo> = scripts
@@ -312,6 +328,54 @@ pub fn check(
                     let mut p = path.clone();
                     p.push(next);
                     stack.push((next, p));
+                }
+            }
+        }
+    }
+    // T097: cycles in the user-function CALL graph (manual: scripts are
+    // event-scheduled functions on a fixed-stack runtime — a call cycle can
+    // never complete). Same DFS shape as T088, but over call edges, rates are
+    // irrelevant, and self-edges (a function calling itself) are kept.
+    if t097 {
+        let index_of: BTreeMap<&str, usize> = ios
+            .iter()
+            .enumerate()
+            .map(|(i, io)| (io.fn_path.as_str(), i))
+            .collect();
+        let mut call_edges: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
+        for (i, io) in ios.iter().enumerate() {
+            for callee in &io.calls {
+                if let Some(&j) = index_of.get(callee.as_str()) {
+                    call_edges.entry(i).or_default().insert(j);
+                }
+            }
+        }
+        let mut reported: BTreeSet<String> = BTreeSet::new();
+        for &start in call_edges.keys() {
+            let mut stack = vec![(start, vec![start])];
+            while let Some((node, path)) = stack.pop() {
+                for &next in call_edges.get(&node).into_iter().flatten() {
+                    if next == start {
+                        let mut names: Vec<&str> =
+                            path.iter().map(|&i| ios[i].fn_path.as_str()).collect();
+                        let anchor = names.iter().min().unwrap_or(&"").to_string();
+                        if reported.insert(anchor.clone()) {
+                            names.push(ios[start].fn_path.as_str());
+                            out.push(make_project_for(
+                                TypeCode::T097,
+                                Severity::Error,
+                                format!(
+                                    "recursive user-function call cycle: {}",
+                                    names.join(" -> ")
+                                ),
+                                anchor,
+                            ));
+                        }
+                    } else if !path.contains(&next) && path.len() < 16 {
+                        let mut p = path.clone();
+                        p.push(next);
+                        stack.push((next, p));
+                    }
                 }
             }
         }
