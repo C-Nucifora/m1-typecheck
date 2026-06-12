@@ -230,3 +230,40 @@ fn t089_is_opt_in_and_flags_fast_reader_of_slow_writer() {
         "fast reader of slow-only writer flags: {on:?}"
     );
 }
+
+// ---- #200: two-location diagnostics carry the declaration side -------------
+
+#[test]
+fn t085_carries_signature_declaration_location() {
+    use m1_typecheck::diagnostics::RelatedPlace;
+    let p = proj();
+    let def_line = p
+        .symbols()
+        .get("Root.Ctrl.Scale")
+        .unwrap()
+        .def_line
+        .expect("fixture symbol has a def line");
+    let diags =
+        check_script(&p, Path::new("Ctrl.Alpha.m1scr"), "A Out = Scale(1.0);\n").diagnostics;
+    let d = diags
+        .iter()
+        .find(|d| d.code == TypeCode::T085)
+        .expect("arity mismatch fires");
+    let r = d.related.first().expect("related declaration attached");
+    assert_eq!(r.place, RelatedPlace::Project { line: def_line });
+    assert!(r.message.contains("signature"), "{:?}", r.message);
+}
+
+#[test]
+fn t086_carries_both_declaration_locations() {
+    let p = proj();
+    let diags =
+        check_script(&p, Path::new("Ctrl.Alpha.m1scr"), "Pressure = Yaw Rate;\n").diagnostics;
+    let d = diags
+        .iter()
+        .find(|d| d.code == TypeCode::T086)
+        .expect("unit mismatch fires");
+    assert_eq!(d.related.len(), 2, "{:?}", d.related);
+    assert!(d.related[0].message.contains("Pa"), "{:?}", d.related);
+    assert!(d.related[1].message.contains("deg/s"), "{:?}", d.related);
+}

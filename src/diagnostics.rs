@@ -157,6 +157,44 @@ pub struct TypeDiagnostic {
     /// `[diagnostics] ignore_symbols` (#151). `None` for source-anchored
     /// diagnostics — those are suppressed in-source with `@m1:allow`.
     pub subject: Option<String>,
+    /// Secondary locations of a two-location diagnostic (#200): T030 points
+    /// at the assignment but the declared type lives on a `.m1prj`
+    /// `<Component>`; T085's signature and T086's unit likewise. Empty for
+    /// single-location diagnostics. The CLI prints these as `note:` lines and
+    /// the LSP maps them to `DiagnosticRelatedInformation`.
+    pub related: Vec<RelatedLocation>,
+}
+
+/// A secondary location a two-location diagnostic points at (#200).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelatedLocation {
+    pub place: RelatedPlace,
+    /// What the other end *is* — "declared here", "signature declared here".
+    pub message: String,
+}
+
+/// Where a [`RelatedLocation`] lives. Rules only know a symbol's `def_line`,
+/// not which file the project was loaded from — the consumer (CLI, LSP) knows
+/// the project path and resolves `Project` to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RelatedPlace {
+    /// A 0-based line of the project file (`Project.m1prj` or a `.m1dbc` —
+    /// the line numbering follows [`crate::symbols::Symbol::def_line`]).
+    Project { line: u32 },
+}
+
+/// The related-location for a symbol's declaration site, if the symbol came
+/// from the project file ([`Symbol::def_line`] is `None` otherwise).
+pub fn related_to_def(
+    sym: &crate::symbols::Symbol,
+    message: impl Into<String>,
+) -> Option<RelatedLocation> {
+    Some(RelatedLocation {
+        place: RelatedPlace::Project {
+            line: sym.def_line?,
+        },
+        message: message.into(),
+    })
 }
 
 /// Build a `TypeDiagnostic` spanning `node`. A type diagnostic's specific
@@ -177,6 +215,7 @@ pub fn make(code: TypeCode, node: &Node, severity: Severity, message: String) ->
             message,
         },
         subject: None,
+        related: Vec::new(),
     }
 }
 
@@ -196,6 +235,7 @@ pub fn make_project(code: TypeCode, severity: Severity, message: String) -> Type
             message,
         },
         subject: None,
+        related: Vec::new(),
     }
 }
 
