@@ -435,7 +435,11 @@ fn emit_output(project_path: Option<&PathBuf>, format: Format, json_buf: &JsonBu
 /// is missing.
 /// `--explain-units`: print a channel's base unit and the units of symbols
 /// directly assigned into it across the supplied scripts (#144).
-fn explain_units(project: Option<&Project>, scripts: &[(String, String)], channel: &str) {
+fn explain_units(
+    project: Option<&Project>,
+    scripts: &[m1_typecheck::parsed::ParsedScript],
+    channel: &str,
+) {
     let Some(p) = project else {
         eprintln!("m1-typecheck: --explain-units needs a project");
         process::exit(2);
@@ -453,8 +457,9 @@ fn explain_units(project: Option<&Project>, scripts: &[(String, String)], channe
         Some(u) => println!("{canonical}: base unit {u}"),
         None => println!("{canonical}: unitless (no Qty declared)"),
     }
-    for (file, src) in scripts {
-        let cst = m1_core::parse(src);
+    for script in scripts {
+        let file = &script.name;
+        let cst = &script.cst;
         if !cst.syntax_diagnostics().is_empty() {
             continue;
         }
@@ -668,11 +673,17 @@ fn main() {
         None => scripts.clone(),
     };
 
+    // Parse every project script exactly once and share the CSTs across all the
+    // project-wide passes below (return-type inference, the cross-script solve,
+    // and the scheduling/usage checks). Previously each pass reparsed every
+    // source independently — 5+ parses per script per run (#192).
+    let parsed_scripts = m1_typecheck::parsed::parse_all(&all_scripts);
+
     // Infer user-function/method return types from the script bodies on the
     // command line, so call sites in other scripts type-check (#110). Scripts
     // that back no function symbol are simply ignored by the pass.
     if let Some(p) = project.as_mut() {
-        p.infer_return_types(&all_scripts);
+        p.infer_return_types(&parsed_scripts);
     }
 
     // Solve the project-wide channel taint graph so cross-script invalid
@@ -680,7 +691,7 @@ fn main() {
     // channel identity to propagate through, so the map stays empty).
     let channel_taints = project
         .as_ref()
-        .map(|p| cross_script::solve(p, &all_scripts))
+        .map(|p| cross_script::solve(p, &parsed_scripts))
         .unwrap_or_default();
 
     // `--explain <CHANNEL>`: report that channel's solved status and exit.
@@ -697,7 +708,7 @@ fn main() {
     // `--explain-units <CHANNEL>`: the channel's quantity and every direct
     // contributor's unit (#144).
     if let Some(channel) = &args.explain_units {
-        explain_units(project.as_ref(), &all_scripts, channel);
+        explain_units(project.as_ref(), &parsed_scripts, channel);
         return;
     }
 
@@ -717,7 +728,7 @@ fn main() {
         .map(|p| {
             m1_typecheck::schedule::check(
                 p,
-                &all_scripts,
+                &parsed_scripts,
                 true,
                 filter.select.contains("T089"),
                 true,
@@ -753,10 +764,13 @@ fn main() {
     let usage_diags: Vec<TypeDiagnostic> = project
         .as_ref()
         .map(|p| {
-            let mut v = m1_typecheck::schedule::check_usage(p, &all_scripts, true, true);
+            let mut v = m1_typecheck::schedule::check_usage(p, &parsed_scripts, true, true);
             // T096 (default-on): channel assigned by >1 periodically scheduled
             // function — M1 Build Error 1022.
-            v.extend(m1_typecheck::schedule::check_multi_writers(p, &all_scripts));
+            v.extend(m1_typecheck::schedule::check_multi_writers(
+                p,
+                &parsed_scripts,
+            ));
             v
         })
         .unwrap_or_default();

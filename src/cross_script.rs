@@ -102,15 +102,16 @@ struct Writer {
     taint: Taint,
 }
 
-/// Solve the project-wide channel taint graph. `scripts` pairs each script's
-/// file name with its source — same convention as
-/// [`Project::infer_return_types`]. Scripts with syntax errors (or
+/// Solve the project-wide channel taint graph. `scripts` carries each script's
+/// file name with its already-parsed CST (parsed once per run — #192), the same
+/// convention as [`Project::infer_return_types`]. Scripts with syntax errors (or
 /// pathologically deep CSTs, #94) are skipped; everything else contributes
 /// its write summary, and the writer→reader graph is iterated to a fixpoint.
-pub fn solve(project: &Project, scripts: &[(String, String)]) -> ChannelTaints {
+pub fn solve(project: &Project, scripts: &[crate::parsed::ParsedScript]) -> ChannelTaints {
     let mut writers: BTreeMap<String, Vec<Writer>> = BTreeMap::new();
-    for (file_name, source) in scripts {
-        let cst = m1_core::parse(source);
+    for script in scripts {
+        let file_name = &script.name;
+        let cst = &script.cst;
         if !cst.syntax_diagnostics().is_empty() {
             continue;
         }
@@ -127,7 +128,7 @@ pub fn solve(project: &Project, scripts: &[(String, String)]) -> ChannelTaints {
             project: Some(project),
             fn_symbol: fn_symbol.clone(),
         };
-        let anns = m1_core::annotations(&cst, &m1_core::Registry::seed());
+        let anns = m1_core::annotations(cst, &m1_core::Registry::seed());
         // Per-file diagnostics are produced by the (later) reporting pass;
         // here only the write summary matters.
         let mut discard = Vec::new();

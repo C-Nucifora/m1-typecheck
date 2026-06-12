@@ -7,6 +7,7 @@ pub mod filter;
 pub mod flow;
 pub mod intrinsics;
 pub mod invalid_value;
+pub mod parsed;
 pub mod project;
 pub mod resolve;
 pub mod rules;
