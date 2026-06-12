@@ -184,7 +184,7 @@ pub enum RelatedPlace {
 }
 
 /// The related-location for a symbol's declaration site, if the symbol came
-/// from the project file ([`Symbol::def_line`] is `None` otherwise).
+/// from the project file ([`crate::symbols::Symbol::def_line`] is `None` otherwise).
 pub fn related_to_def(
     sym: &crate::symbols::Symbol,
     message: impl Into<String>,
