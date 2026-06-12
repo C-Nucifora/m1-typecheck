@@ -82,6 +82,26 @@ struct Args {
     /// pass every project script as FILES so the solve sees the whole graph.
     #[arg(long, value_name = "CHANNEL")]
     explain: Option<String>,
+    /// Treat any finding as a failure: exit 1 if the run produces any diagnostic,
+    /// not only error-severity ones. For warnings-clean CI once errors are at
+    /// zero (matches m1-lint/m1-fmt, which fail on anything to report).
+    #[arg(long)]
+    strict: bool,
+    /// Drop warning-severity findings entirely — not shown, and not counted
+    /// toward the exit status (even under --strict). Lets a team gate on errors
+    /// while triaging warnings.
+    #[arg(short = 'W', long = "no-warnings")]
+    no_warnings: bool,
+}
+
+/// How a finding is treated under `--strict` / `--no-warnings`. `drop` removes it
+/// from output entirely (a `--no-warnings` warning); `fails` is whether it should
+/// fail the run (errors always; under `--strict`, anything still shown). The two
+/// are derived together so every report site stays consistent (#199).
+fn finding_disposition(args: &Args, severity: Severity) -> (bool, bool) {
+    let drop = args.no_warnings && severity == Severity::Warning;
+    let fails = !drop && (args.strict || severity == Severity::Error);
+    (drop, fails)
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
@@ -267,11 +287,11 @@ fn check_files(
             .diagnostics
             .iter()
             .filter(|d| filter.allows(d.code.as_str()))
+            // --no-warnings drops warning findings from both output and JSON (#199).
+            .filter(|d| !finding_disposition(args, d.inner.severity).0)
             .collect();
         for d in &kept {
-            if d.inner.severity == Severity::Error {
-                had_error = true;
-            }
+            had_error |= finding_disposition(args, d.inner.severity).1;
             if !json {
                 println!(
                     "{}:{}:{}: {}[{}]: {}",
@@ -323,7 +343,11 @@ fn audit_project(
             if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
                 continue;
             }
-            had_error |= d.inner.severity == Severity::Error;
+            let (drop, fails) = finding_disposition(args, d.inner.severity);
+            if drop {
+                continue;
+            }
+            had_error |= fails;
             if json {
                 json_buf.project.push(d);
             } else {
@@ -346,7 +370,11 @@ fn audit_project(
             if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
                 continue;
             }
-            had_error |= d.inner.severity == Severity::Error;
+            let (drop, fails) = finding_disposition(args, d.inner.severity);
+            if drop {
+                continue;
+            }
+            had_error |= fails;
             if json {
                 json_buf.project.push(d);
             } else {
@@ -370,7 +398,11 @@ fn audit_project(
             if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
                 continue;
             }
-            had_error |= d.inner.severity == Severity::Error;
+            let (drop, fails) = finding_disposition(args, d.inner.severity);
+            if drop {
+                continue;
+            }
+            had_error |= fails;
             if json {
                 json_buf.project.push(d);
             } else {
@@ -739,7 +771,11 @@ fn main() {
         if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
             continue;
         }
-        project_had_error |= d.inner.severity == Severity::Error;
+        let (drop, fails) = finding_disposition(&args, d.inner.severity);
+        if drop {
+            continue;
+        }
+        project_had_error |= fails;
         if json {
             json_buf.project.push(d.clone());
         } else {
@@ -778,7 +814,11 @@ fn main() {
         if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
             continue;
         }
-        project_had_error |= d.inner.severity == Severity::Error;
+        let (drop, fails) = finding_disposition(&args, d.inner.severity);
+        if drop {
+            continue;
+        }
+        project_had_error |= fails;
         if json {
             json_buf.project.push(d.clone());
         } else {

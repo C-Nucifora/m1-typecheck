@@ -305,3 +305,77 @@ fn project_level_error_sets_exit_code() {
     assert!(s.contains("error[T094]"), "got:\n{s}");
     assert_eq!(o.status.code(), Some(1), "stdout:\n{s}");
 }
+
+// #199: a warning-only run exits 0 by default; --strict escalates any finding to
+// a failure; --no-warnings drops warnings from output and the exit status. We
+// isolate a warning-only run with `--select T092` (the tag audit, Warning), so
+// the script's own errors (T002/T094) don't muddy the exit code.
+fn warning_only_run(name: &str, extra: &[&str]) -> Output {
+    let script = setup(name, None);
+    let prj = script.parent().unwrap().join("Project.m1prj");
+    let mut args = vec![
+        "--project".to_string(),
+        prj.to_str().unwrap().to_string(),
+        "--select".to_string(),
+        "T092".to_string(),
+    ];
+    for a in extra {
+        args.push(a.to_string());
+    }
+    args.push(script.to_str().unwrap().to_string());
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    run(&refs)
+}
+
+#[test]
+fn warnings_alone_exit_zero_by_default() {
+    let o = warning_only_run("strict_default", &[]);
+    assert!(out_of(&o).contains("warning[T092]"), "got:\n{}", out_of(&o));
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "warnings alone must not fail by default"
+    );
+}
+
+#[test]
+fn strict_fails_on_a_warning_only_run() {
+    let o = warning_only_run("strict_on", &["--strict"]);
+    assert!(
+        out_of(&o).contains("warning[T092]"),
+        "the warning is still reported under --strict:\n{}",
+        out_of(&o)
+    );
+    assert_eq!(
+        o.status.code(),
+        Some(1),
+        "--strict must fail on any finding"
+    );
+}
+
+#[test]
+fn no_warnings_suppresses_output_and_does_not_fail() {
+    let o = warning_only_run("nowarn", &["--no-warnings"]);
+    assert!(
+        !out_of(&o).contains("T092"),
+        "--no-warnings must suppress the warning:\n{}",
+        out_of(&o)
+    );
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "suppressed warnings must not fail"
+    );
+}
+
+#[test]
+fn no_warnings_drops_warnings_before_strict_counts_them() {
+    // Both flags together: the warning is dropped, so --strict sees no finding.
+    let o = warning_only_run("nowarn_strict", &["--no-warnings", "--strict"]);
+    assert!(!out_of(&o).contains("T092"), "got:\n{}", out_of(&o));
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "a dropped warning is not a finding for --strict"
+    );
+}
