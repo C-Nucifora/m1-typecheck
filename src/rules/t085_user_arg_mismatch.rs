@@ -46,7 +46,7 @@ impl super::Rule for Rule {
             .unwrap_or_default();
 
         if args.len() != params.len() {
-            out.push(make(
+            let mut d = make(
                 TypeCode::T085,
                 node,
                 Severity::Error,
@@ -58,7 +58,12 @@ impl super::Rule for Rule {
                     args.len(),
                     if args.len() == 1 { "is" } else { "are" },
                 ),
+            );
+            d.related.extend(crate::diagnostics::related_to_def(
+                sym,
+                format!("signature of `{callee_path}` declared here"),
             ));
+            out.push(d);
             return;
         }
         for (arg, (pname, pty)) in args.iter().zip(params) {
@@ -67,7 +72,7 @@ impl super::Rule for Rule {
                 continue;
             }
             if !arg_compatible(*pty, aty) {
-                out.push(make(
+                let mut d = make(
                     TypeCode::T085,
                     arg,
                     Severity::Warning,
@@ -75,7 +80,12 @@ impl super::Rule for Rule {
                         "argument `{}` of `{}` is declared {pty:?}, but a {aty:?} is passed",
                         pname, callee_path
                     ),
+                );
+                d.related.extend(crate::diagnostics::related_to_def(
+                    sym,
+                    format!("signature of `{callee_path}` declared here"),
                 ));
+                out.push(d);
             }
         }
     }

@@ -31,25 +31,32 @@ impl super::Rule for Rule {
             return; // single child; nothing to compare
         }
         // Target must resolve to a Channel/Parameter with a known type.
-        let target_ty = match resolve(&path_text(*target), scope) {
+        let target_sym = match resolve(&path_text(*target), scope) {
             Resolution::Symbol(s)
                 if matches!(s.kind, SymbolKind::Channel | SymbolKind::Parameter) =>
             {
-                s.value_type
+                s
             }
             _ => return,
         };
+        let target_ty = target_sym.value_type;
         let value_ty = type_of(*value, scope);
         if !target_ty.is_known() || !value_ty.is_known() {
             return; // silent under Unknown
         }
         if !compatible(target_ty, value_ty) {
-            out.push(make(
+            let mut d = make(
                 TypeCode::T030,
                 node,
                 Severity::Warning,
                 format!("assigning {value_ty:?} to a target of type {target_ty:?}"),
+            );
+            // The declaration is the other end of this fact (#200).
+            d.related.extend(crate::diagnostics::related_to_def(
+                target_sym,
+                format!("`{}` declared {target_ty:?} here", target_sym.path),
             ));
+            out.push(d);
         }
     }
 }

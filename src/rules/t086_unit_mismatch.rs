@@ -51,20 +51,31 @@ impl super::Rule for Rule {
             Resolution::Symbol(s)
                 if matches!(s.kind, SymbolKind::Channel | SymbolKind::Parameter) =>
             {
-                s.unit.clone().map(|u| (s.path.clone(), u))
+                s.unit.clone().map(|u| (s, u))
             }
             _ => None,
         };
-        let (Some((tpath, tunit)), Some((spath, sunit))) = (unit_of(*target), unit_of(rhs)) else {
+        let (Some((tsym, tunit)), Some((ssym, sunit))) = (unit_of(*target), unit_of(rhs)) else {
             return;
         };
+        let (tpath, spath) = (&tsym.path, &ssym.path);
         if tunit != sunit {
-            out.push(make(
+            let mut d = make(
                 TypeCode::T086,
                 node,
                 Severity::Warning,
                 format!("unit mismatch: `{tpath}` is in {tunit} but `{spath}` is in {sunit}"),
+            );
+            // Both declarations are the other ends of this fact (#200).
+            d.related.extend(crate::diagnostics::related_to_def(
+                tsym,
+                format!("`{tpath}` declared in {tunit} here"),
             ));
+            d.related.extend(crate::diagnostics::related_to_def(
+                ssym,
+                format!("`{spath}` declared in {sunit} here"),
+            ));
+            out.push(d);
         }
     }
 }

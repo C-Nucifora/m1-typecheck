@@ -244,12 +244,13 @@ fn load_project(project_path: Option<&PathBuf>, config_path: Option<&PathBuf>) -
 fn check_files(
     args: &Args,
     project: Option<&Project>,
+    project_path: Option<&std::path::PathBuf>,
     enabled_opt_in: &std::collections::HashSet<String>,
     filter: &DiagFilter,
     channels: &ChannelTaints,
-    json: bool,
-    json_buf: &mut JsonBuf,
+    mut json_buf: Option<&mut JsonBuf>,
 ) -> bool {
+    let json = json_buf.is_some();
     let mut had_error = false;
     for file in &args.files {
         // Read tolerantly: MoTeC `.m1scr` sources may carry Windows-1252 bytes
@@ -302,10 +303,19 @@ fn check_files(
                     d.code.as_str(),
                     d.inner.message
                 );
+                // Two-location diagnostics carry the other end (#200) — the
+                // declaration in the project file, rustc-note style.
+                for r in &d.related {
+                    let m1_typecheck::diagnostics::RelatedPlace::Project { line } = r.place;
+                    let label = project_path
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| "<project>".into());
+                    println!("    note: {}: {label}:{}", r.message, line + 1);
+                }
             }
         }
-        if json {
-            json_buf.files.push(JsonFile {
+        if let Some(buf) = json_buf.as_deref_mut() {
+            buf.files.push(JsonFile {
                 path: file.display().to_string(),
                 syntax_errors: result.syntax_errors,
                 diagnostics: kept.into_iter().cloned().collect(),
@@ -839,11 +849,11 @@ fn main() {
     let had_error = check_files(
         &args,
         project.as_ref(),
+        project_path.as_ref(),
         &enabled_opt_in,
         &filter,
         &channel_taints,
-        json,
-        &mut json_buf,
+        json.then_some(&mut json_buf),
     );
     let audit_had_error = audit_project(
         &args,

@@ -33,83 +33,67 @@ type. No external data is needed — it's all in `Project.m1prj`.
 > crate and add `SymbolKind::Object` arms in `features/hover.rs` (`kind_str`) and
 > `features/semantic_tokens.rs` to show objects + complete their members.
 
-## 2. Built-in global objects — TODO (how to add)
+## 2. Built-in global objects — IMPLEMENTED (intrinsics catalogue)
 
-The most-called things in real scripts are **built-in/firmware objects** that are
-**not in `Project.m1prj` at all**:
+The most-called things in real scripts are **built-in/firmware objects** that
+are **not in `Project.m1prj` at all**:
 
 ```
 Calculate.Min(a, b)      CanComms.GetUnsignedInteger(h, 48, 16)
 Convert.ToInteger(x)     Delay.Rising(cond)      Output.SetState(s)
 ```
 
-`resolve()` currently returns `Resolution::Opaque` for these (silently OK, but no
-type, no method signature, no completion, no argument checking). They come from
-M1 Build's **firmware/SDK**, versioned by `<System VersionBuild="…">`.
+These are modelled by the vendored intrinsics catalogue,
+[`assets/m1-intrinsics.json`], loaded once per process by
+[`src/intrinsics.rs`](../src/intrinsics.rs) (`intrinsics::get()`):
 
-### Recommended design
+- **Resolution** ([`src/resolve.rs`](../src/resolve.rs)): library objects
+  resolve before project symbols, per the M1 scope order
+  (local → library → project). `Calculate` → `Resolution::BuiltinObject`;
+  `Calculate.Min` → `Resolution::BuiltinFn(overloads)`; an **unknown member of
+  a known object stays `Opaque`** — that boundary is what keeps
+  intrinsic-backed rules safe (see below). A project object that shadows a
+  library name is reached via the `This.`/`Library.` anchors.
+- **Rules** that consume resolved built-ins:
+  [T064](../src/rules/t064_arg_count.rs) wrong-argument-count (union-aware
+  across overload arities), [T061/T062/T063](../src/rules/) stateful /
+  deprecated / calibration-only usage.
+- **Typing**: `BuiltinFn` return types feed the typer, so downstream checks
+  (T030 and friends) see through library calls.
+- **Editors**: hover, completion, signature help and the diagnostics all go
+  through `resolve()`, so m1-lsp surfaces the catalogue with no extra feature
+  code.
 
-**a) A definitions registry.** Add `src/symbols/builtins.rs`:
+### Coverage and the T064 graduation question
 
-```rust
-pub struct BuiltinMethod {
-    pub name: String,                 // "Min"
-    pub params: Vec<ValueType>,       // [Float, Float]
-    pub variadic: bool,
-    pub returns: ValueType,           // Float
-}
-pub struct BuiltinObject {
-    pub name: String,                 // "Calculate"
-    pub methods: Vec<BuiltinMethod>,
-}
-pub struct Builtins { /* by_name: HashMap<String, BuiltinObject> */ }
-impl Builtins {
-    pub fn method(&self, object: &str, method: &str) -> Option<&BuiltinMethod>;
-    pub fn object(&self, name: &str) -> Option<&BuiltinObject>;
-}
-```
+`tests/intrinsic_coverage.rs` is the tracked coverage report
+(`cargo test --test intrinsic_coverage -- --nocapture` with a corpus
+available): it walks every corpus script, collects `Object.Method(` call
+heads, and classifies them against the catalogue. As of 2026-06-12, **every
+library call in both real corpora resolves to a modelled method** (the
+remaining unmatched heads are project symbols — timers, outputs, tables — not
+intrinsics). T064 nevertheless stays **opt-in** for now: the catalogue is
+help-capture-derived rather than firmware-export-derived, so corpora beyond
+ours can call methods it misses; the safety boundary (unknown member →
+`Opaque`, never flagged) plus the coverage report make the future
+graduation decision data-driven rather than hopeful.
 
-**b) Source of the data (authoritative).** The definitions are in M1 Build's
-firmware packages. Export them from M1 Build (the package/firmware definitions for
-the project's firmware build) into a machine-readable file — a `builtins.json` /
-`.m1pkg` listing each built-in object, its methods, parameter types and return
-types — and parse that into `Builtins`. This keeps the model version-matched and
-complete. (Absent an export, the registry can be hand-seeded from M1 docs + the
-most-used calls in the corpus, but that's manual and partial.)
+### Refreshing the catalogue
 
-Load it next to the project: `Project::load()` should look for the firmware
-definitions (e.g. a sibling `builtins.json`, or one keyed by `VersionBuild`) and
-build a `Builtins` alongside the `SymbolTable`.
+The catalogue merges curated entries with M1 Build help-pane captures
+(`M1_LIBRARIES_ENUMS_TYPES`): after a new capture set, run
+`python3 assets/merge-help-captures.py <captures-dir>`. Curated entries win on
+conflict (they carry `stateful`/`deprecated`/`calibrationOnly` flags and
+overload unions). Known limits: no firmware-version keying (the catalogue is a
+union across captured versions), and no variadic markers beyond what the
+captures expose.
 
-**c) Wire into `resolve()`.** In `src/resolve.rs`, before returning `Opaque` for a
-project-unrooted path, split it into `object.method` and consult `Builtins`:
-
-```
-resolve("Calculate.Min", scope):
-  not a local, not a project symbol ->
-    if let Some(m) = builtins.method("Calculate", "Min") {
-        return Resolution::Builtin(m)   // new variant carrying the signature
-    }
-    Opaque
-```
-
-Add a `Resolution::Builtin(&BuiltinMethod)` (or reuse `Symbol` with
-`SymbolKind::Method` + a synthetic signature). The typer then knows the return
-type; a new rule can check argument arity/types.
-
-**d) It surfaces everywhere for free.** Hover, completion, go-to-definition,
-signature-help and diagnostics in m1-lsp all go through `resolve()`/`Scope`, so
-once `Builtins` is wired in, every editor gets built-in object understanding with
-no extra feature code (just the re-vendor + the new `Resolution` arm).
-
-### Effort checklist for the built-in library
-
-1. Obtain/define `builtins.json` from M1 Build (firmware export).
-2. `src/symbols/builtins.rs` — types + JSON loader.
-3. `Project::load()` — load the firmware definitions.
-4. `src/resolve.rs` — consult `Builtins`, add `Resolution::Builtin`.
-5. `src/typer.rs` — return type from the builtin method; optional arity/type rule.
-6. Re-vendor into m1-lsp; add hover/completion/signature-help handling.
+> Historical note: this section previously specified a `builtins.json`-based
+> design (`Resolution::Builtin`, a `Builtins` registry) as future work. The
+> implemented model differs mainly in naming (`BuiltinObject`/`BuiltinFn`, the
+> `Intrinsics` loader) and in sourcing the data from help captures instead of
+> an M1 Build firmware export — the export remains the ideal upstream if it
+> ever becomes available.
 
 ## 2026-06-11 — help-pane capture integration
 

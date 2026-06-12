@@ -394,3 +394,29 @@ fn t070_no_flag_with_catch_all_arm() {
 // errors, so the clause can never reach a rule. It also does not appear in the
 // real m1-example corpus (every `is` there is inside a comment). T020 therefore fires
 // only on the corpus-real typed-member-path idiom `<EnumType>.<Member>`.
+
+#[test]
+fn t030_carries_declaration_related_location() {
+    // #200: the declared-type end of the mismatch points at the .m1prj line.
+    use m1_typecheck::diagnostics::RelatedPlace;
+    let p = proj();
+    let def_line = p
+        .symbols()
+        .get("Root.Foo.SwitchMode.Value")
+        .unwrap()
+        .def_line
+        .expect("fixture symbol has a def line");
+    let diags = check_script(
+        &p,
+        Path::new("Foo Update.m1scr"),
+        "SwitchMode.Value = Drive State.Idle;\n",
+    )
+    .diagnostics;
+    let d = diags
+        .iter()
+        .find(|d| d.code == TypeCode::T030)
+        .expect("T030 fires");
+    let r = d.related.first().expect("related declaration attached");
+    assert_eq!(r.place, RelatedPlace::Project { line: def_line });
+    assert!(r.message.contains("declared"), "{:?}", r.message);
+}

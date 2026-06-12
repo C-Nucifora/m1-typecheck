@@ -7,10 +7,13 @@
 //!
 //! Scope guard: this only fires when the callee resolves to `BuiltinFn` (a known
 //! library object + known method). It deliberately does **not** flag unknown
-//! members — the corpus calls valid firmware functions absent from the intrinsics
-//! export (`System.FlashFree()`), which `resolve` returns as `Opaque`, never
-//! `BuiltinFn`, so they are never reached here. Opt-in via `--select T064` (or the
-//! `[diagnostics] select`); low severity (Warning) by default when selected.
+//! members — a firmware function absent from the intrinsics catalogue resolves
+//! `Opaque`, never `BuiltinFn`, so it is never reached here. (The once-canonical
+//! example, `System.FlashFree()`, has since been modelled via the help-pane
+//! captures — see `tests/intrinsic_coverage.rs` for the tracked coverage report,
+//! which shows every library call in both real corpora is now modelled.) Opt-in
+//! via `--select T064` (or the `[diagnostics] select`); low severity (Warning) by
+//! default when selected.
 use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
 use crate::resolve::{Resolution, Scope, resolve};
 use crate::typer::path_text;

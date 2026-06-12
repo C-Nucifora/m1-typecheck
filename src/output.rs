@@ -129,6 +129,21 @@ fn diag_json(d: &TypeDiagnostic) -> String {
     out.push_str(",\"message\":");
     out.push_str(&json_str(&d.inner.message));
     out.push_str(&range_json(&d.inner.range, &d.inner.byte_range));
+    if !d.related.is_empty() {
+        // Secondary locations (#200). `project_line` is 0-based in the file
+        // named by the document's `project_path`.
+        out.push_str(",\"related\":[");
+        for (i, r) in d.related.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            let m1_typecheck::diagnostics::RelatedPlace::Project { line } = r.place;
+            out.push_str(&format!("{{\"project_line\":{line},\"message\":"));
+            out.push_str(&json_str(&r.message));
+            out.push('}');
+        }
+        out.push(']');
+    }
     out.push('}');
     out
 }
@@ -180,7 +195,7 @@ pub fn render_sarif(files: &[JsonFile], project: &[TypeDiagnostic], project_labe
             }));
         }
         for d in &f.diagnostics {
-            results.push(json!({
+            let mut result = json!({
                 "ruleId": d.code.as_str(),
                 "level": level(d.inner.severity),
                 "message": {"text": d.inner.message},
@@ -193,7 +208,11 @@ pub fn render_sarif(files: &[JsonFile], project: &[TypeDiagnostic], project_labe
                         "endColumn": d.inner.range.end.column + 1,
                     },
                 }}],
-            }));
+            });
+            if !d.related.is_empty() {
+                result["relatedLocations"] = related_sarif(&d.related, project_label);
+            }
+            results.push(result);
         }
     }
     for d in project {
@@ -219,6 +238,25 @@ pub fn render_sarif(files: &[JsonFile], project: &[TypeDiagnostic], project_labe
                 },
             }}],
         }));
+    }
+
+    fn related_sarif(
+        related: &[m1_typecheck::diagnostics::RelatedLocation],
+        project_label: &str,
+    ) -> serde_json::Value {
+        related
+            .iter()
+            .map(|r| {
+                let m1_typecheck::diagnostics::RelatedPlace::Project { line } = r.place;
+                json!({
+                    "message": {"text": r.message},
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": project_label},
+                        "region": {"startLine": line + 1},
+                    },
+                })
+            })
+            .collect()
     }
 
     json!({
