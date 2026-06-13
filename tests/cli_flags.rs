@@ -379,3 +379,166 @@ fn no_warnings_drops_warnings_before_strict_counts_them() {
         "a dropped warning is not a finding for --strict"
     );
 }
+
+// ---- T095 invalid-display-unit (default-on, M1 Build Error 1017) ------------
+
+// A project with a channel whose display unit is from the wrong physical
+// dimension: `rad/s` (Angular Speed) shown as `%` (a unit of ratio).
+const PROJECT_T095: &str = r#"<?xml version="1.0"?>
+<MoTeCM1BuildSession>
+ <Project Name="T095Demo" TargetHardware="ecu120">
+  <ComponentStream>
+   <List>
+    <Component Classname="BuiltIn.GroupCompound" Name="Root.Ctrl"/>
+    <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.Speed">
+     <Props Qty="rad/s"><Locale><Default Unit="%"/></Locale></Props>
+    </Component>
+    <Component Classname="BuiltIn.FuncUser" Filename="Ctrl.Update.m1scr" Name="Root.Ctrl.Update"/>
+   </List>
+  </ComponentStream>
+ </Project>
+</MoTeCM1BuildSession>
+"#;
+
+fn setup_t095(name: &str) -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("Project.m1prj"), PROJECT_T095).unwrap();
+    let script = dir.join("Ctrl.Update.m1scr");
+    fs::write(&script, "").unwrap();
+    script
+}
+
+#[test]
+fn t095_invalid_display_unit_fires_and_is_error() {
+    // T095 is default-on (M1 Build Error 1017 parity): a channel whose display
+    // unit belongs to a different physical dimension than its Qty must be
+    // flagged as an error (exit non-zero) even without --select.
+    let script = setup_t095("t095_default_on");
+    let prj = script.parent().unwrap().join("Project.m1prj");
+    let o = run(&["--project", prj.to_str().unwrap(), script.to_str().unwrap()]);
+    let s = out_of(&o);
+    assert!(s.contains("T095"), "expected T095 in output:\n{s}");
+    assert_eq!(
+        o.status.code(),
+        Some(1),
+        "T095 is Error severity — must exit 1:\n{s}"
+    );
+}
+
+#[test]
+fn t095_ignore_suppresses_the_code() {
+    // Isolate T095 with --select T095 first to confirm it fires, then verify
+    // --ignore T095 removes it (the select/ignore pair is the standard pattern).
+    let script = setup_t095("t095_ignore");
+    let prj = script.parent().unwrap().join("Project.m1prj");
+    // With --select T095 it appears.
+    let on = run(&[
+        "--project",
+        prj.to_str().unwrap(),
+        "--select",
+        "T095",
+        script.to_str().unwrap(),
+    ]);
+    let s_on = out_of(&on);
+    assert!(
+        s_on.contains("T095"),
+        "expected T095 with --select:\n{s_on}"
+    );
+    // With --ignore T095 it disappears (use --select T095 to avoid noise from
+    // other default-on codes that would also fail the run).
+    let off = run(&[
+        "--project",
+        prj.to_str().unwrap(),
+        "--select",
+        "T095",
+        "--ignore",
+        "T095",
+        script.to_str().unwrap(),
+    ]);
+    let s_off = out_of(&off);
+    assert!(
+        !s_off.contains("T095"),
+        "--ignore T095 must suppress it:\n{s_off}"
+    );
+    assert_eq!(
+        off.status.code(),
+        Some(0),
+        "no remaining findings must exit 0:\n{s_off}"
+    );
+}
+
+// ---- T096 multiple-scheduled-writers (default-on, M1 Build Error 1022) ------
+
+// A project with two periodically-scheduled functions and a channel that both
+// write to — exactly the scenario that triggers M1 Build Error 1022.
+const PROJECT_T096: &str = r#"<?xml version="1.0"?>
+<MoTeCM1BuildSession>
+ <Project Name="T096Demo" TargetHardware="ecu120">
+  <ComponentStream>
+   <List>
+    <Component Classname="BuiltIn.GroupCompound" Name="Root.Events"/>
+    <Component Classname="BuiltIn.EventKernel" Name="Root.Events.On 100Hz"/>
+    <Component Classname="BuiltIn.EventKernel" Name="Root.Events.On 50Hz"/>
+    <Component Classname="BuiltIn.GroupCompound" Name="Root.Ctrl"/>
+    <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.Shared"><Props Type="f32"/></Component>
+    <Component Classname="BuiltIn.FuncUser" Filename="Alpha.Update.m1scr" Name="Root.Ctrl.Alpha">
+     <Props SelectedTrigger="Root.Events.On 100Hz"/>
+    </Component>
+    <Component Classname="BuiltIn.FuncUser" Filename="Beta.Update.m1scr" Name="Root.Ctrl.Beta">
+     <Props SelectedTrigger="Root.Events.On 50Hz"/>
+    </Component>
+   </List>
+  </ComponentStream>
+ </Project>
+</MoTeCM1BuildSession>
+"#;
+
+fn setup_t096(name: &str) -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("Project.m1prj"), PROJECT_T096).unwrap();
+    // Both scripts write to Root.Ctrl.Shared — the multi-writer scenario.
+    fs::write(dir.join("Alpha.Update.m1scr"), "Ctrl.Shared = 1.0;\n").unwrap();
+    fs::write(dir.join("Beta.Update.m1scr"), "Ctrl.Shared = 2.0;\n").unwrap();
+    dir.join("Alpha.Update.m1scr")
+}
+
+#[test]
+fn t096_multiple_scheduled_writers_fires_and_is_error() {
+    // T096 is default-on (M1 Build Error 1022 parity): a channel assigned by
+    // more than one periodically-scheduled function must be flagged as an error
+    // (exit non-zero) even without --select.
+    let script = setup_t096("t096_default_on");
+    let prj = script.parent().unwrap().join("Project.m1prj");
+    let o = run(&["--project", prj.to_str().unwrap(), script.to_str().unwrap()]);
+    let s = out_of(&o);
+    assert!(s.contains("T096"), "expected T096 in output:\n{s}");
+    assert_eq!(
+        o.status.code(),
+        Some(1),
+        "T096 is Error severity — must exit 1:\n{s}"
+    );
+}
+
+#[test]
+fn t096_ignore_suppresses_the_code() {
+    let script = setup_t096("t096_ignore");
+    let prj = script.parent().unwrap().join("Project.m1prj");
+    let o = run(&[
+        "--project",
+        prj.to_str().unwrap(),
+        "--ignore",
+        "T096",
+        script.to_str().unwrap(),
+    ]);
+    let s = out_of(&o);
+    assert!(!s.contains("T096"), "--ignore T096 must suppress it:\n{s}");
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "suppressed T096 must not fail:\n{s}"
+    );
+}
