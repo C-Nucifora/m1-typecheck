@@ -34,12 +34,20 @@ impl super::Rule for Rule {
             return;
         };
         let Some(project) = scope.project else { return };
-        let enum_ty = project.symbols().enum_type(id);
+        let table = project.symbols();
+        let enum_open = table.enum_is_open(id);
+        let enum_ty = table.enum_type(id);
 
         // Collect the enumerators covered across every `is` arm (one arm may list
-        // several via `or`). If an arm names something that is NOT a member of the
-        // enum, treat it as a catch-all/default and consider the `when` exhaustive.
+        // several via `or`). A label that is NOT a member of the enum is handled
+        // by enum-openness: for an OPEN firmware enum the member list is not fully
+        // known, so an unlisted label may be a real enumerator we cannot see —
+        // bail conservatively (no T020, no T070). For a CLOSED project enum the
+        // member list is exhaustive, M1's `when…is` has no catch-all syntax, and
+        // M1 Build rejects an unknown is-label (Error 1352): emit T020 and keep
+        // checking exhaustiveness so a typo cannot mask a missing enumerator (#212).
         let mut covered: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut nonmember_buf: Vec<TypeDiagnostic> = Vec::new();
         for arm in node.named_children() {
             if arm.kind() != Kind::IsClause {
                 continue;
@@ -48,20 +56,32 @@ impl super::Rule for Rule {
                 continue;
             };
             let names = arm_enumerators(state);
-            // An arm we cannot decompose into enumerators (empty), or one naming a
-            // label that is not a member of the enum, acts as a catch-all/default:
-            // bail out conservatively and emit nothing.
+            // An arm we cannot decompose into enumerators (an unrecognisable
+            // pattern) carries no information either way — bail conservatively.
             if names.is_empty() {
                 return;
             }
             for name in names {
                 if enum_ty.members.iter().any(|(m, _)| *m == name) {
                     covered.insert(name);
-                } else {
+                } else if enum_open {
+                    // Open firmware enum: the unlisted label may be a real member
+                    // we cannot see, so treat the arm as a catch-all and bail.
                     return;
+                } else {
+                    nonmember_buf.push(make(
+                        TypeCode::T020,
+                        &state,
+                        Severity::Error,
+                        format!(
+                            "`{name}` is not a member of enum `{}` (M1 Build Error 1352: \"does not exist\")",
+                            enum_ty.name
+                        ),
+                    ));
                 }
             }
         }
+        out.append(&mut nonmember_buf);
 
         let missing: Vec<&str> = enum_ty
             .members

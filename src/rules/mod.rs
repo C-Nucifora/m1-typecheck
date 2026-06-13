@@ -265,6 +265,15 @@ pub fn run_with(
     source: &str,
     channels: &crate::cross_script::ChannelTaints,
 ) -> CheckResult {
+    // A leading UTF-8 BOM (U+FEFF) is metadata, not content: Windows editors add
+    // it routinely. Strip one leading BOM here, the single parse choke-point, so
+    // column 1 maps to the document's first real character regardless of how the
+    // source reached us. The CLI read path already strips it via
+    // `m1_workspace::read_text`, and tree-sitter currently consumes a stray BOM as
+    // whitespace, but in-process callers (the LSP) pass source strings directly
+    // and must not depend on that grammar detail (#213). Done locally, so it needs
+    // no m1-workspace release.
+    let source = source.strip_prefix('\u{feff}').unwrap_or(source);
     let cst = m1_core::parse(source);
     let syntax_errors = cst.syntax_diagnostics();
     if !syntax_errors.is_empty() {

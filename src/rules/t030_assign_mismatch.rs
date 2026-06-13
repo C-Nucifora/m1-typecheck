@@ -30,35 +30,56 @@ impl super::Rule for Rule {
         if std::ptr::eq(target, value) {
             return; // single child; nothing to compare
         }
-        // Target must resolve to a Channel/Parameter with a known type.
-        let target_sym = match resolve(&path_text(*target), scope) {
-            Resolution::Symbol(s)
-                if matches!(s.kind, SymbolKind::Channel | SymbolKind::Parameter) =>
-            {
-                s
-            }
-            _ => return,
-        };
-        let target_ty = target_sym.value_type;
+        // Target may be a Channel/Parameter symbol, or a local — locals have a
+        // fully-known declared type (the lattice and `type_of` support them, per
+        // T003), so a float→integer write to a local is the same mismatch the
+        // manual gives as invalid (`low = high;`, p.44) and must flag too (#210).
         let value_ty = type_of(*value, scope);
+        let (target_ty, target_sym): (ValueType, Option<&crate::symbols::Symbol>) =
+            match resolve(&path_text(*target), scope) {
+                Resolution::Symbol(s)
+                    if matches!(s.kind, SymbolKind::Channel | SymbolKind::Parameter) =>
+                {
+                    (s.value_type, Some(s))
+                }
+                Resolution::Local(ty) => (ty, None),
+                _ => return,
+            };
         if !target_ty.is_known() || !value_ty.is_known() {
             return; // silent under Unknown
         }
         if !compatible(target_ty, value_ty) {
+            let target_str = render_type(target_ty, scope);
             let mut d = make(
                 TypeCode::T030,
                 node,
                 Severity::Warning,
-                format!("assigning {value_ty:?} to a target of type {target_ty:?}"),
+                format!(
+                    "assigning {} to a target of type {target_str}",
+                    render_type(value_ty, scope)
+                ),
             );
-            // The declaration is the other end of this fact (#200).
-            d.related.extend(crate::diagnostics::related_to_def(
-                target_sym,
-                format!("`{}` declared {target_ty:?} here", target_sym.path),
-            ));
+            // The declaration is the other end of this fact (#200). Locals are
+            // declared inline (no separate symbol), so there is no def to link.
+            if let Some(sym) = target_sym {
+                d.related.extend(crate::diagnostics::related_to_def(
+                    sym,
+                    format!("`{}` declared {target_str} here", sym.path),
+                ));
+            }
             out.push(d);
         }
     }
+}
+
+/// Render a `ValueType` for a user-facing message. Enums resolve to their name
+/// via the symbol table (like T020), rather than leaking the internal id as
+/// `Enum(0)` (#214); every other type uses its `Debug` shape.
+fn render_type(ty: ValueType, scope: &Scope) -> String {
+    if let (ValueType::Enum(id), Some(project)) = (ty, scope.project) {
+        return format!("enum `{}`", project.symbols().enum_type(id).name);
+    }
+    format!("{ty:?}")
 }
 
 /// `local <Type> x = init;` — the declared annotation is authoritative (#142),
@@ -96,7 +117,11 @@ fn check_local_declaration(node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnos
             TypeCode::T030,
             node,
             Severity::Warning,
-            format!("initialising a local declared {declared:?} with a {init_ty:?} value"),
+            format!(
+                "initialising a local declared {} with a {} value",
+                render_type(declared, scope),
+                render_type(init_ty, scope)
+            ),
         ));
     }
 }
