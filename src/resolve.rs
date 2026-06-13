@@ -111,6 +111,22 @@ pub fn resolve<'p>(path: &str, scope: &Scope<'p>) -> Resolution<'p> {
             }
             return Resolution::Opaque;
         }
+        // `This` anchors to the group the current object is stored within (manual
+        // p.41): `This.<rest>` denotes `<group>.<rest>`. Mirrors the `Parent` arm
+        // but without walking up. A `This.` reference that resolves is a real
+        // symbol so the semantic rules (T001/T020/T030/T031/…) apply; one that
+        // does not stays opaque (conservative). Bare `This` is handled at step 5.
+        "This" if path != "This" => {
+            if let (Some(project), Some(group)) = (scope.project, scope.group.as_ref())
+                && let Some(rest) = path.strip_prefix("This.")
+            {
+                let target = format!("{group}.{rest}");
+                if let Some(sym) = project.symbols().get(&target) {
+                    return Resolution::Symbol(sym);
+                }
+            }
+            return Resolution::Opaque;
+        }
         _ => {}
     }
 

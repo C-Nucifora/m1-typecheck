@@ -163,7 +163,7 @@ impl Project {
         crate::audit::audit_project(self)
     }
 
-    /// Opt-in tags audit (T092): M1 Build tag-warning parity — see
+    /// Tags audit (T092, default-on): M1 Build tag-warning parity — see
     /// [`crate::audit::audit_tags`].
     pub fn audit_tags(&self) -> Vec<crate::diagnostics::TypeDiagnostic> {
         crate::audit::audit_tags(self)

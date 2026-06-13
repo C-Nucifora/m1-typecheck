@@ -135,6 +135,68 @@ fn t030_no_flag_unknown_target() {
     assert!(!codes(&p, "driveMode = 1.0;\n").contains(&TypeCode::T030));
 }
 
+#[test]
+fn t030_flags_float_to_integer_local_plain_assignment() {
+    // Manual p.44: `local <Unsigned Integer> low = 5; local high = 6.5;` then
+    // `low = high;` is *not valid*. A plain `=` float→integer write to a local
+    // is the same mismatch as a channel assignment and must flag (#210).
+    let p = proj();
+    let src = "local <Unsigned Integer> low = 5;\nlocal high = 6.5;\nlow = high;\n";
+    let got = codes(&p, src);
+    assert!(got.contains(&TypeCode::T030), "expected T030, got {got:?}");
+}
+
+#[test]
+fn t030_no_flag_integer_to_float_local() {
+    // The reverse (integer into a float local) is numerically compatible — silent.
+    let p = proj();
+    let src = "local hi = 6.5;\nlocal <Unsigned Integer> low = 5;\nhi = low;\n";
+    assert!(!codes(&p, src).contains(&TypeCode::T030));
+}
+
+#[test]
+fn t030_message_renders_enum_name_not_internal_id() {
+    // #214: the T030 message must name the enum (`enum \`Switch State\``), not
+    // leak the internal `Enum(0)` id. `SwitchMode.Value` is enum `Switch State`;
+    // assigning a plain Integer is a mismatch.
+    let p = proj();
+    let diags =
+        check_script(&p, Path::new("Foo Update.m1scr"), "SwitchMode.Value = 3;\n").diagnostics;
+    let t030 = diags
+        .iter()
+        .find(|d| d.code == TypeCode::T030)
+        .expect("expected a T030 diagnostic");
+    assert!(
+        t030.inner.message.contains("enum `Switch State`"),
+        "message should name the enum, got: {}",
+        t030.inner.message
+    );
+    assert!(
+        !t030.inner.message.contains("Enum("),
+        "message must not leak the internal id, got: {}",
+        t030.inner.message
+    );
+}
+
+#[test]
+fn t030_resolves_this_qualified_target() {
+    // #211: `This.<X>` anchors to the script's group (`Root.Foo`), so a
+    // `This.`-qualified assignment participates in the type rules exactly like the
+    // bare reference. `This.gain` is the f32 channel `Root.Foo.gain`; assigning an
+    // enum member to it is a T030 mismatch.
+    let p = proj();
+    let bare = codes(&p, "gain = Drive State.Idle;\n");
+    let qualified = codes(&p, "This.gain = Drive State.Idle;\n");
+    assert!(
+        bare.contains(&TypeCode::T030),
+        "bare baseline, got {bare:?}"
+    );
+    assert!(
+        qualified.contains(&TypeCode::T030),
+        "This.-qualified target must resolve and flag, got {qualified:?}"
+    );
+}
+
 // ---- T070 when-is-exhaustive --------------------------------------------
 // `SwitchMode.Value` is enum `Switch State` with members {Off, On}.
 
@@ -381,11 +443,47 @@ fn t082_no_flag_unknown_subject() {
 }
 
 #[test]
-fn t070_no_flag_with_catch_all_arm() {
+fn t070_nonmember_label_on_closed_enum_is_t020_and_does_not_suppress_t070() {
     let p = proj();
-    // An arm naming a non-member label acts as a default/catch-all -> exhaustive.
+    // `SwitchMode.Value` is the CLOSED project enum `Switch State` {Off, On}.
+    // M1's `when…is` has no catch-all syntax, so a non-member is-label is a
+    // typo, not a default: M1 Build rejects it (Error 1352). It must surface as
+    // T020 and must NOT mask the missing `On` enumerator (#212).
     let src = "when (SwitchMode.Value) {\nis (Off) {\n}\nis (Anything) {\n}\n}\n";
-    assert!(!codes(&p, src).contains(&TypeCode::T070));
+    let got = codes(&p, src);
+    assert!(got.contains(&TypeCode::T020), "expected T020, got {got:?}");
+    assert!(got.contains(&TypeCode::T070), "expected T070, got {got:?}");
+}
+
+#[test]
+fn t070_typo_in_or_list_on_closed_enum_does_not_suppress_missing_enumerator() {
+    let p = proj();
+    // `Off or Onn` — `Onn` is a typo of `On`. Before #212 the bad label
+    // disabled both checks; now `Onn` is a T020 and `On` is still reported
+    // missing by T070 (the closed enum `Switch State` is {Off, On}).
+    let src = "when (SwitchMode.Value) {\nis (Off or Onn) {\n}\n}\n";
+    let got = codes(&p, src);
+    assert!(got.contains(&TypeCode::T020), "expected T020, got {got:?}");
+    assert!(got.contains(&TypeCode::T070), "expected T070, got {got:?}");
+}
+
+#[test]
+fn t070_open_firmware_enum_keeps_conservative_catch_all_bail() {
+    // `fwMystery` is typed by an OPEN firmware enum (`Mystery Enumeration`, not in
+    // the builtin catalogue), whose full member list is unknown, so an unlisted
+    // is-label may be a real member we cannot see — keep the conservative bail
+    // (no T020, no T070).
+    let p = proj();
+    let src = "when (fwMystery) {\nis (SomethingFirmware) {\n}\n}\n";
+    let got = codes(&p, src);
+    assert!(
+        !got.contains(&TypeCode::T020),
+        "open enum: no T020, got {got:?}"
+    );
+    assert!(
+        !got.contains(&TypeCode::T070),
+        "open enum: no T070, got {got:?}"
+    );
 }
 
 // NOTE (deviation from plan): the `LHS is (Member)` clause that the plan's

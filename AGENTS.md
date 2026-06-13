@@ -25,10 +25,11 @@ questions belong here and nowhere else.
 - **The M1 Development Manual is the spec.** The manual-conformance rules
   cite manual pages; when behaviour and manual disagree, the manual wins —
   the real corpora follow it.
-- **Some rules are opt-in on purpose.** Naming audits, scheduling audits,
-  tag-parity: real projects legitimately violate them en masse, so default-on
-  would bury every actionable diagnostic. Noise policy is part of a rule's
-  design, not an afterthought.
+- **Some rules are opt-in on purpose.** Naming audits and scheduling audits:
+  real projects legitimately violate them en masse, so default-on would bury
+  every actionable diagnostic. Noise policy is part of a rule's design, not an
+  afterthought. (The tags audit T092 is the deliberate exception — it is
+  **default-on** for M1-Build parity despite its volume; see `audit_tags`.)
 - **Project-wide analyses solve over the files passed in.** Cross-script
   taint (NaN provenance) iterates to a fixpoint over the writer→reader
   channel graph; it can only see edges from scripts it was given. That's why
