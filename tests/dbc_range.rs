@@ -132,3 +132,19 @@ fn ignores_computed_rhs() {
         0
     );
 }
+
+#[test]
+fn flags_hex_literal_wider_than_u128() {
+    // A hex constant with 33 hex digits (> 128 bits) cannot be parsed by either
+    // u64::from_str_radix or u128::from_str_radix. parse_hex falls back to the
+    // digit-by-digit f64 accumulation added in #97. The value is astronomically
+    // larger than the signal's [0, 255] range so T042 must still fire.
+    assert_eq!(
+        t042_count(
+            &project_with_signal(),
+            "Bus.Msg.Sig = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF1;\n"
+        ),
+        1,
+        "hex constant wider than u128 must be caught by the digit accumulation branch"
+    );
+}
