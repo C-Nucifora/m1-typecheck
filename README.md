@@ -28,6 +28,7 @@ m1-typecheck Scripts/*.m1scr                     # project + cfg auto-discovered
 m1-typecheck --audit-names Scripts/*.m1scr       # opt-in project naming audit
 m1-typecheck --format sarif Scripts/*.m1scr      # SARIF for GitHub code scanning
 m1-typecheck --explain Demo.Rate Scripts/*.m1scr # trace a channel's NaN provenance
+m1-typecheck --explain-units Demo.Rate Scripts/*.m1scr # trace a channel's unit provenance
 m1-typecheck --rules                             # the full T-code catalogue
 ```
 
@@ -37,6 +38,12 @@ project gets full type-aware checking with no flags. Pass the whole project's
 scripts in one run — cross-script analyses solve over every file they're
 given. Output formats: human, JSON, SARIF. Exit code is non-zero on any
 error-severity finding, so the CLI is directly usable as a CI gate.
+
+For CI gating, `--strict` fails the run on **any** finding (not just
+error-severity ones), and `-W`/`--no-warnings` drops warning-severity findings
+entirely (so a team can gate on errors while triaging warnings). Per-symbol
+suppression is `--ignore-symbol CODE:Symbol.Path` (overlaying the
+`[diagnostics] ignore_symbols` list from `m1-tools.toml`).
 
 Run `m1-typecheck --rules` for the complete catalogue of checks with
 descriptions, and `--help` for all flags (rule selection, per-symbol ignores,
