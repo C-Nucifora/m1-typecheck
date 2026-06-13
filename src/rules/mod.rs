@@ -46,7 +46,9 @@ impl Registry {
     ///   intentional and accepted — so default-on would diverge from M1 Build.
     ///
     /// T088 (circular dependency = M1 Build 1640), T092 (untagged = M1 Build
-    /// 1142/1549) and T093/T094 (unassigned/unread = M1 Build 1627/1631) are now
+    /// 1142/1549), T093/T094 (unassigned/unread = M1 Build 1627/1631),
+    /// T095 (invalid display unit = M1 Build 1017), T096 (multiple scheduled
+    /// writers = M1 Build 1022), and T097 (user-function call cycle) are now
     /// **default-on**: each mirrors a finding M1 Build itself emits, and the
     /// cross-script checks source the whole project's scripts so they no longer
     /// false-positive under a partial invocation.
