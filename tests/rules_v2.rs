@@ -155,6 +155,21 @@ fn t030_no_flag_integer_to_float_local() {
 }
 
 #[test]
+fn t030_silent_when_local_type_is_unknown() {
+    // A local whose initialiser is an unresolved channel read has Unknown type
+    // (#210). Re-assigning that local from a float literal must NOT fire T030 —
+    // the rule's `!value_ty.is_known()` / `!target_ty.is_known()` guard is
+    // specifically designed to stay silent under Unknown so that incomplete
+    // projects don't produce a flood of spurious mismatches.
+    let p = proj();
+    let src = "local x = Unresolved.Channel;\nx = 1.5;\n";
+    assert!(
+        !codes(&p, src).contains(&TypeCode::T030),
+        "Unknown-typed local must not generate T030 on float assignment"
+    );
+}
+
+#[test]
 fn t030_message_renders_enum_name_not_internal_id() {
     // #214: the T030 message must name the enum (`enum \`Switch State\``), not
     // leak the internal `Enum(0)` id. `SwitchMode.Value` is enum `Switch State`;
