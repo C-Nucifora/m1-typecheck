@@ -9,6 +9,7 @@ pub mod t001_unresolved;
 pub mod t002_float_eq;
 pub mod t003_int_float_mix;
 pub mod t004_signed_unsigned_cmp;
+pub mod t005_modulo_on_float;
 pub mod t020_enum_member;
 pub mod t021_enum_numeric_cmp;
 pub mod t030_assign_mismatch;
@@ -87,6 +88,7 @@ impl Default for Registry {
                 Box::new(t002_float_eq::Rule),
                 Box::new(t003_int_float_mix::Rule),
                 Box::new(t004_signed_unsigned_cmp::Rule),
+                Box::new(t005_modulo_on_float::Rule),
                 Box::new(t020_enum_member::Rule),
                 Box::new(t021_enum_numeric_cmp::Rule),
                 Box::new(t030_assign_mismatch::Rule),
