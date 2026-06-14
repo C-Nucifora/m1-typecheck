@@ -98,6 +98,7 @@ pub fn augment(
             tags: Vec::new(),
             return_type: None,
             table_meta: None,
+            reference_target: None,
         });
     }
     Ok(())

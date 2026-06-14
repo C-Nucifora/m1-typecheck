@@ -161,6 +161,12 @@ pub struct Symbol {
     /// from the `.m1cfg` `<Table>` (the `.m1prj` carries none). `None` for
     /// non-tables and when no `.m1cfg` is loaded. See [`TableMeta`].
     pub table_meta: Option<TableMeta>,
+    /// The raw `Target` attribute of a `BuiltIn.Reference` component's
+    /// `<Props Target="…">`, verbatim (e.g. `"This.Value"`, or a cross-symbol
+    /// path the reference aliases). Captured but **not** resolved or validated
+    /// here — downstream tools document what the reference points at. `None` for
+    /// non-references and for references that declare no `Target`.
+    pub reference_target: Option<String>,
 }
 
 /// Shape of a `BuiltIn.Table`, read from the `.m1cfg` `<Table>` element: its
@@ -407,6 +413,7 @@ mod tests {
             return_type: None,
             in_params: None,
             table_meta: None,
+            reference_target: None,
         }
     }
 
