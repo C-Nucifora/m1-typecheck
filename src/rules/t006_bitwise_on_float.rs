@@ -76,7 +76,7 @@ impl Rule {
             .filter(|c| is_expr(c.kind()))
             .any(|c| type_of(c, scope).is_float());
         if any_float {
-            out.push(make(TypeCode::T006, node, Severity::Warning, MSG.into()));
+            out.push(make(TypeCode::T006, node, Severity::Error, MSG.into()));
         }
     }
 
@@ -93,7 +93,7 @@ impl Rule {
             .filter(|c| is_expr(c.kind()))
             .any(|c| type_of(c, scope).is_float());
         if operand_is_float {
-            out.push(make(TypeCode::T006, node, Severity::Warning, MSG.into()));
+            out.push(make(TypeCode::T006, node, Severity::Error, MSG.into()));
         }
     }
 
@@ -114,7 +114,7 @@ impl Rule {
         .flatten()
         .any(|c| type_of(c, scope).is_float());
         if float_operand {
-            out.push(make(TypeCode::T006, node, Severity::Warning, MSG.into()));
+            out.push(make(TypeCode::T006, node, Severity::Error, MSG.into()));
         }
     }
 }
@@ -175,6 +175,9 @@ mod tests {
         let out = diags("local x = ~f;\n", &[("f", ValueType::Float)]);
         assert_eq!(out.len(), 1, "expected one T006, got {out:?}");
         assert_eq!(out[0].code, TypeCode::T006);
+        // Bitwise ops are integer-only (manual p.37) — an Error, so CI blocks
+        // and editors flag it red, not a silently-passing warning.
+        assert_eq!(out[0].inner.severity, Severity::Error);
     }
 
     #[test]
