@@ -56,7 +56,7 @@ impl Rule {
             .filter(|c| is_expr(c.kind()))
             .any(|c| type_of(c, scope).is_float());
         if any_float {
-            out.push(make(TypeCode::T005, node, Severity::Warning, MSG.into()));
+            out.push(make(TypeCode::T005, node, Severity::Error, MSG.into()));
         }
     }
 
@@ -77,7 +77,7 @@ impl Rule {
         .flatten()
         .any(|c| type_of(c, scope).is_float());
         if float_operand {
-            out.push(make(TypeCode::T005, node, Severity::Warning, MSG.into()));
+            out.push(make(TypeCode::T005, node, Severity::Error, MSG.into()));
         }
     }
 }
@@ -117,6 +117,10 @@ mod tests {
         );
         assert_eq!(out.len(), 1, "expected one T005, got {out:?}");
         assert_eq!(out[0].code, TypeCode::T005);
+        // Float modulo is invalid per the manual (p.35), not a style nit: it is
+        // an Error so it blocks m1-ci (which doesn't fail on warnings by default)
+        // and shows as an error in editors.
+        assert_eq!(out[0].inner.severity, Severity::Error);
     }
 
     #[test]
