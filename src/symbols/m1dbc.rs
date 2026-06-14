@@ -75,30 +75,22 @@ pub fn augment(
         // Message objects, bit layout + scaling on Signal channels.
         let can = props.and_then(|p| can_meta(p, classname));
         let class = (kind == SymbolKind::Object).then(|| classname.to_string());
+        // Only the fields a `.m1dbc` actually sources are spelled here; every
+        // other field (qty/display_unit/security/enum_assoc/call+log rate/tags/
+        // return_type/in_params/table_meta/reference_target) is its inert
+        // `Symbol::default()` — a CAN entry carries none of them.
         table.push(Symbol {
             path: name.to_string(),
             kind,
             value_type,
-            declared_type: None,
             unit,
-            // CAN signals carry no `.m1prj` quantity / display unit.
-            qty: None,
-            display_unit: None,
-            security: None,
             filename: Some(rel_filename.to_string()),
-            enum_assoc: None,
             class,
             classname: Some(classname.to_string()),
             def_line: Some(line_index.line_at(node.range().start) as u32),
-            in_params: None,
             dbc_range,
             can,
-            call_rate_hz: None,
-            log_rate_hz: None,
-            tags: Vec::new(),
-            return_type: None,
-            table_meta: None,
-            reference_target: None,
+            ..Symbol::default()
         });
     }
     Ok(())

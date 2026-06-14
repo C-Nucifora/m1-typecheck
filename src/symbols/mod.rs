@@ -44,7 +44,7 @@ impl std::error::Error for XmlParseError {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SymbolKind {
     Channel,
     Parameter,
@@ -59,10 +59,12 @@ pub enum SymbolKind {
     /// [`Symbol::class`]; its members are the symbols whose path is prefixed by
     /// this object's path (see [`SymbolTable::immediate_children`]).
     Object,
+    /// The catch-all kind; also the inert [`Default`] used by `Symbol::default()`.
+    #[default]
     Other,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Symbol {
     pub path: String,
     pub kind: SymbolKind,
@@ -394,27 +396,41 @@ mod tests {
         Symbol {
             path: path.to_string(),
             kind,
-            value_type: ValueType::Unknown,
-            declared_type: None,
-            unit: None,
-            qty: None,
-            display_unit: None,
-            security: None,
             filename: filename.map(str::to_string),
-            enum_assoc: None,
-            class: None,
-            classname: None,
-            def_line: None,
-            dbc_range: None,
-            can: None,
-            call_rate_hz: None,
-            log_rate_hz: None,
-            tags: Vec::new(),
-            return_type: None,
-            in_params: None,
-            table_meta: None,
-            reference_target: None,
+            ..Symbol::default()
         }
+    }
+
+    // `Symbol::default()` is the inert symbol the builders fill in from: every
+    // value-less field is its empty form, and the value type is the absorbing
+    // `Unknown`. The DBC loader and this test helper rely on `..default()` to
+    // avoid re-spelling the trivial fields, so a new field must not silently
+    // pick up a non-inert default.
+    #[test]
+    fn default_symbol_is_inert() {
+        let s = Symbol::default();
+        assert!(s.path.is_empty());
+        assert_eq!(s.kind, SymbolKind::Other);
+        assert_eq!(s.value_type, ValueType::Unknown);
+        assert_eq!(s.declared_type, None);
+        assert_eq!(s.unit, None);
+        assert_eq!(s.qty, None);
+        assert_eq!(s.display_unit, None);
+        assert_eq!(s.security, None);
+        assert_eq!(s.filename, None);
+        assert_eq!(s.enum_assoc, None);
+        assert_eq!(s.class, None);
+        assert_eq!(s.classname, None);
+        assert_eq!(s.def_line, None);
+        assert_eq!(s.dbc_range, None);
+        assert_eq!(s.can, None);
+        assert_eq!(s.call_rate_hz, None);
+        assert_eq!(s.log_rate_hz, None);
+        assert!(s.tags.is_empty());
+        assert_eq!(s.return_type, None);
+        assert_eq!(s.in_params, None);
+        assert_eq!(s.table_meta, None);
+        assert_eq!(s.reference_target, None);
     }
 
     // `by_filename` resolves a Function/Method symbol by its `Filename=` in O(1),
