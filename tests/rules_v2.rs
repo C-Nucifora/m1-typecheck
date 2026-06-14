@@ -212,6 +212,78 @@ fn t030_resolves_this_qualified_target() {
     );
 }
 
+// ---- T030 compound-assignment type mismatch (#221) ----------------------
+
+#[test]
+fn t030_compound_assign_flags_integer_into_enum_channel() {
+    // `SwitchMode.Value` is enum `Switch State`; `+= 2` is incompatible (#221).
+    let p = proj();
+    let got = codes(&p, "SwitchMode.Value += 2;\n");
+    assert!(
+        got.contains(&TypeCode::T030),
+        "enum target with integer RHS via += must flag T030, got {got:?}"
+    );
+}
+
+#[test]
+fn t030_compound_assign_flags_wrong_enum_into_enum_channel() {
+    // Compound assignment with a mismatched enum member on an enum target.
+    let p = proj();
+    let got = codes(&p, "SwitchMode.Value += Drive State.Idle;\n");
+    assert!(
+        got.contains(&TypeCode::T030),
+        "enum target with wrong-enum RHS via += must flag T030, got {got:?}"
+    );
+}
+
+#[test]
+fn t030_compound_assign_silent_for_unknown_target() {
+    // `driveMode` has no declared type → Unknown → must stay silent per design.
+    let p = proj();
+    let got = codes(&p, "driveMode += 2;\n");
+    assert!(
+        !got.contains(&TypeCode::T030),
+        "Unknown-typed target via += must not generate T030, got {got:?}"
+    );
+}
+
+#[test]
+fn t030_compound_assign_no_double_flag_int_target_float_rhs() {
+    // `intCh += 2.0` is already flagged by T003 (float→integral narrowing);
+    // T030 must NOT also fire to avoid duplicate diagnostics on the same node.
+    // `gain` is a Float channel, so use a typed-integer local to test.
+    let p = proj();
+    // local <Integer> iX; iX += 2.0 → T003 fires, T030 must not.
+    let src = "local <Integer> iX = 1;\niX += 2.0;\n";
+    let got = codes(&p, src);
+    assert!(
+        !got.contains(&TypeCode::T030),
+        "T030 must not double-fire on int-target + float-rhs compound assign (T003 owns this), got {got:?}"
+    );
+}
+
+#[test]
+fn t030_compound_assign_no_flag_float_target_int_rhs() {
+    // `gain` is a Float channel; `+= 2` is integer→float widening — compatible, silent.
+    let p = proj();
+    let got = codes(&p, "gain += 2;\n");
+    assert!(
+        !got.contains(&TypeCode::T030),
+        "float target with integer RHS via += is widening — must not flag T030, got {got:?}"
+    );
+}
+
+#[test]
+fn t030_compound_assign_no_flag_same_enum() {
+    // Same-enum compound assign is compatible (odd but not a type mismatch).
+    let p = proj();
+    let got = codes(&p, "SwitchMode.Value += Switch State.On;\n");
+    assert!(
+        !got.contains(&TypeCode::T030),
+        "same-enum compound assign must not flag T030, got {got:?}"
+    );
+}
+
 // ---- T070 when-is-exhaustive --------------------------------------------
 // `SwitchMode.Value` is enum `Switch State` with members {Off, On}.
 
