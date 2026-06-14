@@ -542,3 +542,97 @@ fn t096_ignore_suppresses_the_code() {
         "suppressed T096 must not fail:\n{s}"
     );
 }
+
+// ---- T050 --audit-names disposition under --strict / --no-warnings ----------
+
+// A project with a lowercase group leaf (`Root.foo`), so the naming audit (T050,
+// Warning) fires under --audit-names. Names beginning lowercase violate the
+// manual's "Naming Objects" convention.
+const PROJECT_T050: &str = r#"<?xml version="1.0"?>
+<MoTeCM1BuildSession>
+ <Project Name="T050Demo" TargetHardware="ecu120">
+  <ComponentStream>
+   <List>
+    <Component Classname="BuiltIn.GroupCompound" Name="Root.foo"/>
+    <Component Classname="BuiltIn.FuncUser" Filename="foo.Update.m1scr" Name="Root.foo.Update"/>
+   </List>
+  </ComponentStream>
+ </Project>
+</MoTeCM1BuildSession>
+"#;
+
+fn setup_t050(name: &str) -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("Project.m1prj"), PROJECT_T050).unwrap();
+    let script = dir.join("foo.Update.m1scr");
+    fs::write(&script, "").unwrap();
+    script
+}
+
+fn run_t050(name: &str, extra: &[&str]) -> Output {
+    let script = setup_t050(name);
+    let prj = script.parent().unwrap().join("Project.m1prj");
+    let mut args = vec![
+        "--project".to_string(),
+        prj.to_str().unwrap().to_string(),
+        "--audit-names".to_string(),
+        "--select".to_string(),
+        "T050".to_string(),
+    ];
+    for a in extra {
+        args.push(a.to_string());
+    }
+    args.push(script.to_str().unwrap().to_string());
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    run(&refs)
+}
+
+#[test]
+fn audit_names_t050_warning_fires_by_default() {
+    // Baseline: --audit-names surfaces the lowercase-name T050 warning, and a
+    // warning alone exits 0 (no --strict).
+    let o = run_t050("t050_default", &[]);
+    let s = out_of(&o);
+    assert!(s.contains("warning[T050]"), "expected T050 warning:\n{s}");
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "a warning alone must not fail by default:\n{s}"
+    );
+}
+
+#[test]
+fn audit_names_t050_warning_fails_under_strict() {
+    // #199 disposition parity: every other project-level diagnostic fails the run
+    // under --strict; the --audit-names T050 path must too.
+    let o = run_t050("t050_strict", &["--strict"]);
+    let s = out_of(&o);
+    assert!(
+        s.contains("warning[T050]"),
+        "the warning is still reported under --strict:\n{s}"
+    );
+    assert_eq!(
+        o.status.code(),
+        Some(1),
+        "--strict must fail on a T050 warning, like every other project diagnostic:\n{s}"
+    );
+}
+
+#[test]
+fn audit_names_t050_warning_dropped_under_no_warnings() {
+    // #199 disposition parity: --no-warnings drops the T050 warning from output
+    // and the exit status, like every other project-level diagnostic.
+    let o = run_t050("t050_nowarn", &["--no-warnings"]);
+    let s = out_of(&o);
+    assert!(
+        !s.contains("T050"),
+        "--no-warnings must suppress the T050 warning:\n{s}"
+    );
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "a dropped warning must not fail the run:\n{s}"
+    );
+}
