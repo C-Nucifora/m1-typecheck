@@ -170,6 +170,9 @@ struct ComponentProps {
     return_type: Option<ValueType>,
     /// Declared parameters from `<Signature><Params>` (#110).
     in_params: Option<Vec<(String, ValueType)>>,
+    /// Raw `<Props Target="…">` of a `BuiltIn.Reference` component, verbatim;
+    /// `None` for non-references or references without a `Target`.
+    reference_target: Option<String>,
 }
 
 /// Extract the derived fields for one component from its node, `<Props>`, the
@@ -312,6 +315,18 @@ fn component_props(
             })
             .unwrap_or_default()
     });
+    // Reference target (m1-doc#29 cross-references): a `BuiltIn.Reference`
+    // aliases the symbol/path named by its `<Props Target="…">`. Captured raw
+    // and verbatim for the reference kind only — never resolved or validated
+    // here; downstream tools document what it points at. `None` for other kinds
+    // and for references that declare no `Target`.
+    let reference_target = if kind == SymbolKind::Reference {
+        props
+            .and_then(|p| p.attribute("Target"))
+            .map(str::to_string)
+    } else {
+        None
+    };
     ComponentProps {
         value_type,
         enum_assoc,
@@ -325,6 +340,7 @@ fn component_props(
         class,
         return_type,
         in_params,
+        reference_target,
         // A Table's shape is encoded in the .m1prj `<Axis>` children
         // (`<X MaxSites/>`, `<Y …/>`, `<Z …/>`); surface it so hover
         // shows the shape even before a `.m1cfg` exists. When a cfg is
@@ -393,6 +409,7 @@ pub(super) fn symbol_from_component(
         return_type: props.return_type,
         in_params: props.in_params,
         table_meta: props.table_meta,
+        reference_target: props.reference_target,
     })
 }
 

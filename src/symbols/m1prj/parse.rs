@@ -568,4 +568,42 @@ mod tests {
             "`… Mode` is not a physical quantity — stays Unknown (no false Float)"
         );
     }
+
+    #[test]
+    fn reference_captures_target_verbatim_else_none() {
+        // A `BuiltIn.Reference` aliases the path in its `<Props Target="…">`;
+        // capture it verbatim (m1-doc#29 cross-references) — no resolution.
+        let xml = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.Reference" Name="Root.X.Ref"><Props Target="This.Value"/></Component>
+  <Component Classname="BuiltIn.Reference" Name="Root.X.NoTarget"><Props/></Component>
+  <Component Classname="BuiltIn.Reference" Name="Root.X.NoProps"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.X.Chan"><Props Type="u32" Target="This.Value"/></Component>
+</Project>"#;
+        let parsed = parse(xml).unwrap();
+        // A reference with a Target captures it verbatim.
+        assert_eq!(
+            parsed.table.get("Root.X.Ref").unwrap().reference_target,
+            Some("This.Value".to_string())
+        );
+        // A reference whose `<Props>` declares no Target -> None.
+        assert_eq!(
+            parsed
+                .table
+                .get("Root.X.NoTarget")
+                .unwrap()
+                .reference_target,
+            None
+        );
+        // A reference with no `<Props>` at all -> None.
+        assert_eq!(
+            parsed.table.get("Root.X.NoProps").unwrap().reference_target,
+            None
+        );
+        // A non-reference component never captures a Target, even if present.
+        assert_eq!(
+            parsed.table.get("Root.X.Chan").unwrap().reference_target,
+            None
+        );
+    }
 }
