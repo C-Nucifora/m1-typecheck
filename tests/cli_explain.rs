@@ -131,6 +131,56 @@ fn explain_unknown_channel_exits_2() {
     );
 }
 
+// #223: `--explain-units` chained `once(*c)` in front of `descendants()`, which
+// already yields the node itself — so every contributing symbol was printed
+// twice. Each contributor must appear exactly once.
+#[test]
+fn explain_units_lists_each_contributor_once() {
+    const UNITS_PROJECT: &str = r#"<?xml version="1.0"?>
+<MoTeCM1BuildSession><Project Name="D" TargetHardware="ecu120"><ComponentStream><List>
+<Component Classname="BuiltIn.GroupCompound" Name="Root.Sensor"/>
+<Component Classname="BuiltIn.Channel" Name="Root.Sensor.Speed"><Props Type="f32" Qty="m/s"/></Component>
+<Component Classname="BuiltIn.Channel" Name="Root.Sensor.Pressure"><Props Type="f32" Qty="Pa"/></Component>
+</List></ComponentStream></Project></MoTeCM1BuildSession>"#;
+
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("explain_units_dup");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let prj = dir.join("Project.m1prj");
+    fs::write(&prj, UNITS_PROJECT).unwrap();
+    let s = dir.join("S.m1scr");
+    fs::write(&s, "Root.Sensor.Speed = Root.Sensor.Pressure;\n").unwrap();
+
+    let o = run(&[
+        "--project",
+        prj.to_str().unwrap(),
+        "--explain-units",
+        "Root.Sensor.Speed",
+        s.to_str().unwrap(),
+    ]);
+    assert!(o.status.success(), "explain-units exits 0: {}", err_of(&o));
+    let out = out_of(&o);
+
+    // The contributing-symbol lines (the `  <- …` provenance entries) must be
+    // unique — the bug duplicated each one.
+    let prov: Vec<&str> = out
+        .lines()
+        .filter(|l| l.trim_start().starts_with("<-"))
+        .collect();
+    let mut unique = prov.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(
+        prov.len(),
+        unique.len(),
+        "provenance lines must not be duplicated; got:\n{out}"
+    );
+    assert!(
+        prov.iter().any(|l| l.contains("Root.Sensor.Pressure (Pa)")),
+        "the read symbol should be listed once; got:\n{out}"
+    );
+}
+
 #[test]
 fn explain_json_emits_the_chain() {
     let (prj, w, r) = setup("xs_json", WRITER);

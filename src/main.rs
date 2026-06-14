@@ -72,8 +72,9 @@ struct Args {
     #[arg(long)]
     rules: bool,
     /// Explain a channel's physical quantity: its declared base unit and the
-    /// unit of every symbol directly assigned into it across the given
-    /// scripts, then exit (#144's units sibling of --explain).
+    /// unit of every symbol directly assigned into it across the project's
+    /// scripts (the whole auto-discovered set, like --explain — the positional
+    /// FILES do not narrow it), then exit (#144's units sibling of --explain).
     #[arg(long, value_name = "CHANNEL")]
     explain_units: Option<String>,
     /// Explain a channel's project-wide invalid-value (NaN/Inf) status: print
@@ -499,6 +500,11 @@ fn explain_units(
         Some(u) => println!("{canonical}: base unit {u}"),
         None => println!("{canonical}: unitless (no Qty declared)"),
     }
+    // Each contributing symbol is listed once. A dotted path's CST yields both
+    // the full `MemberExpression` and its inner segments (a bare property like
+    // `Sensor` resolves group-relative to the same symbol), so resolving every
+    // descendant node would emit a contributor more than once (#223).
+    let mut seen = std::collections::HashSet::new();
     for script in scripts {
         let file = &script.name;
         let cst = &script.cst;
@@ -531,7 +537,11 @@ fn explain_units(
             }
             // List every symbol read on the value side with its unit.
             for c in kids.iter().filter(|c| !std::ptr::eq(*c, target)) {
-                for d in std::iter::once(*c).chain(c.descendants()) {
+                // `descendants()` is pre-order and already yields `c` itself,
+                // so iterate it alone (chaining `once(*c)` in front double-
+                // counted `c`); `seen` collapses the remaining segment-level
+                // duplicates (#223).
+                for d in c.descendants() {
                     if !matches!(
                         d.kind(),
                         m1_core::Kind::Identifier | m1_core::Kind::MemberExpression
@@ -541,13 +551,16 @@ fn explain_units(
                     if let m1_typecheck::resolve::Resolution::Symbol(s) =
                         m1_typecheck::resolve::resolve(&m1_typecheck::typer::path_text(d), &scope)
                     {
-                        println!(
+                        let line = format!(
                             "  <- {} ({}) in {} line {}",
                             s.path,
                             s.unit.as_deref().unwrap_or("unitless"),
                             file,
                             n.range().start.line + 1
                         );
+                        if seen.insert(line.clone()) {
+                            println!("{line}");
+                        }
                     }
                 }
             }
