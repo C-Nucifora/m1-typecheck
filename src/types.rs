@@ -2,7 +2,7 @@
 
 pub type EnumId = usize;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ValueType {
     Boolean,
     Integer,
@@ -10,6 +10,9 @@ pub enum ValueType {
     Float,
     Enum(EnumId),
     String,
+    /// The absorbing, silent type: a rule fires only when every type it needs
+    /// is *known*, so `Unknown` is the natural identity (and the `Default`).
+    #[default]
     Unknown,
 }
 
@@ -91,6 +94,14 @@ pub fn primitive_type(t: &str) -> Option<ValueType> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_is_unknown() {
+        // `Unknown` is the absorbing identity used throughout the symbol
+        // builders; it is the natural `Default` so `Symbol::default()` lands
+        // a value-less symbol on the silent path.
+        assert_eq!(ValueType::default(), ValueType::Unknown);
+    }
 
     #[test]
     fn number_literals() {
