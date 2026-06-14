@@ -105,6 +105,53 @@ fn finding_disposition(args: &Args, severity: Severity) -> (bool, bool) {
     (drop, fails)
 }
 
+/// Emit a batch of project-level (zero-range) diagnostics through the one shared
+/// disposition path: `allows_subject` filtering, `finding_disposition`
+/// (`--strict`/`--no-warnings`), then either buffering into `json_buf.project`
+/// or human-printing under the project-path label. Returns whether any kept
+/// finding should fail the run. Owns the diagnostics so the JSON path moves them
+/// straight in (no clone). Every project-level report site routes through here so
+/// the disposition stays uniform — previously the `--audit-names` (T050) block
+/// had a hand-edited copy that bypassed `finding_disposition`, so T050 warnings
+/// neither failed under `--strict` nor dropped under `--no-warnings`.
+fn emit_project_diags(
+    args: &Args,
+    diags: impl IntoIterator<Item = TypeDiagnostic>,
+    filter: &DiagFilter,
+    project_path: Option<&Path>,
+    json: bool,
+    json_buf: &mut JsonBuf,
+) -> bool {
+    let mut had_error = false;
+    let path_label = || {
+        project_path
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<project>".into())
+    };
+    for d in diags {
+        if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
+            continue;
+        }
+        let (drop, fails) = finding_disposition(args, d.inner.severity);
+        if drop {
+            continue;
+        }
+        had_error |= fails;
+        if json {
+            json_buf.project.push(d);
+        } else {
+            println!(
+                "{}: {}[{}]: {}",
+                path_label(),
+                severity_str(d.inner.severity),
+                d.code.as_str(),
+                d.inner.message
+            );
+        }
+    }
+    had_error
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 enum Format {
     Human,
@@ -339,65 +386,28 @@ fn audit_project(
     json_buf: &mut JsonBuf,
 ) -> bool {
     let mut had_error = false;
-    let path_label = || {
-        project_path
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "<project>".into())
-    };
+    let path = project_path.map(PathBuf::as_path);
 
     // Project-level audit: parameters declared in the .m1prj but missing from the
     // loaded .m1cfg (T041). Emitted on every run that has a project + cfg so CI
     // validates calibration coverage. Hint severity (#156) — riding the default
     // is normal M1 behaviour, so it informs without drowning real findings.
     if let Some(p) = project {
-        for d in p.missing_cfg_parameters() {
-            if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
-                continue;
-            }
-            let (drop, fails) = finding_disposition(args, d.inner.severity);
-            if drop {
-                continue;
-            }
-            had_error |= fails;
-            if json {
-                json_buf.project.push(d);
-            } else {
-                println!(
-                    "{}: {}[{}]: {}",
-                    path_label(),
-                    severity_str(d.inner.severity),
-                    d.code.as_str(),
-                    d.inner.message
-                );
-            }
-        }
+        had_error |= emit_project_diags(
+            args,
+            p.missing_cfg_parameters(),
+            filter,
+            path,
+            json,
+            json_buf,
+        );
     }
 
     // Tags audit (T092, default-on): M1 Build tag-warning parity (Warning 1142/
     // 1549). Runs whenever a project is loaded; `allows_subject` still honours
     // `--select`/`--ignore`. Mirrors M1 Build, which emits these warnings itself.
     if let Some(p) = project {
-        for d in p.audit_tags() {
-            if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
-                continue;
-            }
-            let (drop, fails) = finding_disposition(args, d.inner.severity);
-            if drop {
-                continue;
-            }
-            had_error |= fails;
-            if json {
-                json_buf.project.push(d);
-            } else {
-                println!(
-                    "{}: {}[{}]: {}",
-                    path_label(),
-                    severity_str(d.inner.severity),
-                    d.code.as_str(),
-                    d.inner.message
-                );
-            }
-        }
+        had_error |= emit_project_diags(args, p.audit_tags(), filter, path, json, json_buf);
     }
 
     // Display-unit audit (T095, default-on): M1 Build Error 1017 parity ("Invalid
@@ -405,49 +415,17 @@ fn audit_project(
     // object's `Qty`). Runs whenever a project is loaded, like the tags audit;
     // `allows_subject` honours `--select`/`--ignore`.
     if let Some(p) = project {
-        for d in p.audit_display_units() {
-            if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
-                continue;
-            }
-            let (drop, fails) = finding_disposition(args, d.inner.severity);
-            if drop {
-                continue;
-            }
-            had_error |= fails;
-            if json {
-                json_buf.project.push(d);
-            } else {
-                println!(
-                    "{}: {}[{}]: {}",
-                    path_label(),
-                    severity_str(d.inner.severity),
-                    d.code.as_str(),
-                    d.inner.message
-                );
-            }
-        }
+        had_error |=
+            emit_project_diags(args, p.audit_display_units(), filter, path, json, json_buf);
     }
 
     if args.audit_names {
         match project {
+            // Routes through the shared `emit_project_diags` like every other
+            // project-level audit, so T050's `--strict`/`--no-warnings`
+            // disposition matches the rest (it used to bypass it).
             Some(p) => {
-                for d in p.audit() {
-                    if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
-                        continue;
-                    }
-                    had_error |= d.inner.severity == Severity::Error;
-                    if json {
-                        json_buf.project.push(d);
-                    } else {
-                        println!(
-                            "{}: {}[{}]: {}",
-                            path_label(),
-                            severity_str(d.inner.severity),
-                            d.code.as_str(),
-                            d.inner.message
-                        );
-                    }
-                }
+                had_error |= emit_project_diags(args, p.audit(), filter, path, json, json_buf)
             }
             None => eprintln!("m1-typecheck: --audit-names needs a project; skipping"),
         }
@@ -790,30 +768,14 @@ fn main() {
             )
         })
         .unwrap_or_default();
-    for d in &schedule_diags {
-        if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
-            continue;
-        }
-        let (drop, fails) = finding_disposition(&args, d.inner.severity);
-        if drop {
-            continue;
-        }
-        project_had_error |= fails;
-        if json {
-            json_buf.project.push(d.clone());
-        } else {
-            let label = project_path
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "<project>".into());
-            println!(
-                "{label}: {}[{}]: {}",
-                severity_str(d.inner.severity),
-                d.code.as_str(),
-                d.inner.message
-            );
-        }
-    }
+    project_had_error |= emit_project_diags(
+        &args,
+        schedule_diags,
+        &filter,
+        project_path.as_deref(),
+        json,
+        &mut json_buf,
+    );
 
     // Usage audit (default-on): channels never assigned (T093) / parameters never
     // read (T094) by any script — M1 Build Errors 1627/1631. Run over the COMPLETE
@@ -833,30 +795,14 @@ fn main() {
             v
         })
         .unwrap_or_default();
-    for d in &usage_diags {
-        if !filter.allows_subject(d.code.as_str(), d.subject.as_deref()) {
-            continue;
-        }
-        let (drop, fails) = finding_disposition(&args, d.inner.severity);
-        if drop {
-            continue;
-        }
-        project_had_error |= fails;
-        if json {
-            json_buf.project.push(d.clone());
-        } else {
-            let label = project_path
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "<project>".into());
-            println!(
-                "{label}: {}[{}]: {}",
-                severity_str(d.inner.severity),
-                d.code.as_str(),
-                d.inner.message
-            );
-        }
-    }
+    project_had_error |= emit_project_diags(
+        &args,
+        usage_diags,
+        &filter,
+        project_path.as_deref(),
+        json,
+        &mut json_buf,
+    );
 
     // Per-file checks, then the once-per-run project-level audits.
     let had_error = check_files(
