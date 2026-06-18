@@ -43,6 +43,10 @@ pub enum TypeCode {
     T095, // invalid-display-unit (M1 Build Error 1017: display unit not valid for the quantity)
     T096, // multiple-scheduled-writers (M1 Build Error 1022: channel assigned by >1 periodically scheduled function)
     T097, // recursive-call (cycle in the user-function call graph, incl. a function calling itself)
+    T098, // unused-argument (M1 Build Error 1355: a declared `<Param>` never read via `In.<name>`)
+    T099, // return-value-not-assigned (M1 Build Error 1353: `<Signature ReturnType>` set but no `Out =`)
+    T100, // bare-parameter-reference (M1 Build Error 1338: a param referenced by bare name, not `In.<name>`)
+    T101, // return-statement (M1 Build Error 1338: a C-style `return <expr>`; M1 has no `return` keyword)
 }
 
 impl TypeCode {
@@ -88,6 +92,10 @@ impl TypeCode {
             TypeCode::T095 => "T095",
             TypeCode::T096 => "T096",
             TypeCode::T097 => "T097",
+            TypeCode::T098 => "T098",
+            TypeCode::T099 => "T099",
+            TypeCode::T100 => "T100",
+            TypeCode::T101 => "T101",
         }
     }
 
@@ -137,6 +145,10 @@ impl TypeCode {
             TypeCode::T095 => "invalid-display-unit",
             TypeCode::T096 => "multiple-scheduled-writers",
             TypeCode::T097 => "recursive-call",
+            TypeCode::T098 => "unused-argument",
+            TypeCode::T099 => "return-value-not-assigned",
+            TypeCode::T100 => "bare-parameter-reference",
+            TypeCode::T101 => "return-statement",
         }
     }
 
@@ -149,7 +161,8 @@ impl TypeCode {
         &[
             T001, T002, T003, T004, T005, T006, T010, T020, T021, T030, T031, T040, T041, T042,
             T050, T060, T061, T062, T063, T064, T070, T071, T080, T081, T082, T083, T084, T085,
-            T086, T087, T088, T089, T090, T091, T092, T093, T094, T095, T096, T097,
+            T086, T087, T088, T089, T090, T091, T092, T093, T094, T095, T096, T097, T098, T099,
+            T100, T101,
         ]
     }
 }
@@ -286,6 +299,6 @@ mod tests {
             );
         }
         // Catalogue size tracks the enum (bump both together).
-        assert_eq!(codes.len(), 40);
+        assert_eq!(codes.len(), 44);
     }
 }

@@ -5,6 +5,7 @@ pub mod cross_script;
 pub mod diagnostics;
 pub mod filter;
 pub mod flow;
+pub mod in_out_io;
 pub mod intrinsics;
 pub mod invalid_value;
 pub mod parsed;
