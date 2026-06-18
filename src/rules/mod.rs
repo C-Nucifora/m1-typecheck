@@ -50,10 +50,12 @@ impl Registry {
     /// T088 (circular dependency = M1 Build 1640), T092 (untagged = M1 Build
     /// 1142/1549), T093/T094 (unassigned/unread = M1 Build 1627/1631),
     /// T095 (invalid display unit = M1 Build 1017), T096 (multiple scheduled
-    /// writers = M1 Build 1022), and T097 (user-function call cycle) are now
-    /// **default-on**: each mirrors a finding M1 Build itself emits, and the
-    /// cross-script checks source the whole project's scripts so they no longer
-    /// false-positive under a partial invocation.
+    /// writers = M1 Build 1022), T097 (user-function call cycle), T102
+    /// (cross-function multiple-assignment = M1 Build 1317), T103 (ambiguous
+    /// reference = M1 Build 1339), and T104 (unscheduled function = M1 Build 1642)
+    /// are now **default-on**: each mirrors a finding M1 Build itself emits, and
+    /// the cross-script checks source the whole project's scripts so they no
+    /// longer false-positive under a partial invocation.
     pub fn opt_in_codes() -> &'static [crate::diagnostics::TypeCode] {
         use crate::diagnostics::TypeCode::*;
         &[T064, T089]
@@ -334,6 +336,9 @@ pub fn run_with(
     // M1 In/Out function-I/O parity (#233): runs after the per-node walk so it
     // can supersede the generic T001 a bare-param / `return` token produces.
     crate::in_out_io::check(cst.root(), &scope, &mut diagnostics);
+    // M1 ambiguous-reference parity (#234, T103): a bare name resolving to both a
+    // sibling channel and a same-named enum type (M1 Build Error 1339).
+    crate::ambiguous::check(cst.root(), &scope, &mut diagnostics);
 
     // Parse `@m1:` annotations once and drive both consumers: the invalid-value
     // (NaN/Inf) provenance analysis (T080/T081, #78) reads the finiteness

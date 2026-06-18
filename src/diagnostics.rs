@@ -47,6 +47,9 @@ pub enum TypeCode {
     T099, // return-value-not-assigned (M1 Build Error 1353: `<Signature ReturnType>` set but no `Out =`)
     T100, // bare-parameter-reference (M1 Build Error 1338: a param referenced by bare name, not `In.<name>`)
     T101, // return-statement (M1 Build Error 1338: a C-style `return <expr>`; M1 has no `return` keyword)
+    T102, // channel-multiple-assignment-cross-function (M1 Build Error 1317: a channel reset in a caller and written by a callee on one path)
+    T103, // ambiguous-reference (M1 Build Error 1339: a bare name matching both a sibling channel and an enum type)
+    T104, // unscheduled-function (M1 Build Error 1642: a user function no scheduled function reaches)
 }
 
 impl TypeCode {
@@ -96,6 +99,9 @@ impl TypeCode {
             TypeCode::T099 => "T099",
             TypeCode::T100 => "T100",
             TypeCode::T101 => "T101",
+            TypeCode::T102 => "T102",
+            TypeCode::T103 => "T103",
+            TypeCode::T104 => "T104",
         }
     }
 
@@ -149,6 +155,9 @@ impl TypeCode {
             TypeCode::T099 => "return-value-not-assigned",
             TypeCode::T100 => "bare-parameter-reference",
             TypeCode::T101 => "return-statement",
+            TypeCode::T102 => "channel-multiple-assignment-cross-function",
+            TypeCode::T103 => "ambiguous-reference",
+            TypeCode::T104 => "unscheduled-function",
         }
     }
 
@@ -162,7 +171,7 @@ impl TypeCode {
             T001, T002, T003, T004, T005, T006, T010, T020, T021, T030, T031, T040, T041, T042,
             T050, T060, T061, T062, T063, T064, T070, T071, T080, T081, T082, T083, T084, T085,
             T086, T087, T088, T089, T090, T091, T092, T093, T094, T095, T096, T097, T098, T099,
-            T100, T101,
+            T100, T101, T102, T103, T104,
         ]
     }
 }
@@ -299,6 +308,6 @@ mod tests {
             );
         }
         // Catalogue size tracks the enum (bump both together).
-        assert_eq!(codes.len(), 44);
+        assert_eq!(codes.len(), 47);
     }
 }

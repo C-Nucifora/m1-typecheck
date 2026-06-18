@@ -792,6 +792,19 @@ fn main() {
                 p,
                 &parsed_scripts,
             ));
+            // T102 (default-on): a channel reset in a caller and re-assigned by a
+            // callee on one path — M1 Build Error 1317 (the cross-function gap
+            // T040 misses).
+            v.extend(m1_typecheck::schedule::check_cross_fn_assignment(
+                p,
+                &parsed_scripts,
+            ));
+            // T104 (default-on): a user function no scheduled function reaches —
+            // M1 Build Error 1642.
+            v.extend(m1_typecheck::schedule::check_reachability(
+                p,
+                &parsed_scripts,
+            ));
             v
         })
         .unwrap_or_default();

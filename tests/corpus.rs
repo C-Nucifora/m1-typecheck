@@ -141,6 +141,123 @@ fn in_out_io_checks_are_corpus_clean() {
     eprintln!("in/out parity checks clean over {checked} corpus scripts");
 }
 
+/// #234 corpus safety: the ambiguous-reference parity check (T103) must never
+/// fire on real, M1-Build-valid code. The corpora reference same-named enum
+/// types unambiguously (the channel is never reachable by the bare name), so a
+/// correctly-precise check leaves them clean.
+#[test]
+fn ambiguous_reference_check_is_corpus_clean() {
+    let corpora = all_corpora();
+    if corpora.is_empty() {
+        eprintln!("corpus absent; skipping");
+        return;
+    }
+    use m1_typecheck::diagnostics::TypeCode::T103;
+    let mut checked = 0usize;
+    for (proj_path, dir) in &corpora {
+        let project = Project::load(proj_path).expect("load project");
+        let mut scripts = Vec::new();
+        scripts_under(dir, &mut scripts);
+        for s in &scripts {
+            let src = std::fs::read_to_string(s).expect("read");
+            let hits: Vec<_> = check_script(&project, s, &src)
+                .diagnostics
+                .into_iter()
+                .filter(|d| d.code == T103)
+                .map(|d| format!("{} {}: {}", d.code.as_str(), s.display(), d.inner.message))
+                .collect();
+            assert!(
+                hits.is_empty(),
+                "T103 ambiguous-reference false-positived on the real corpus:\n{}",
+                hits.join("\n")
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "no corpus scripts found");
+    eprintln!("T103 ambiguous-reference clean over {checked} corpus scripts");
+}
+
+/// (project, all parsed scripts) for a corpus — the COMPLETE script set the
+/// cross-script audits require. Mirrors the CLI's whole-project gather.
+fn load_project_and_scripts(
+    proj_path: &Path,
+    dir: &Path,
+) -> (Project, Vec<m1_typecheck::parsed::ParsedScript>) {
+    let project = Project::load(proj_path).expect("load project");
+    let mut paths = Vec::new();
+    scripts_under(dir, &mut paths);
+    let sources: Vec<(String, String)> = paths
+        .iter()
+        .map(|p| {
+            (
+                p.file_name().unwrap().to_string_lossy().into_owned(),
+                std::fs::read_to_string(p).expect("read"),
+            )
+        })
+        .collect();
+    let scripts = m1_typecheck::parsed::parse_all(&sources);
+    (project, scripts)
+}
+
+/// #234 corpus safety: the reachability audit (T104, M1 Build Error 1642) must
+/// leave the real corpora clean — they pass M1 Build, so every user function is
+/// reached from some scheduled function. A hit here means the call-graph /
+/// root-set definition is wrong, not a real orphan.
+#[test]
+fn reachability_check_is_corpus_clean() {
+    let corpora = all_corpora();
+    if corpora.is_empty() {
+        eprintln!("corpus absent; skipping");
+        return;
+    }
+    let mut checked = 0usize;
+    for (proj_path, dir) in &corpora {
+        let (project, scripts) = load_project_and_scripts(proj_path, dir);
+        let hits: Vec<String> = m1_typecheck::schedule::check_reachability(&project, &scripts)
+            .into_iter()
+            .map(|d| format!("{}: {}", proj_path.display(), d.inner.message))
+            .collect();
+        assert!(
+            hits.is_empty(),
+            "T104 reachability false-positived on the real corpus:\n{}",
+            hits.join("\n")
+        );
+        checked += scripts.len();
+    }
+    assert!(checked > 0, "no corpus scripts found");
+    eprintln!("T104 reachability clean over {checked} corpus scripts");
+}
+
+/// #234 corpus safety: the cross-function multiple-assignment audit (T102, M1
+/// Build Error 1317) must leave the real corpora clean — they pass M1 Build, so
+/// no channel is reset in a caller and written by a callee on one path.
+#[test]
+fn cross_fn_multi_assign_check_is_corpus_clean() {
+    let corpora = all_corpora();
+    if corpora.is_empty() {
+        eprintln!("corpus absent; skipping");
+        return;
+    }
+    let mut checked = 0usize;
+    for (proj_path, dir) in &corpora {
+        let (project, scripts) = load_project_and_scripts(proj_path, dir);
+        let hits: Vec<String> =
+            m1_typecheck::schedule::check_cross_fn_assignment(&project, &scripts)
+                .into_iter()
+                .map(|d| format!("{}: {}", proj_path.display(), d.inner.message))
+                .collect();
+        assert!(
+            hits.is_empty(),
+            "T102 cross-function multiple-assignment false-positived on the real corpus:\n{}",
+            hits.join("\n")
+        );
+        checked += scripts.len();
+    }
+    assert!(checked > 0, "no corpus scripts found");
+    eprintln!("T102 cross-fn multiple-assignment clean over {checked} corpus scripts");
+}
+
 #[test]
 fn sbg_gyro_unit_is_the_base_unit_degrees_per_second() {
     // `Root.Vehicle.SBG.IMU.Gyro.Z` is declared `<Props Qty="rad/s">` with a
