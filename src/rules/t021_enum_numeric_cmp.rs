@@ -65,6 +65,33 @@ impl super::Rule for Rule {
                 Severity::Error,
                 "enumerated types support only eq/neq (==/!=), not ordering comparisons (M1 Build Error 1329: incompatible data types for binary operation)".into(),
             ));
+            return;
+        }
+        // Two operands of DIFFERENT enum types (even with eq/neq): M1 Build
+        // rejects comparing distinct enumerated types outright (Error 1329).
+        // Only same-enum comparison is valid — the same `(Enum(a), Enum(b)) =>
+        // a == b` constraint already encoded for assignment (T030) and user
+        // arguments (T085). Stay silent unless BOTH ids are known *and* the
+        // enums are closed (project) types: an open firmware enum's identity is
+        // a placeholder we cannot prove distinct, so comparing against it must
+        // not false-positive (matches the ordering guard's conservatism).
+        if let (ValueType::Enum(a), ValueType::Enum(b)) = (lt, rt)
+            && a != b
+            && let Some(project) = scope.project
+        {
+            let syms = project.symbols();
+            if !syms.enum_is_open(a) && !syms.enum_is_open(b) {
+                let an = syms.enum_type(a).name.clone();
+                let bn = syms.enum_type(b).name.clone();
+                out.push(make(
+                    TypeCode::T021,
+                    node,
+                    Severity::Error,
+                    format!(
+                        "comparing enum `{an}` with enum `{bn}`; only same-enum comparison is valid (M1 Build Error 1329: incompatible data types for binary operation)"
+                    ),
+                ));
+            }
         }
     }
 }

@@ -559,6 +559,64 @@ fn t021_no_flag_enum_ordering_against_unknown() {
     assert!(!codes(&p, "if (SwitchMode.Value > Mystery Channel) {\n}\n").contains(&TypeCode::T021));
 }
 
+// ---- T021 on eq/neq between two DIFFERENT enum types ----------------------
+// M1 Build rejects comparing values of two distinct enumerated types even with
+// `eq`/`neq` (Error 1329, incompatible data types) — only same-enum comparison
+// is valid. `DriveSel.Value` is `Drive State`; `SwitchMode.Value` is
+// `Switch State`, so comparing them is a real logic bug M1 Build would reject.
+
+#[test]
+fn t021_flags_eq_between_two_different_enums() {
+    let p = proj();
+    let got = codes(&p, "if (DriveSel.Value eq SwitchMode.Value) {\n}\n");
+    assert!(
+        got.contains(&TypeCode::T021),
+        "comparing two different enum types must be flagged: {got:?}"
+    );
+}
+
+#[test]
+fn t021_flags_neq_between_two_different_enums() {
+    let p = proj();
+    assert!(
+        codes(&p, "if (DriveSel.Value neq SwitchMode.Value) {\n}\n").contains(&TypeCode::T021),
+        "neq across two enum types must be flagged"
+    );
+}
+
+#[test]
+fn t021_flags_eqeq_between_two_different_enums() {
+    let p = proj();
+    assert!(
+        codes(&p, "if (DriveSel.Value == SwitchMode.Value) {\n}\n").contains(&TypeCode::T021),
+        "== across two enum types must be flagged"
+    );
+}
+
+#[test]
+fn t021_no_flag_eq_between_same_enum_channels() {
+    let p = proj();
+    // Both sides are the same `Switch State` enum: a valid comparison, no T021.
+    assert!(
+        !codes(&p, "if (SwitchMode.Value eq Switch State.Off) {\n}\n").contains(&TypeCode::T021),
+        "same-enum eq must stay valid"
+    );
+}
+
+#[test]
+fn t021_no_flag_cross_enum_against_open_firmware_enum() {
+    let p = proj();
+    // `fwMystery` is an open firmware enum (`Mystery Enumeration`) whose id we
+    // cannot match against a project enum: comparing it to a project enum must
+    // NOT fire (conservatism — we only flag when BOTH enum ids are known,
+    // closed, and differ). NOTE: `fwMode` (`Mode Enumeration`) is a *documented*
+    // builtin and therefore closed, so it would legitimately flag.
+    assert!(
+        !codes(&p, "if (DriveSel.Value eq fwMystery) {\n}\n").contains(&TypeCode::T021),
+        "cross-enum must stay silent when one side is an open firmware enum"
+    );
+}
+
 #[test]
 fn t082_no_flag_enum_subject() {
     let p = proj();
