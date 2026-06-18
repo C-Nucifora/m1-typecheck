@@ -1,4 +1,5 @@
 //! m1-typecheck: symbol model + name resolution + basic type checking for .m1scr.
+pub mod ambiguous;
 pub mod audit;
 pub mod classname;
 pub mod cross_script;

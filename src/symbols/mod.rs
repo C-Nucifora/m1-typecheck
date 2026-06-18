@@ -131,6 +131,14 @@ pub struct Symbol {
     /// startup-only functions (`On Startup`), and triggers that are parameter
     /// references (`$(…)`) the model can't resolve statically. Surfaced in hover.
     pub call_rate_hz: Option<f64>,
+    /// True when this function/method is bound to a schedule event — i.e. its
+    /// `.m1prj` `<Props>` declares a non-empty `SelectedTrigger` (a clock like
+    /// `On 100Hz`, `On Startup`, or a `$(…)` parameter-reference trigger). Unlike
+    /// [`Symbol::call_rate_hz`] — which is `None` for `On Startup`/`$(…)` triggers
+    /// — this stays `true` for *every* triggered function, so it is the entry-point
+    /// (root) predicate for the call-graph reachability check (T104 / M1 Build
+    /// Error 1642). `false` for untriggered helper functions and non-functions.
+    pub scheduled: bool,
     /// Default logging rate (Hz) of a channel, derived from its `.m1prj`
     /// `<Props DefaultLogRate="…">` — a period string like `"5MS"` (5 ms → 200 Hz)
     /// or `"10MS"` (100 Hz). `None` for symbols with no `DefaultLogRate` (the
@@ -425,6 +433,7 @@ mod tests {
         assert_eq!(s.dbc_range, None);
         assert_eq!(s.can, None);
         assert_eq!(s.call_rate_hz, None);
+        assert!(!s.scheduled);
         assert_eq!(s.log_rate_hz, None);
         assert!(s.tags.is_empty());
         assert_eq!(s.return_type, None);

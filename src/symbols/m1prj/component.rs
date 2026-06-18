@@ -162,6 +162,10 @@ struct ComponentProps {
     display_unit: Option<String>,
     security: Option<String>,
     call_rate_hz: Option<f64>,
+    /// True when `<Props SelectedTrigger="…">` is present and non-empty — the
+    /// function is bound to a schedule event (any clock, `On Startup`, or a
+    /// `$(…)` trigger). Broader than `call_rate_hz`; powers the T104 root set.
+    scheduled: bool,
     log_rate_hz: Option<f64>,
     class: Option<String>,
     table_meta: Option<TableMeta>,
@@ -279,6 +283,12 @@ fn component_props(
     let call_rate_hz = props
         .and_then(|p| p.attribute("SelectedTrigger"))
         .and_then(event_rate_hz);
+    // Bound to *any* schedule event (clock, `On Startup`, or a `$(…)` trigger),
+    // regardless of whether the rate is statically resolvable — the entry-point
+    // predicate for the T104 reachability check (M1 Build Error 1642).
+    let scheduled = props
+        .and_then(|p| p.attribute("SelectedTrigger"))
+        .is_some_and(|t| !t.trim().is_empty());
     // Default log rate (#171): `<Props DefaultLogRate="5MS">` — a
     // logging *period*, surfaced as a rate in Hz for hover.
     let log_rate_hz = props
@@ -336,6 +346,7 @@ fn component_props(
         display_unit,
         security,
         call_rate_hz,
+        scheduled,
         log_rate_hz,
         class,
         return_type,
@@ -404,6 +415,7 @@ pub(super) fn symbol_from_component(
         dbc_range: None,
         can: None,
         call_rate_hz: props.call_rate_hz,
+        scheduled: props.scheduled,
         log_rate_hz: props.log_rate_hz,
         tags: props.tags,
         return_type: props.return_type,

@@ -544,6 +544,510 @@ pub fn check_multi_writers(
     out
 }
 
+/// One analysable user function: its symbol path, body root, and resolution
+/// scope — the inputs the flow analysis (T102) needs per function.
+struct FnCtx<'a> {
+    fn_path: String,
+    root: Node<'a>,
+    scope: Scope<'a>,
+}
+
+/// Build the [`FnCtx`] for every script that backs a user function and parses
+/// cleanly (the same gate `script_io` applies). Keyed lookups go through the
+/// returned `index` (fn_path -> position).
+fn fn_contexts<'a>(
+    project: &'a Project,
+    scripts: &'a [crate::parsed::ParsedScript],
+) -> (Vec<FnCtx<'a>>, BTreeMap<String, usize>) {
+    let mut ctxs = Vec::new();
+    for s in scripts {
+        let Some(fn_path) = project.function_symbol_for_script(&s.name) else {
+            continue;
+        };
+        let cst = &s.cst;
+        if !cst.syntax_diagnostics().is_empty()
+            || cst.root().max_depth() > m1_core::MAX_RECURSION_DEPTH
+        {
+            continue;
+        }
+        let group = project.group_for_script(&s.name);
+        let scope = Scope {
+            locals: crate::rules::collect_locals(cst.root(), Some(project), group.as_deref()),
+            group,
+            project: Some(project),
+            fn_symbol: Some(fn_path.clone()),
+        };
+        ctxs.push(FnCtx {
+            fn_path,
+            root: cst.root(),
+            scope,
+        });
+    }
+    let index = ctxs
+        .iter()
+        .enumerate()
+        .map(|(i, c)| (c.fn_path.clone(), i))
+        .collect();
+    (ctxs, index)
+}
+
+/// Memoised, transitively-inlined channel-assignment counts for `fn_path`:
+/// `channel_counts` of its body with each user-function call expanded to the
+/// callee's own inlined counts. A call back into a function still on the stack
+/// (a cycle — separately flagged by T097) contributes nothing, terminating the
+/// recursion with a safe under-approximation.
+fn inlined_counts(
+    fn_path: &str,
+    ctxs: &[FnCtx],
+    index: &BTreeMap<String, usize>,
+    memo: &mut std::collections::HashMap<String, crate::flow::ChannelCounts>,
+    visiting: &mut std::collections::HashSet<String>,
+) -> crate::flow::ChannelCounts {
+    if let Some(c) = memo.get(fn_path) {
+        return c.clone();
+    }
+    let Some(&i) = index.get(fn_path) else {
+        return crate::flow::ChannelCounts::new();
+    };
+    if !visiting.insert(fn_path.to_string()) {
+        return crate::flow::ChannelCounts::new(); // cycle back-edge
+    }
+    // Compute every callee's inlined counts first, so the expander below only
+    // reads the (now-complete) memo.
+    for callee in crate::flow::user_callees(ctxs[i].root, &ctxs[i].scope) {
+        if !memo.contains_key(&callee) {
+            let c = inlined_counts(&callee, ctxs, index, memo, visiting);
+            memo.insert(callee, c);
+        }
+    }
+    let counts = {
+        let expand = |callee: &str| memo.get(callee).cloned();
+        crate::flow::channel_counts(ctxs[i].root, &ctxs[i].scope, &expand)
+    };
+    visiting.remove(fn_path);
+    memo.insert(fn_path.to_string(), counts.clone());
+    counts
+}
+
+/// Cross-function single-assignment audit (default-on, T102): a channel assigned
+/// more than once on one execution path *across function-call edges* — M1 Build
+/// Error 1317 "Channel … assigned more than once in the same code path", which
+/// fails the build. The intra-procedural complement is T040 (a single function
+/// body assigning a channel twice on one path); this catches the split T040
+/// misses — a scheduled function resetting a channel then calling helpers that
+/// re-assign it on a branch.
+///
+/// Precision (the corpora pass M1 Build, so this must leave them clean):
+/// a channel is flagged at a scheduled root only when (1) its inlined count
+/// (caller body + every transitively-called helper, composed with the same
+/// mutual-exclusion rules as T040) reaches 2 on a path, (2) **no single
+/// function** already assigns it twice alone (that is T040's job — never
+/// double-reported), and (3) the writes come from **two or more distinct
+/// functions** (the genuine cross-function split the issue targets, never a lone
+/// helper). Roots are scheduled user functions (runtime entry points); `.Set()`
+/// and compound `+=` writes are excluded exactly as in T040.
+pub fn check_cross_fn_assignment(
+    project: &Project,
+    scripts: &[crate::parsed::ParsedScript],
+) -> Vec<TypeDiagnostic> {
+    let (ctxs, index) = fn_contexts(project, scripts);
+    let table = project.symbols();
+
+    // Per-function self counts (no call inlining) — T040's view, used to exclude
+    // single-function doublings and to identify which functions write a channel.
+    let no_calls = |_: &str| None;
+    let self_counts: Vec<crate::flow::ChannelCounts> = ctxs
+        .iter()
+        .map(|c| crate::flow::channel_counts(c.root, &c.scope, &no_calls))
+        .collect();
+
+    // Per-function inlined counts (memoised across the whole call graph).
+    let mut memo: std::collections::HashMap<String, crate::flow::ChannelCounts> =
+        std::collections::HashMap::new();
+    let mut visiting: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for c in &ctxs {
+        let counts = inlined_counts(&c.fn_path, &ctxs, &index, &mut memo, &mut visiting);
+        memo.insert(c.fn_path.clone(), counts);
+    }
+
+    let mut out = Vec::new();
+    let mut reported: BTreeSet<String> = BTreeSet::new();
+    for root in ctxs.iter().filter(|c| {
+        table
+            .get(&c.fn_path)
+            .is_some_and(|s| s.scheduled && is_user_function(s.classname.as_deref()))
+    }) {
+        let inlined = match memo.get(&root.fn_path) {
+            Some(c) => c,
+            None => continue,
+        };
+        // The call-closure of this root (itself + everything it transitively
+        // calls), for attributing writers.
+        let closure = call_closure(&root.fn_path, &ctxs, &index);
+        for (chan, &cnt) in inlined {
+            if cnt < 2 || reported.contains(chan) {
+                continue;
+            }
+            // Functions in the closure that write `chan` at all, and the most any
+            // single one writes it on one path.
+            let mut writers: Vec<&str> = Vec::new();
+            let mut max_self = 0u32;
+            for fp in &closure {
+                if let Some(&i) = index.get(fp) {
+                    let n = self_counts[i].get(chan).copied().unwrap_or(0);
+                    if n >= 1 {
+                        writers.push(fp.as_str());
+                    }
+                    max_self = max_self.max(n);
+                }
+            }
+            // (2) not a single-function T040; (3) genuinely split across funcs.
+            if max_self >= 2 || writers.len() < 2 {
+                continue;
+            }
+            writers.sort_unstable();
+            let list = writers
+                .iter()
+                .map(|f| format!("`{f}`"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            reported.insert(chan.clone());
+            out.push(make_project_for(
+                TypeCode::T102,
+                Severity::Error,
+                format!(
+                    "channel `{chan}` is assigned more than once on a single code path across \
+                     function calls reached from scheduled function `{}` (assigned by: {list}) — \
+                     accumulate in a local and assign the channel once (M1 Build Error 1317)",
+                    root.fn_path
+                ),
+                chan.clone(),
+            ));
+        }
+    }
+    out.sort_by(|a, b| a.inner.message.cmp(&b.inner.message));
+    out
+}
+
+/// The set of functions reachable from `start` over user-function call edges
+/// (inclusive of `start`).
+fn call_closure(start: &str, ctxs: &[FnCtx], index: &BTreeMap<String, usize>) -> BTreeSet<String> {
+    let mut seen = BTreeSet::new();
+    let mut stack = vec![start.to_string()];
+    while let Some(f) = stack.pop() {
+        if !seen.insert(f.clone()) {
+            continue;
+        }
+        if let Some(&i) = index.get(&f) {
+            for callee in crate::flow::user_callees(ctxs[i].root, &ctxs[i].scope) {
+                if !seen.contains(&callee) {
+                    stack.push(callee);
+                }
+            }
+        }
+    }
+    seen
+}
+
+/// True for a *user-authored* function classname — `BuiltIn.FuncUser`,
+/// `BuiltIn.FuncUserParam`, or `BuiltIn.MethodUser`. Deliberately excludes
+/// auto-generated functions (`BuiltIn.FuncGenerated`, `BuiltIn.CalFuncUser`) and
+/// the schedule events themselves (`BuiltIn.EventKernel`): M1 Build's 1642 is
+/// about user code that no schedule reaches, and generated/kernel functions are
+/// driven by mechanisms outside the user call graph.
+fn is_user_function(classname: Option<&str>) -> bool {
+    matches!(
+        classname,
+        Some("BuiltIn.FuncUser" | "BuiltIn.FuncUserParam" | "BuiltIn.MethodUser")
+    )
+}
+
+/// Reachability audit (default-on, T104): a user function that no scheduled
+/// function reaches through the call graph — M1 Build Error 1642 "Function '…'
+/// not executed by a scheduled function", which fails the build.
+///
+/// The roots are every user function bound to a schedule event
+/// ([`crate::symbols::Symbol::scheduled`] — any `SelectedTrigger`, including
+/// `On Startup` and `$(…)` triggers, not just statically-resolvable clocks). The
+/// call edges are the same ones T097 uses (`ScriptIo::calls`, resolved
+/// `FuncUser`/`MethodUser` callees, including helpers invoked as call arguments).
+/// A user function not reached from any root is flagged.
+///
+/// IMPORTANT: like the other cross-script audits, `scripts` must be the COMPLETE
+/// project script set — a missing script drops its call edges and would make the
+/// helpers it invokes look orphaned. Generated/kernel functions are never flagged
+/// (see `is_user_function`).
+pub fn check_reachability(
+    project: &Project,
+    scripts: &[crate::parsed::ParsedScript],
+) -> Vec<TypeDiagnostic> {
+    let ios: Vec<ScriptIo> = scripts
+        .iter()
+        .filter_map(|s| script_io(project, &s.name, &s.cst))
+        .collect();
+    // call edges: caller fn_path -> callee fn_paths (user functions only).
+    let mut calls: BTreeMap<&str, &BTreeSet<String>> = BTreeMap::new();
+    for io in &ios {
+        calls.insert(io.fn_path.as_str(), &io.calls);
+    }
+    let table = project.symbols();
+
+    // Roots: every user function bound to a schedule event. BFS the call graph
+    // from them; everything visited is "executed by a scheduled function".
+    let mut reachable: BTreeSet<&str> = BTreeSet::new();
+    let mut queue: Vec<&str> = table
+        .iter()
+        .filter(|s| s.scheduled && is_user_function(s.classname.as_deref()))
+        .map(|s| s.path.as_str())
+        .collect();
+    while let Some(f) = queue.pop() {
+        if !reachable.insert(f) {
+            continue;
+        }
+        for callee in calls.get(f).copied().into_iter().flatten() {
+            if !reachable.contains(callee.as_str()) {
+                queue.push(callee.as_str());
+            }
+        }
+    }
+
+    // Flag every user function (backed by a parsed script) not reached. Anchoring
+    // on `ios` keeps the check to functions whose body we actually analysed; a
+    // generated/kernel function or one with no script is never reported.
+    let mut out = Vec::new();
+    for io in &ios {
+        let sym = table.get(&io.fn_path);
+        if !sym.is_some_and(|s| is_user_function(s.classname.as_deref())) {
+            continue;
+        }
+        if !reachable.contains(io.fn_path.as_str()) {
+            out.push(make_project_for(
+                TypeCode::T104,
+                Severity::Error,
+                format!(
+                    "function `{}` is not executed by any scheduled function (M1 Build Error 1642: \"Function not executed by a scheduled function\")",
+                    io.fn_path
+                ),
+                &io.fn_path,
+            ));
+        }
+    }
+    out.sort_by(|a, b| a.inner.message.cmp(&b.inner.message));
+    out
+}
+
+#[cfg(test)]
+mod cross_fn_tests {
+    use super::*;
+    use crate::project::Project;
+
+    // Scheduled `Update` (100Hz) calls helpers; `X`/`Y` are channels.
+    const XML: &str = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root.Ctrl"/>
+  <Component Classname="BuiltIn.FuncUser" Filename="Ctrl.Update.m1scr" Name="Root.Ctrl.Update"><Props SelectedTrigger="Root.Events.On 100Hz"/></Component>
+  <Component Classname="BuiltIn.FuncUserParam" Filename="Ctrl.Helper.m1scr" Name="Root.Ctrl.Helper"/>
+  <Component Classname="BuiltIn.FuncUserParam" Filename="Ctrl.Other.m1scr" Name="Root.Ctrl.Other"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.X"><Props Type="f32" Security="Tune"/></Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.Y"><Props Type="f32" Security="Tune"/></Component>
+</Project>"#;
+
+    fn run(srcs: &[(&str, &str)]) -> Vec<String> {
+        let project = Project::from_xml(XML).unwrap();
+        let scripts = crate::parsed::parse_all(
+            &srcs
+                .iter()
+                .map(|(n, s)| (n.to_string(), s.to_string()))
+                .collect::<Vec<_>>(),
+        );
+        check_cross_fn_assignment(&project, &scripts)
+            .into_iter()
+            .map(|d| d.inner.message)
+            .collect()
+    }
+
+    #[test]
+    fn reset_in_caller_plus_conditional_write_in_callee_is_flagged() {
+        // The issue shape: caller resets X, helper re-assigns X on a branch.
+        let msgs = run(&[
+            ("Ctrl.Update.m1scr", "X = 1.0;\nHelper();\n"),
+            ("Ctrl.Helper.m1scr", "if (Y > 0.0) { X = 2.0; }\n"),
+        ]);
+        assert_eq!(msgs.len(), 1, "{msgs:?}");
+        assert!(
+            msgs[0].contains("`Root.Ctrl.X`")
+                && msgs[0].contains("Root.Ctrl.Update")
+                && msgs[0].contains("Root.Ctrl.Helper"),
+            "{}",
+            msgs[0]
+        );
+    }
+
+    #[test]
+    fn flagged_as_error() {
+        let project = Project::from_xml(XML).unwrap();
+        let scripts = crate::parsed::parse_all(&[
+            (
+                "Ctrl.Update.m1scr".to_string(),
+                "X = 1.0;\nHelper();\n".to_string(),
+            ),
+            (
+                "Ctrl.Helper.m1scr".to_string(),
+                "if (Y > 0.0) { X = 2.0; }\n".to_string(),
+            ),
+        ]);
+        let diags = check_cross_fn_assignment(&project, &scripts);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].inner.severity, Severity::Error);
+    }
+
+    #[test]
+    fn caller_and_callee_writing_different_channels_is_not_flagged() {
+        assert!(
+            run(&[
+                ("Ctrl.Update.m1scr", "X = 1.0;\nHelper();\n"),
+                ("Ctrl.Helper.m1scr", "Y = 2.0;\n"),
+            ])
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn single_function_double_assignment_is_t040_not_t102() {
+        // The caller assigns X twice itself; the helper does not touch X. That is
+        // a single-function T040, never a cross-function T102.
+        assert!(
+            run(&[
+                ("Ctrl.Update.m1scr", "X = 1.0;\nX = 2.0;\nHelper();\n"),
+                ("Ctrl.Helper.m1scr", "Y = 2.0;\n"),
+            ])
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn one_writer_in_one_function_is_not_flagged() {
+        // Only the helper writes X (once). No split, no double — not flagged.
+        assert!(
+            run(&[
+                ("Ctrl.Update.m1scr", "Helper();\n"),
+                ("Ctrl.Helper.m1scr", "X = 2.0;\n"),
+            ])
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn transitive_callee_write_is_flagged() {
+        // caller resets X, calls Helper, which calls Other, which writes X.
+        let msgs = run(&[
+            ("Ctrl.Update.m1scr", "X = 1.0;\nHelper();\n"),
+            ("Ctrl.Helper.m1scr", "Other();\n"),
+            ("Ctrl.Other.m1scr", "if (Y > 0.0) { X = 2.0; }\n"),
+        ]);
+        assert_eq!(msgs.len(), 1, "{msgs:?}");
+        assert!(msgs[0].contains("`Root.Ctrl.X`"), "{}", msgs[0]);
+    }
+
+    #[test]
+    fn unscheduled_helper_chain_alone_is_not_flagged() {
+        // Without a scheduled root reaching the writes, there is no runtime path —
+        // M1 Build 1317 is about scheduled execution paths. (These helpers would
+        // instead surface as T104 orphans.)
+        assert!(
+            run(&[
+                ("Ctrl.Helper.m1scr", "X = 1.0;\nOther();\n"),
+                ("Ctrl.Other.m1scr", "X = 2.0;\n"),
+            ])
+            .is_empty()
+        );
+    }
+}
+
+#[cfg(test)]
+mod reachability_tests {
+    use super::*;
+    use crate::project::Project;
+
+    // Two scheduled functions (`Update`, `Init`), one reached helper
+    // (`Helper`, called by `Update`), one transitively reached helper
+    // (`Deep`, called by `Helper`), and one orphan (`Orphan`, called by nobody).
+    const XML: &str = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root.Ctrl"/>
+  <Component Classname="BuiltIn.FuncUser" Filename="Ctrl.Update.m1scr" Name="Root.Ctrl.Update"><Props SelectedTrigger="Root.Events.On 100Hz"/></Component>
+  <Component Classname="BuiltIn.FuncUser" Filename="Ctrl.Init.m1scr" Name="Root.Ctrl.Init"><Props SelectedTrigger="Root.Events.On Startup"/></Component>
+  <Component Classname="BuiltIn.FuncUserParam" Filename="Ctrl.Helper.m1scr" Name="Root.Ctrl.Helper"/>
+  <Component Classname="BuiltIn.FuncUserParam" Filename="Ctrl.Deep.m1scr" Name="Root.Ctrl.Deep"/>
+  <Component Classname="BuiltIn.FuncUserParam" Filename="Ctrl.Orphan.m1scr" Name="Root.Ctrl.Orphan"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.X"><Props Type="f32" Security="Tune"/></Component>
+</Project>"#;
+
+    fn run(srcs: &[(&str, &str)]) -> Vec<String> {
+        let project = Project::from_xml(XML).unwrap();
+        let scripts = crate::parsed::parse_all(
+            &srcs
+                .iter()
+                .map(|(n, s)| (n.to_string(), s.to_string()))
+                .collect::<Vec<_>>(),
+        );
+        check_reachability(&project, &scripts)
+            .into_iter()
+            .map(|d| d.inner.message)
+            .collect()
+    }
+
+    #[test]
+    fn orphan_user_function_is_flagged_reached_ones_are_not() {
+        let msgs = run(&[
+            ("Ctrl.Update.m1scr", "Helper();\nX = 1.0;\n"),
+            ("Ctrl.Init.m1scr", "X = 0.0;\n"),
+            ("Ctrl.Helper.m1scr", "Deep();\n"),
+            ("Ctrl.Deep.m1scr", "X = 2.0;\n"),
+            ("Ctrl.Orphan.m1scr", "X = 3.0;\n"),
+        ]);
+        assert_eq!(msgs.len(), 1, "only the orphan is flagged: {msgs:?}");
+        assert!(msgs[0].contains("`Root.Ctrl.Orphan`"), "{msgs:?}");
+    }
+
+    #[test]
+    fn scheduled_function_is_never_flagged_even_if_uncalled() {
+        // `Init` (Startup) and `Update` (100Hz) are roots; neither is called by
+        // anyone, but both are scheduled → never orphans.
+        let msgs = run(&[
+            ("Ctrl.Update.m1scr", "X = 1.0;\n"),
+            ("Ctrl.Init.m1scr", "X = 0.0;\n"),
+            ("Ctrl.Helper.m1scr", "X = 2.0;\n"),
+            ("Ctrl.Deep.m1scr", "X = 4.0;\n"),
+            ("Ctrl.Orphan.m1scr", "X = 3.0;\n"),
+        ]);
+        // Helper, Deep, Orphan are all uncalled here → three orphans; the two
+        // scheduled functions are not among them.
+        assert!(!msgs.iter().any(|m| m.contains("Root.Ctrl.Update")));
+        assert!(!msgs.iter().any(|m| m.contains("Root.Ctrl.Init")));
+        assert_eq!(msgs.len(), 3, "{msgs:?}");
+    }
+
+    #[test]
+    fn orphans_are_errors() {
+        let project = Project::from_xml(XML).unwrap();
+        let scripts = crate::parsed::parse_all(&[
+            ("Ctrl.Update.m1scr".to_string(), "X = 1.0;\n".to_string()),
+            ("Ctrl.Init.m1scr".to_string(), "X = 0.0;\n".to_string()),
+            ("Ctrl.Helper.m1scr".to_string(), "X = 2.0;\n".to_string()),
+            ("Ctrl.Deep.m1scr".to_string(), "X = 4.0;\n".to_string()),
+            ("Ctrl.Orphan.m1scr".to_string(), "X = 3.0;\n".to_string()),
+        ]);
+        let diags = check_reachability(&project, &scripts);
+        assert!(!diags.is_empty());
+        for d in &diags {
+            assert_eq!(d.inner.severity, Severity::Error, "{}", d.inner.message);
+        }
+    }
+}
+
 #[cfg(test)]
 mod usage_tests {
     use super::*;
