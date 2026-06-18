@@ -6,7 +6,7 @@
 //! declaration is a build error.
 //!
 //! The base resolver registers every local up-front in a flat, position-less map
-//! ([`crate::rules::collect_locals`]), so a forward reference still resolves as
+//! (`collect_locals`), so a forward reference still resolves as
 //! [`Resolution::Local`] and the per-node rules never see the ordering problem.
 //! This separate positional pass closes that gap: it records each local's
 //! declaration byte-offset, then flags any single-segment identifier that
