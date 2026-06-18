@@ -47,7 +47,7 @@ use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
 use crate::resolve::{Resolution, Scope, resolve};
 use crate::typer::{is_expr, path_text};
 use crate::types::ValueType;
-use m1_core::{Annotations, Kind, Node, Severity};
+use m1_core::{Annotations, Kind, Node, Severity, is_binary_op};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// The invalid-value state of an expression's result.
@@ -400,7 +400,7 @@ fn binary_taint(node: Node, ctx: &Ctx, env: &HashMap<String, Taint>) -> Taint {
         .collect();
     let op = node
         .child_nodes()
-        .find(|c| is_operator(c.kind()))
+        .find(|c| is_binary_op(c.kind()))
         .map(|c| c.text().to_string())
         .unwrap_or_default();
 
@@ -618,28 +618,6 @@ fn visit_statements(node: Node, f: &mut impl FnMut(Node)) {
     }
 }
 
-fn is_operator(k: Kind) -> bool {
-    matches!(
-        k,
-        Kind::Plus
-            | Kind::Minus
-            | Kind::Star
-            | Kind::Slash
-            | Kind::Percent
-            | Kind::Lt
-            | Kind::LtEq
-            | Kind::Gt
-            | Kind::GtEq
-            | Kind::EqEq
-            | Kind::BangEq
-            | Kind::And
-            | Kind::Or
-            | Kind::Amp
-            | Kind::Pipe
-            | Kind::Caret
-    )
-}
-
 fn is_boolean_operator(op: &str) -> bool {
     matches!(
         op,
@@ -699,6 +677,21 @@ mod tests {
     fn finite_value_is_not_flagged() {
         let src = "// @m1:requires-finite\nOut = a + b * 2;\n";
         assert!(!has_t080(&run(src)));
+    }
+
+    #[test]
+    fn comparison_of_invalid_source_is_finite_boolean() {
+        // A comparison yields a boolean — always finite — even when an operand
+        // can be invalid. The keyword spellings `eq`/`neq` are the same as the
+        // `==`/`!=` symbol forms and must be treated identically (the operator
+        // token must be recognised so its text reaches `is_boolean_operator`).
+        for op in ["==", "!=", "eq", "neq"] {
+            let src = format!("// @m1:requires-finite\nOut = (a / b) {op} c;\n");
+            assert!(
+                !has_t080(&run(&src)),
+                "comparison `(a / b) {op} c` is a boolean and must not flag T080"
+            );
+        }
     }
 
     #[test]
