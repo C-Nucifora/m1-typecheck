@@ -331,6 +331,9 @@ pub fn run_with(
     walk(cst.root(), registry, &scope, &mut diagnostics);
     crate::flow::single_assignment(cst.root(), &scope, &mut diagnostics);
     t091_local_case::check(cst.root(), &scope, &mut diagnostics);
+    // M1 In/Out function-I/O parity (#233): runs after the per-node walk so it
+    // can supersede the generic T001 a bare-param / `return` token produces.
+    crate::in_out_io::check(cst.root(), &scope, &mut diagnostics);
 
     // Parse `@m1:` annotations once and drive both consumers: the invalid-value
     // (NaN/Inf) provenance analysis (T080/T081, #78) reads the finiteness
