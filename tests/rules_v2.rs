@@ -514,6 +514,51 @@ fn t021_is_an_error_like_m1_build_1329() {
     assert_eq!(t021.inner.severity, m1_core::Severity::Error);
 }
 
+// ---- T021 on ordering comparisons between two enums -----------------------
+// The Manual's "Enumeration Comparison" table (p.36-37) lists ONLY `a eq b` and
+// `a neq b` for enumerated types. Ordering (`>`/`<`/`>=`/`<=`) is not defined;
+// M1 Build rejects it with Error 1329 (incompatible data types). Equality
+// (eq/neq) between two enums stays valid.
+
+#[test]
+fn t021_flags_enum_ordering_comparison() {
+    let p = proj();
+    // Both operands are the same project enum `Switch State`; `>` is not a
+    // defined enum operator, so M1 Build rejects it (Error 1329).
+    let got = codes(&p, "if (SwitchMode.Value > Switch State.On) {\n}\n");
+    assert!(
+        got.contains(&TypeCode::T021),
+        "ordering an enum must be flagged: {got:?}"
+    );
+}
+
+#[test]
+fn t021_flags_enum_ordering_with_lt() {
+    let p = proj();
+    let got = codes(&p, "if (SwitchMode.Value < Switch State.On) {\n}\n");
+    assert!(got.contains(&TypeCode::T021), "{got:?}");
+}
+
+#[test]
+fn t021_no_flag_enum_equality_between_two_enums() {
+    let p = proj();
+    // eq/neq between two enums is the ONLY valid enum comparison per the manual.
+    assert!(
+        !codes(&p, "if (SwitchMode.Value eq Switch State.On) {\n}\n").contains(&TypeCode::T021)
+    );
+    assert!(
+        !codes(&p, "if (SwitchMode.Value == Switch State.On) {\n}\n").contains(&TypeCode::T021)
+    );
+}
+
+#[test]
+fn t021_no_flag_enum_ordering_against_unknown() {
+    let p = proj();
+    // The right side is unresolvable, so we cannot prove both sides are enums:
+    // ordering must NOT fire (no false positive on an Unknown operand).
+    assert!(!codes(&p, "if (SwitchMode.Value > Mystery Channel) {\n}\n").contains(&TypeCode::T021));
+}
+
 #[test]
 fn t082_no_flag_enum_subject() {
     let p = proj();

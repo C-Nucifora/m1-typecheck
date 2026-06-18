@@ -47,6 +47,24 @@ impl super::Rule for Rule {
                 Severity::Error,
                 "comparing an enum to a number; compare against an enum member instead (M1 Build Error 1329: incompatible data types)".into(),
             ));
+            return;
+        }
+        // The Manual's "Enumeration Comparison" table (p.36-37) defines ONLY
+        // `eq`/`neq` (==/!=) for enumerated types. Ordering (`<`/`>`/`<=`/`>=`)
+        // is not defined, so two enum operands joined by an ordering operator
+        // are rejected by M1 Build with the same Error 1329. Guard on BOTH
+        // sides being known enums so an Unknown operand never trips it.
+        let is_ordering = node
+            .children()
+            .iter()
+            .any(|c| matches!(c.kind(), Kind::Lt | Kind::Gt | Kind::LtEq | Kind::GtEq));
+        if is_ordering && lt.is_enum() && rt.is_enum() {
+            out.push(make(
+                TypeCode::T021,
+                node,
+                Severity::Error,
+                "enumerated types support only eq/neq (==/!=), not ordering comparisons (M1 Build Error 1329: incompatible data types for binary operation)".into(),
+            ));
         }
     }
 }
