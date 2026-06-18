@@ -50,6 +50,7 @@ pub enum TypeCode {
     T102, // channel-multiple-assignment-cross-function (M1 Build Error 1317: a channel reset in a caller and written by a callee on one path)
     T103, // ambiguous-reference (M1 Build Error 1339: a bare name matching both a sibling channel and an enum type)
     T104, // unscheduled-function (M1 Build Error 1642: a user function no scheduled function reaches)
+    T105, // local-use-before-definition (manual p.34: a local may only be used after it has been defined)
 }
 
 impl TypeCode {
@@ -102,6 +103,7 @@ impl TypeCode {
             TypeCode::T102 => "T102",
             TypeCode::T103 => "T103",
             TypeCode::T104 => "T104",
+            TypeCode::T105 => "T105",
         }
     }
 
@@ -158,6 +160,7 @@ impl TypeCode {
             TypeCode::T102 => "channel-multiple-assignment-cross-function",
             TypeCode::T103 => "ambiguous-reference",
             TypeCode::T104 => "unscheduled-function",
+            TypeCode::T105 => "local-use-before-definition",
         }
     }
 
@@ -171,7 +174,7 @@ impl TypeCode {
             T001, T002, T003, T004, T005, T006, T010, T020, T021, T030, T031, T040, T041, T042,
             T050, T060, T061, T062, T063, T064, T070, T071, T080, T081, T082, T083, T084, T085,
             T086, T087, T088, T089, T090, T091, T092, T093, T094, T095, T096, T097, T098, T099,
-            T100, T101, T102, T103, T104,
+            T100, T101, T102, T103, T104, T105,
         ]
     }
 }
@@ -308,6 +311,6 @@ mod tests {
             );
         }
         // Catalogue size tracks the enum (bump both together).
-        assert_eq!(codes.len(), 47);
+        assert_eq!(codes.len(), 48);
     }
 }

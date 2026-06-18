@@ -26,6 +26,7 @@ pub mod t084_expand_bounds;
 pub mod t085_user_arg_mismatch;
 pub mod t086_unit_mismatch;
 pub mod t091_local_case;
+pub mod t105_local_use_before_def;
 
 pub trait Rule: Send + Sync {
     fn check_node(&self, node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>);
@@ -333,6 +334,11 @@ pub fn run_with(
     walk(cst.root(), registry, &scope, &mut diagnostics);
     crate::flow::single_assignment(cst.root(), &scope, &mut diagnostics);
     t091_local_case::check(cst.root(), &scope, &mut diagnostics);
+    // M1 local use-before-definition (manual p.34, T105): a local read that
+    // textually precedes its `local` declaration. A positional pass — the base
+    // resolver registers locals position-lessly, so a forward reference still
+    // resolves as `Resolution::Local` and the per-node rules can't see it.
+    t105_local_use_before_def::check(cst.root(), &scope, &mut diagnostics);
     // M1 In/Out function-I/O parity (#233): runs after the per-node walk so it
     // can supersede the generic T001 a bare-param / `return` token produces.
     crate::in_out_io::check(cst.root(), &scope, &mut diagnostics);
