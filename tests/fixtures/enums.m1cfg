@@ -2,6 +2,7 @@
 <Configuration>
  <Group Name="">
   <Parameter Name="Root.Foo.SwitchMode.Value"><Cell Type="enum"><![CDATA[On]]></Cell></Parameter>
+  <Parameter Name="Root.Foo.DriveSel.Value"><Cell Type="enum"><![CDATA[Idle]]></Cell></Parameter>
   <Parameter Name="Root.Foo.gain"><Cell Type="f32" Unit="ratio"><![CDATA[1.0]]></Cell></Parameter>
  </Group>
 </Configuration>
