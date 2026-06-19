@@ -27,6 +27,7 @@ pub mod t085_user_arg_mismatch;
 pub mod t086_unit_mismatch;
 pub mod t091_local_case;
 pub mod t105_local_use_before_def;
+pub mod t106_group_not_value_provider;
 
 pub trait Rule: Send + Sync {
     fn check_node(&self, node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>);
@@ -107,6 +108,7 @@ impl Default for Registry {
                 Box::new(t085_user_arg_mismatch::Rule),
                 Box::new(t086_unit_mismatch::Rule),
                 Box::new(t084_expand_bounds::Rule),
+                Box::new(t106_group_not_value_provider::Rule),
             ],
         }
     }

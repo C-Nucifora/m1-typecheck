@@ -177,6 +177,13 @@ pub struct Symbol {
     /// here — downstream tools document what the reference points at. `None` for
     /// non-references and for references that declare no `Target`.
     pub reference_target: Option<String>,
+    /// For a [`SymbolKind::Group`], the raw `DefValue` of its
+    /// `<Props UseDefValue="true" DefValue="…">` — the group's Default Value
+    /// (e.g. `"This.Value"`). A group is a *value provider* (usable where a
+    /// value is expected) only when it declares one; passing a group without a
+    /// default value as a value is M1 Build Error 1331 (T106). `None` for
+    /// non-groups and for groups that declare no usable default value.
+    pub default_value: Option<String>,
 }
 
 /// Shape of a `BuiltIn.Table`, read from the `.m1cfg` `<Table>` element: its
@@ -440,6 +447,7 @@ mod tests {
         assert_eq!(s.in_params, None);
         assert_eq!(s.table_meta, None);
         assert_eq!(s.reference_target, None);
+        assert_eq!(s.default_value, None);
     }
 
     // `by_filename` resolves a Function/Method symbol by its `Filename=` in O(1),

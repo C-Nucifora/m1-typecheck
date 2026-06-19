@@ -59,8 +59,15 @@ pub fn single_assignment(root: Node, scope: &Scope, out: &mut Vec<TypeDiagnostic
                 out.push(make(
                     TypeCode::T040,
                     &node,
-                    m1_core::Severity::Warning,
-                    format!("channel `{path}` is assigned more than once on a single code path"),
+                    // M1 Build Error 1317 fails the build, so this is an Error
+                    // (matching the cross-function sibling T102), not a Warning
+                    // that would leave `tc_exit` 0 and green-light a rejected
+                    // build (#242).
+                    m1_core::Severity::Error,
+                    format!(
+                        "channel `{path}` is assigned more than once on a single code path \
+                         (M1 Build Error 1317)"
+                    ),
                 ));
             }
         }
