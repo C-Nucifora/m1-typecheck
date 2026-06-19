@@ -51,6 +51,7 @@ pub enum TypeCode {
     T103, // ambiguous-reference (M1 Build Error 1339: a bare name matching both a sibling channel and an enum type)
     T104, // unscheduled-function (M1 Build Error 1642: a user function no scheduled function reaches)
     T105, // local-use-before-definition (manual p.34: a local may only be used after it has been defined)
+    T106, // group-not-a-value-provider (M1 Build Error 1331: a group with no Default Value used where a value is expected)
 }
 
 impl TypeCode {
@@ -104,6 +105,7 @@ impl TypeCode {
             TypeCode::T103 => "T103",
             TypeCode::T104 => "T104",
             TypeCode::T105 => "T105",
+            TypeCode::T106 => "T106",
         }
     }
 
@@ -161,6 +163,7 @@ impl TypeCode {
             TypeCode::T103 => "ambiguous-reference",
             TypeCode::T104 => "unscheduled-function",
             TypeCode::T105 => "local-use-before-definition",
+            TypeCode::T106 => "group-not-a-value-provider",
         }
     }
 
@@ -174,7 +177,7 @@ impl TypeCode {
             T001, T002, T003, T004, T005, T006, T010, T020, T021, T030, T031, T040, T041, T042,
             T050, T060, T061, T062, T063, T064, T070, T071, T080, T081, T082, T083, T084, T085,
             T086, T087, T088, T089, T090, T091, T092, T093, T094, T095, T096, T097, T098, T099,
-            T100, T101, T102, T103, T104, T105,
+            T100, T101, T102, T103, T104, T105, T106,
         ]
     }
 }
@@ -311,6 +314,6 @@ mod tests {
             );
         }
         // Catalogue size tracks the enum (bump both together).
-        assert_eq!(codes.len(), 48);
+        assert_eq!(codes.len(), 49);
     }
 }
