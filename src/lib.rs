@@ -4,6 +4,7 @@ pub mod audit;
 pub mod classname;
 pub mod cross_script;
 pub mod diagnostics;
+pub mod expand;
 pub mod filter;
 pub mod flow;
 pub mod in_out_io;
