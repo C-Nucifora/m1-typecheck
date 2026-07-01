@@ -1,4 +1,5 @@
 use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
+use crate::expand::{enclosing_expand_bindings, substituted};
 use crate::resolve::{Resolution, Scope, resolve};
 use m1_core::{Field, Kind, Node, Severity};
 
@@ -28,8 +29,42 @@ impl super::Rule for Rule {
         if in_is_clause_state(node) {
             return;
         }
-        if !matches!(resolve(node.text(), scope), Resolution::Unresolved) {
+        let text = node.text();
+        if !matches!(resolve(text, scope), Resolution::Unresolved) {
             return;
+        }
+        // A `$(VAR)` template is compile-time-substituted by M1 Build's `expand`
+        // loop *before* the object name is resolved (manual p.33, #246), so the
+        // literal `$(VAR)` text never matches a symbol but the *expanded* names
+        // do. Resolve the substituted names instead: under the enclosing
+        // integer-literal `expand` bounds the target expands to one concrete name
+        // per iteration. `display` is the name actually reported — for a plain
+        // path that is the path itself; for a templated one it is the concrete
+        // iteration that misses (not the confusing `$(VAR)` text).
+        let display;
+        if text.contains("$(") {
+            let bindings = enclosing_expand_bindings(node);
+            let variants = substituted(text, &bindings);
+            // No enumerable expansion — a runaway product, a non-`expand` `$(…)`
+            // reference, or a constant/absent bound that left a `$(VAR)` in place:
+            // we cannot prove the target is unknown (M1 Build resolves it at
+            // expansion), so stay silent rather than false-positive.
+            if variants.is_empty() || variants.iter().any(|v| v.contains("$(")) {
+                return;
+            }
+            // M1 Build expands every iteration and errors on any whose target does
+            // not exist (Validate Project reports 0 errors only when all exist).
+            // Flag the first such concrete name; if every expansion resolves there
+            // is no miss.
+            match variants
+                .iter()
+                .find(|v| matches!(resolve(v, scope), Resolution::Unresolved))
+            {
+                Some(v) => display = v.clone(),
+                None => return,
+            }
+        } else {
+            display = text.to_string();
         }
         // A miss in *write* position — the target of a plain `=` assignment — is
         // not an unresolved *reference* (a read): it is a write to a target the
@@ -47,8 +82,7 @@ impl super::Rule for Rule {
                 node,
                 Severity::Error,
                 format!(
-                    "assignment to unknown target `{}` (M1 Build Error 1338: \"does not exist\")",
-                    node.text()
+                    "assignment to unknown target `{display}` (M1 Build Error 1338: \"does not exist\")"
                 ),
             ));
         } else {
@@ -56,7 +90,7 @@ impl super::Rule for Rule {
                 TypeCode::T001,
                 node,
                 Severity::Warning,
-                format!("unresolved reference `{}`", node.text()),
+                format!("unresolved reference `{display}`"),
             ));
         }
     }
