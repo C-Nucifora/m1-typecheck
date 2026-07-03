@@ -24,6 +24,16 @@ fn t040_flags_unconditional_double_assignment() {
 }
 
 #[test]
+fn t040_flags_fixed_write_repeated_in_an_expand_body() {
+    // `expand (N = 1 to 4)` unrolls to four sequential writes of the same
+    // (non-templated) channel — a multiple assignment (M1 Build 1317) — even
+    // though the body contains a single write.
+    let p = proj();
+    let src = "expand (N = 1 to 4)\n{\n\tdriveMode = Drive State.Idle;\n}\n";
+    assert!(codes(&p, src).contains(&TypeCode::T040));
+}
+
+#[test]
 fn t040_points_at_first_write() {
     // The diagnostic should land on the earlier (first) conflicting write, not
     // the second. Regression for #15.

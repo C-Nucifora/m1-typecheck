@@ -107,6 +107,20 @@ fn check_compound_assign(node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnosti
     }
 }
 
+/// Severity of a T030 mismatch. Assigning a **float** value to an **integer**
+/// target is *invalid* per the manual (p.43: "a conversion of … to an integer
+/// data type is not allowed"), so it is an Error — the same call the repo made
+/// for the equally-invalid T040 class (#242). Every other mismatch (sign,
+/// enum, boolean/numeric) stays a Warning: the numeric ones are lossy but the
+/// manual permits the conversion.
+fn t030_severity(target_ty: ValueType, value_ty: ValueType) -> Severity {
+    if value_ty.is_float() && target_ty.is_integral() {
+        Severity::Error
+    } else {
+        Severity::Warning
+    }
+}
+
 /// Emit a T030 diagnostic for a type mismatch, optionally linking the
 /// declaration site for Channel/Parameter targets (#200).
 fn emit_mismatch(
@@ -121,7 +135,7 @@ fn emit_mismatch(
     let mut d = make(
         TypeCode::T030,
         node,
-        Severity::Warning,
+        t030_severity(target_ty, value_ty),
         format!(
             "assigning {} to a target of type {target_str}",
             render_type(value_ty, scope)
@@ -182,7 +196,7 @@ fn check_local_declaration(node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnos
         out.push(make(
             TypeCode::T030,
             node,
-            Severity::Warning,
+            t030_severity(declared, init_ty),
             format!(
                 "initialising a local declared {} with a {} value",
                 render_type(declared, scope),

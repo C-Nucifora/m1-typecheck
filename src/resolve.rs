@@ -127,6 +127,29 @@ pub fn resolve<'p>(path: &str, scope: &Scope<'p>) -> Resolution<'p> {
             }
             return Resolution::Opaque;
         }
+        // `Library.<X>` (manual p.41) explicitly anchors `X` to the *library*
+        // scope, disambiguating a firmware library object from a project object
+        // of the same name. Resolve the remainder against the library
+        // intrinsics only. Without this arm the manual's own disambiguating
+        // spelling fell through to Opaque, so T060–T064 and return-type
+        // inference silently skipped every `Library.`-qualified call.
+        "Library" if path != "Library" => {
+            let intr = crate::intrinsics::get();
+            if let Some(rest) = path.strip_prefix("Library.") {
+                let root = root_segment(rest);
+                if let Some(obj_name) = intr.library_object_name(root) {
+                    if rest == root {
+                        return Resolution::BuiltinObject(obj_name);
+                    }
+                    let method = &rest[root.len() + 1..];
+                    let overloads = intr.library_overloads(root, method);
+                    if !overloads.is_empty() {
+                        return Resolution::BuiltinFn(overloads);
+                    }
+                }
+            }
+            return Resolution::Opaque;
+        }
         _ => {}
     }
 
@@ -367,6 +390,23 @@ mod intrinsics_tests {
                 assert_eq!(ov[0].name, "GetUnsignedInteger");
             }
             other => panic!("expected BuiltinFn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn library_anchor_resolves_to_the_library_function() {
+        // `Library.<X>` (manual p.41) anchors X to the library scope. Previously
+        // this fell through to Opaque, so the library-function rules skipped it.
+        match resolve("Library.CanComms.GetUnsignedInteger", &scope()) {
+            Resolution::BuiltinFn(ov) => {
+                assert!(!ov.is_empty());
+                assert_eq!(ov[0].name, "GetUnsignedInteger");
+            }
+            other => panic!("expected BuiltinFn, got {other:?}"),
+        }
+        match resolve("Library.Calculate", &scope()) {
+            Resolution::BuiltinObject(n) => assert_eq!(n, "Calculate"),
+            other => panic!("expected BuiltinObject, got {other:?}"),
         }
     }
 
