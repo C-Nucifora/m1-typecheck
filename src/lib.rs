@@ -3,6 +3,7 @@ pub mod ambiguous;
 pub mod audit;
 pub mod classname;
 pub mod cross_script;
+pub mod dbc_init;
 pub mod diagnostics;
 pub mod expand;
 pub mod filter;
