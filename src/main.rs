@@ -817,6 +817,22 @@ fn main() {
         &mut json_buf,
     );
 
+    // DBC-Init audit (default-on, T107): a DBC object whose generated accessors
+    // are used but whose Init function is never called — M1 Build Error 1375,
+    // which fails Validate Project. Whole-project, so it runs over every script.
+    let dbc_diags: Vec<TypeDiagnostic> = project
+        .as_ref()
+        .map(|p| m1_typecheck::dbc_init::check(p, &parsed_scripts))
+        .unwrap_or_default();
+    project_had_error |= emit_project_diags(
+        &args,
+        dbc_diags,
+        &filter,
+        project_path.as_deref(),
+        json,
+        &mut json_buf,
+    );
+
     // Per-file checks, then the once-per-run project-level audits.
     let had_error = check_files(
         &args,
