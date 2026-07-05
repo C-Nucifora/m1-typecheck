@@ -347,6 +347,10 @@ pub fn run_with(
     // M1 ambiguous-reference parity (#234, T103): a bare name resolving to both a
     // sibling channel and a same-named enum type (M1 Build Error 1339).
     crate::ambiguous::check(cst.root(), &scope, &mut diagnostics);
+    // CAN-DBC reference checks (T108/T109/T110): a DBC module/message/signal chain
+    // that doesn't exist, a message method vs its Transmit direction, or a signal
+    // accessor vs the signal's declared Type. No-op without a project or DBC model.
+    crate::dbc_ref::check(cst.root(), &scope, &mut diagnostics);
 
     // Parse `@m1:` annotations once and drive both consumers: the invalid-value
     // (NaN/Inf) provenance analysis (T080/T081, #78) reads the finiteness

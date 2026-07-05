@@ -53,6 +53,9 @@ pub enum TypeCode {
     T105, // local-use-before-definition (manual p.34: a local may only be used after it has been defined)
     T106, // group-not-a-value-provider (M1 Build Error 1331: a group with no Default Value used where a value is expected)
     T107, // dbc-init-missing (M1 Build Error 1375: a DBC object used but its Init function never called)
+    T108, // dbc-unresolved-reference (M1 Build Error 1338/1352: a DBC module/message/signal segment that does not exist)
+    T109, // dbc-message-direction (a message method disagrees with its Transmit direction: .Receive on TX, .Tx*/.Transmit on RX)
+    T110, // dbc-signal-accessor-type (a raw signal accessor disagrees with the signal's declared Type, e.g. .SetFloat on an integer signal)
 }
 
 impl TypeCode {
@@ -108,6 +111,9 @@ impl TypeCode {
             TypeCode::T105 => "T105",
             TypeCode::T106 => "T106",
             TypeCode::T107 => "T107",
+            TypeCode::T108 => "T108",
+            TypeCode::T109 => "T109",
+            TypeCode::T110 => "T110",
         }
     }
 
@@ -167,6 +173,9 @@ impl TypeCode {
             TypeCode::T105 => "local-use-before-definition",
             TypeCode::T106 => "group-not-a-value-provider",
             TypeCode::T107 => "dbc-init-missing",
+            TypeCode::T108 => "dbc-unresolved-reference",
+            TypeCode::T109 => "dbc-message-direction",
+            TypeCode::T110 => "dbc-signal-accessor-type",
         }
     }
 
@@ -180,7 +189,7 @@ impl TypeCode {
             T001, T002, T003, T004, T005, T006, T010, T020, T021, T030, T031, T040, T041, T042,
             T050, T060, T061, T062, T063, T064, T070, T071, T080, T081, T082, T083, T084, T085,
             T086, T087, T088, T089, T090, T091, T092, T093, T094, T095, T096, T097, T098, T099,
-            T100, T101, T102, T103, T104, T105, T106, T107,
+            T100, T101, T102, T103, T104, T105, T106, T107, T108, T109, T110,
         ]
     }
 }
@@ -317,6 +326,6 @@ mod tests {
             );
         }
         // Catalogue size tracks the enum (bump both together).
-        assert_eq!(codes.len(), 50);
+        assert_eq!(codes.len(), 53);
     }
 }

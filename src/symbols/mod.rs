@@ -209,10 +209,24 @@ pub struct TableAxis {
     pub unit: Option<String>,
 }
 
+/// The transmit direction of a `BuiltIn.CAN.Message`, from its `.m1dbc`
+/// `<Props Transmit="…">`: a message the M1 **receives** (`RX`) or **transmits**
+/// (`TX`). Absent `Transmit` leaves the direction unknown (`None` on
+/// [`CanMeta::transmit`]) — never guessed, so the direction check (T109) stays
+/// silent for it. Drives the message-method-vs-direction check: `.Receive()`
+/// needs `Rx`, `.Transmit()`/`.Tx*()` need `Tx`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CanDirection {
+    /// `Transmit="RX"` — the M1 receives this message (use `.Receive()`).
+    Rx,
+    /// `Transmit="TX"` — the M1 transmits this message (use `.Transmit()`/`.Tx*()`).
+    Tx,
+}
+
 /// CAN layout metadata retained from a `.m1dbc` `<Props>`, attached to a
 /// [`Symbol`] so the LSP can render it in hover. Message-level fields
-/// (`can_id`, `dlc`) populate on `BuiltIn.CAN.Message` objects; signal-level
-/// fields (`start_bit`, `length`, `multiplier`, `offset`) on
+/// (`can_id`, `dlc`, `transmit`) populate on `BuiltIn.CAN.Message` objects;
+/// signal-level fields (`start_bit`, `length`, `multiplier`, `offset`) on
 /// `BuiltIn.CAN.Signal` channels. A signal's parent message is looked up by
 /// path to combine the two in one tooltip.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -221,6 +235,10 @@ pub struct CanMeta {
     pub can_id: Option<u32>,
     /// Data-length code — the message payload size in bytes.
     pub dlc: Option<u32>,
+    /// Transmit direction of the message (`Rx`/`Tx`), from `<Props Transmit>`.
+    /// `None` when the message declares no direction — the direction check
+    /// (T109) then stays silent (never a guess). Present only on messages.
+    pub transmit: Option<CanDirection>,
     /// Signal's least-significant bit position within the frame.
     pub start_bit: Option<u32>,
     /// Signal width in bits.
