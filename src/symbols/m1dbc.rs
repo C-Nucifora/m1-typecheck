@@ -12,7 +12,7 @@
 //!
 //! DBC/Message are objects so their built-in methods (`.Init`, `.Transmit`, …)
 //! resolve as opaque accessors rather than being flagged.
-use super::{CanMeta, Symbol, SymbolKind, SymbolTable, XmlParseError};
+use super::{CanDirection, CanMeta, Symbol, SymbolKind, SymbolTable, XmlParseError};
 use crate::types::{ValueType, primitive_type};
 use m1_workspace::LineIndex;
 
@@ -140,6 +140,13 @@ fn can_meta(props: roxmltree::Node<'_, '_>, classname: &str) -> Option<CanMeta> 
         "BuiltIn.CAN.Message" => CanMeta {
             can_id: uint("CANId"),
             dlc: uint("DLC"),
+            // `Transmit="RX"|"TX"` is the message's direction; anything else
+            // (or absent) leaves it unknown so the direction check stays silent.
+            transmit: props.attribute("Transmit").and_then(|t| match t {
+                "RX" => Some(CanDirection::Rx),
+                "TX" => Some(CanDirection::Tx),
+                _ => None,
+            }),
             ..Default::default()
         },
         "BuiltIn.CAN.Signal" => CanMeta {
@@ -164,7 +171,7 @@ mod tests {
   <List>
    <Component Classname="BuiltIn.CAN.DBC" Name="Balls3EV25"/>
    <Component Classname="BuiltIn.CAN.Message" Name="Balls3EV25.DashVals">
-    <Props CANId="291" DLC="8"/>
+    <Props CANId="291" DLC="8" Transmit="RX"/>
    </Component>
    <Component Classname="BuiltIn.CAN.Signal" Name="Balls3EV25.DashVals.Inverter Error">
     <Props Type="u32" Qty="deg" StartBit="0" Length="10" Multiplier="0.5" Offset="2.0"/>
@@ -190,6 +197,8 @@ mod tests {
         let msg_can = msg.can.as_ref().expect("message CAN meta");
         assert_eq!(msg_can.can_id, Some(291));
         assert_eq!(msg_can.dlc, Some(8));
+        // `Transmit="RX"` is captured as the receive direction (T109 input).
+        assert_eq!(msg_can.transmit, Some(CanDirection::Rx));
 
         let sig = table
             .get("Balls3EV25.DashVals.Inverter Error")
@@ -207,6 +216,57 @@ mod tests {
             .get("Balls3EV25.DashVals.Aux Switch")
             .expect("bool signal");
         assert_eq!(boolsig.value_type, ValueType::Boolean);
+    }
+
+    // A message's `Transmit` direction is captured (or left `None`) so the
+    // message-method-vs-direction check (T109) has an input: `RX` → Rx, `TX` →
+    // Tx, and any other/absent value stays unknown (never guessed).
+    #[test]
+    fn captures_message_transmit_direction() {
+        let xml = r#"<?xml version="1.0"?>
+<DBC>
+ <ComponentStream>
+  <List>
+   <Component Classname="BuiltIn.CAN.DBC" Name="Bus"/>
+   <Component Classname="BuiltIn.CAN.Message" Name="Bus.RxMsg"><Props CANId="1" DLC="8" Transmit="RX"/></Component>
+   <Component Classname="BuiltIn.CAN.Message" Name="Bus.TxMsg"><Props CANId="2" DLC="8" Transmit="TX"/></Component>
+   <Component Classname="BuiltIn.CAN.Message" Name="Bus.NoDir"><Props CANId="3" DLC="8"/></Component>
+  </List>
+ </ComponentStream>
+</DBC>"#;
+        let mut table = SymbolTable::default();
+        augment(&mut table, xml, "dbc/Bus.m1dbc").unwrap();
+        assert_eq!(
+            table
+                .get("Bus.RxMsg")
+                .unwrap()
+                .can
+                .as_ref()
+                .unwrap()
+                .transmit,
+            Some(CanDirection::Rx)
+        );
+        assert_eq!(
+            table
+                .get("Bus.TxMsg")
+                .unwrap()
+                .can
+                .as_ref()
+                .unwrap()
+                .transmit,
+            Some(CanDirection::Tx)
+        );
+        // No `Transmit` → unknown direction; the CAN meta still exists (CANId/DLC).
+        assert_eq!(
+            table
+                .get("Bus.NoDir")
+                .unwrap()
+                .can
+                .as_ref()
+                .unwrap()
+                .transmit,
+            None
+        );
     }
 
     // #169 gap 1: each DBC symbol records the 0-based source line of its

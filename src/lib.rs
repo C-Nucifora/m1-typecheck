@@ -4,6 +4,7 @@ pub mod audit;
 pub mod classname;
 pub mod cross_script;
 pub mod dbc_init;
+pub mod dbc_ref;
 pub mod diagnostics;
 pub mod expand;
 pub mod filter;
