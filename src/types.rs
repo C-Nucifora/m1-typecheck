@@ -54,7 +54,10 @@ pub fn numeric_join(a: ValueType, b: ValueType) -> ValueType {
     match (a, b) {
         (Unknown, _) | (_, Unknown) => Unknown,
         (Float, x) | (x, Float) if x.is_float() || x.is_integral() => Float,
-        (Unsigned, Unsigned) => Unsigned,
+        // Manual p.42: a mixed integer expression converts to *unsigned* if
+        // either operand is unsigned — so signed x unsigned is Unsigned, not
+        // Integer. Only signed x signed stays Integer.
+        (Unsigned, x) | (x, Unsigned) if x.is_integral() => Unsigned,
         (x, y) if x.is_integral() && y.is_integral() => Integer,
         _ => Unknown, // non-numeric operands: not our concern here
     }
@@ -121,7 +124,9 @@ mod tests {
         assert_eq!(numeric_join(Integer, Float), Float);
         assert_eq!(numeric_join(Float, Unsigned), Float);
         assert_eq!(numeric_join(Unsigned, Unsigned), Unsigned);
-        assert_eq!(numeric_join(Integer, Unsigned), Integer);
+        // Manual p.42: mixed signed/unsigned converts to unsigned.
+        assert_eq!(numeric_join(Integer, Unsigned), Unsigned);
+        assert_eq!(numeric_join(Unsigned, Integer), Unsigned);
         assert_eq!(numeric_join(Unknown, Float), Unknown);
         assert_eq!(numeric_join(Boolean, Integer), Unknown);
     }

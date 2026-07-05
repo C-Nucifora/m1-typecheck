@@ -108,6 +108,16 @@ fn facts_of(node: Node, scope: &Scope, expand: &dyn CallExpander) -> Facts {
             merge_seq(f, call_facts(node, scope, expand))
         }
         Kind::IfStatement => {
+            // The condition runs (and any user-function call inside it executes)
+            // whenever the `if` is reached, before either branch — sequence its
+            // inlined facts first, else a helper that writes a channel from an
+            // `if (Helper() > 0)` condition is missed by the cross-function
+            // check.
+            let cond_f = node
+                .child_nodes()
+                .find(|c| is_expr(c.kind()))
+                .map(|c| call_facts(c, scope, expand))
+                .unwrap_or_default();
             // then-block facts vs else-block facts -> per-key max (mutual exclusion).
             let blocks: Vec<_> = node
                 .child_nodes()
@@ -122,7 +132,7 @@ fn facts_of(node: Node, scope: &Scope, expand: &dyn CallExpander) -> Facts {
                 .find(|b| b.kind() == Kind::ElseClause)
                 .map(|b| seq_children(*b, scope, expand))
                 .unwrap_or_default();
-            merge_alt(then_f, else_f)
+            merge_seq(cond_f, merge_alt(then_f, else_f))
         }
         Kind::WhenStatement => {
             // A `when` body is a set of `is` clauses (the CST is
@@ -131,7 +141,8 @@ fn facts_of(node: Node, scope: &Scope, expand: &dyn CallExpander) -> Facts {
             // per-channel MAX across them (merge_alt), not the sequential sum
             // (#20). Two writes in different arms are fine; two in one arm still
             // flag T040 (seq_children sums within a single Block).
-            node.child_nodes()
+            let arms = node
+                .child_nodes()
                 .filter(|c| c.kind() == Kind::IsClause)
                 .map(|clause| {
                     clause
@@ -140,14 +151,40 @@ fn facts_of(node: Node, scope: &Scope, expand: &dyn CallExpander) -> Facts {
                         .map(|b| seq_children(b, scope, expand))
                         .unwrap_or_default()
                 })
-                .fold(Facts::default(), merge_alt)
+                .fold(Facts::default(), merge_alt);
+            // The `when (subject)` expression runs before any clause; sequence a
+            // user-function call in it (mirrors the `if` condition above).
+            let subj_f = node
+                .child_nodes()
+                .find(|c| is_expr(c.kind()))
+                .map(|c| call_facts(c, scope, expand))
+                .unwrap_or_default();
+            merge_seq(subj_f, arms)
         }
         Kind::ExpandStatement => {
-            // Treated as a no-else conditional body (see spec §5.2).
             let body = node.child_nodes().find(|c| c.kind() == Kind::Block);
-            let body_f = body
+            let mut body_f = body
                 .map(|b| seq_children(b, scope, expand))
                 .unwrap_or_default();
+            // `expand (N = a to b)` unrolls to (b - a + 1) sequential copies of
+            // the body (manual). A write whose target does NOT vary with the
+            // loop variable is therefore repeated — a multiple assignment (M1
+            // Build Error 1317). A `$(N)`-templated target hits a distinct
+            // channel each iteration and never resolves to one symbol, so it is
+            // already absent from these counts; the surviving fixed-target
+            // counts are scaled by the iteration count. (schedule.rs models the
+            // same per-iteration expansion for T093/T094.)
+            if let Some((_, start, end)) = crate::expand::expand_binding(&node) {
+                let iters = end - start + 1;
+                if iters >= 2 {
+                    let iters = iters as u32;
+                    for n in body_f.max_per_path.values_mut() {
+                        *n = n.saturating_mul(iters);
+                    }
+                }
+            }
+            // The range can be empty at compile time, so still model the body as
+            // conditional (0-or-more) rather than mandatory.
             merge_alt(body_f, Facts::default())
         }
         Kind::Block | Kind::ElseClause => seq_children(node, scope, expand),

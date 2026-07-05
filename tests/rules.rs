@@ -134,3 +134,26 @@ fn moderately_nested_valid_input_is_analyzed_normally() {
         result.diagnostics
     );
 }
+
+#[test]
+fn t030_float_to_integer_local_is_an_error() {
+    // Manual p.43: converting a float to an integer data type is not allowed, so
+    // a float initialiser on an `<Integer>` local is an Error (like T040), not a
+    // Warning that CI's error gate would let pass.
+    let result = check_script_no_project("local <Integer> x = 1.5;\n");
+    let d = result
+        .diagnostics
+        .iter()
+        .find(|d| d.code == TypeCode::T030)
+        .expect("expected a T030 diagnostic");
+    assert_eq!(d.inner.severity, m1_core::Severity::Error);
+}
+
+#[test]
+fn t030_signed_unsigned_mismatch_stays_a_warning() {
+    // A sign mismatch is lossy but the manual permits the conversion — Warning.
+    let result = check_script_no_project("local <Unsigned Integer> x = -1;\n");
+    if let Some(d) = result.diagnostics.iter().find(|d| d.code == TypeCode::T030) {
+        assert_eq!(d.inner.severity, m1_core::Severity::Warning);
+    }
+}
