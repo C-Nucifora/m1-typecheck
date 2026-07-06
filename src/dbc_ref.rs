@@ -199,6 +199,15 @@ fn walk(n: Node, model: &DbcModel, out: &mut Vec<TypeDiagnostic>) {
 /// the DBC model, emitting at most one diagnostic.
 fn check_chain(node: &Node, model: &DbcModel, out: &mut Vec<TypeDiagnostic>) {
     let text = path_text(*node);
+    // An `expand … to` template placeholder (`$(N)`) means this chain is the
+    // pre-expansion source text — `CMU.Segment $(N).Receive()` names no real
+    // message until M1 Build substitutes the counter. The expanded names cannot
+    // be resolved here (the same template-awareness as the T031 fix, #246), so
+    // template chains stay silent rather than reporting a false "does not
+    // exist" (seen on the real AV-M1 corpus).
+    if text.contains("$(") {
+        return;
+    }
     // Segment on `.`, trimming any whitespace a multi-line chain introduced, so
     // segments match the (clean) symbol-table keys.
     let mut segs: Vec<&str> = text.split('.').map(str::trim).collect();
@@ -455,6 +464,23 @@ mod tests {
             "if (DBC.BMU.Status.Receive()) {\n  local v = DBC.BMU.Status.Voltage.GetUnsignedInteger();\n}\n",
         );
         assert!(codes.is_empty(), "expected clean, got {codes:?}");
+    }
+
+    #[test]
+    fn t108_silent_on_expand_template_chains() {
+        // An `expand … to` template references pre-expansion names —
+        // `CMU.Segment $(N)` (real AV-M1 shape) resolves to nothing until
+        // M1 Build substitutes the counter, so template chains must stay
+        // silent (the T031 template-awareness, #246). Both spellings.
+        let codes = codes_for(
+            PRJ,
+            DBC,
+            "expand (N) in (1, 2) to\n{\n  if (DBC.BMU.Segment $(N).Receive())\n  {\n    local v = BMU.Segment $(N).Voltage.GetUnsignedInteger();\n  }\n}\n",
+        );
+        assert!(
+            codes.is_empty(),
+            "template chains must not resolve: {codes:?}"
+        );
     }
 
     #[test]
