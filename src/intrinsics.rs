@@ -96,9 +96,25 @@ pub struct EnumDef {
     pub members: Vec<EnumMember>,
 }
 
+/// Provenance of the embedded catalogue. The `target` names the firmware /
+/// manual the intrinsics were captured from — the catalogue is not universal,
+/// so callers can see (and, via `--firmware`, assert) which target they are
+/// checking against. The remaining fields are documentation only.
+#[derive(Debug, Deserialize, Default)]
+pub struct Source {
+    /// The firmware/manual target identifier, e.g. `m1-build-2026-06`. Empty
+    /// only for a hand-written catalogue that predates keying; callers fall back
+    /// to [`DEFAULT_TARGET`] in that case.
+    #[serde(default)]
+    pub target: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Intrinsics {
     pub version: u32,
+    /// Catalogue provenance, including the firmware/manual `target`.
+    #[serde(default)]
+    pub source: Source,
     #[serde(default, rename = "dataTypes")]
     pub data_types: Vec<String>,
     /// object name -> { doc, functions }: the 13 ECU-script library objects plus
@@ -136,6 +152,43 @@ pub fn get() -> &'static Intrinsics {
     INTRINSICS.get_or_init(|| {
         serde_json::from_str(INTRINSICS_JSON).expect("vendored m1-intrinsics.json must be valid")
     })
+}
+
+/// Fallback target for a catalogue whose `source.target` is empty (a
+/// hand-written catalogue predating firmware keying).
+pub const DEFAULT_TARGET: &str = "m1-build-2026-06";
+
+/// The firmware/manual target the embedded catalogue was captured from. This is
+/// the *default* — and, until a second catalogue is vendored, the *only* —
+/// target the checker can resolve against. Reads `source.target`, falling back
+/// to [`DEFAULT_TARGET`].
+pub fn active_target() -> &'static str {
+    let t = get().source.target.as_str();
+    if t.is_empty() { DEFAULT_TARGET } else { t }
+}
+
+/// Every catalogue target the binary can check against. One embedded catalogue
+/// today, so a single-element list — the plumbing (`--firmware`, the error
+/// listing) is in place for when a second target is vendored.
+pub fn known_targets() -> Vec<&'static str> {
+    vec![active_target()]
+}
+
+/// Resolve a user-requested `--firmware <target>` against the embedded
+/// catalogue(s). `Ok` with the canonical target when it is known; `Err` with a
+/// user-facing message that lists the known targets otherwise (the CLI exits 2
+/// on that error — an unknown target must fail loud, never silently check
+/// against the wrong firmware).
+pub fn resolve_target(requested: &str) -> Result<&'static str, String> {
+    known_targets()
+        .into_iter()
+        .find(|t| *t == requested)
+        .ok_or_else(|| {
+            format!(
+                "unknown firmware target `{requested}`; known targets: {}",
+                known_targets().join(", ")
+            )
+        })
 }
 
 impl Intrinsics {
@@ -283,6 +336,35 @@ mod tests {
             assert!(!ov.is_empty(), "{m} modelled");
             assert_eq!(ov[0].returns, "Void", "{m} returns Void");
         }
+    }
+
+    #[test]
+    fn catalogue_carries_a_firmware_target() {
+        // The embedded catalogue is keyed by the firmware/manual it was captured
+        // from (#260), so a consumer can see — and assert — which target it is
+        // checking against rather than treating the intrinsics as universal.
+        assert_eq!(active_target(), "m1-build-2026-06");
+        assert_eq!(get().source.target, "m1-build-2026-06");
+        assert_eq!(known_targets(), vec!["m1-build-2026-06"]);
+    }
+
+    #[test]
+    fn resolve_target_accepts_known_and_rejects_unknown() {
+        assert_eq!(
+            resolve_target("m1-build-2026-06").unwrap(),
+            "m1-build-2026-06"
+        );
+        let err = resolve_target("m1-build-2099-01").unwrap_err();
+        // The error names the bad target AND lists what is known, so the user
+        // can correct it (fail loud, never silently wrong-firmware).
+        assert!(
+            err.contains("m1-build-2099-01"),
+            "names the bad target: {err}"
+        );
+        assert!(
+            err.contains("m1-build-2026-06"),
+            "lists known targets: {err}"
+        );
     }
 
     #[test]

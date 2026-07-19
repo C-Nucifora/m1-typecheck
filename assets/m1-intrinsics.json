@@ -2,6 +2,7 @@
  "$schema": "./m1-intrinsics.schema.json",
  "version": 1,
  "source": {
+  "target": "m1-build-2026-06",
   "origin": "MoTeC M1 Build Development Manual",
   "m1BuildVersion": "1.4.0.0092",
   "published": "2015-12-18",

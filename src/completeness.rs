@@ -78,6 +78,12 @@ pub struct CompletenessReport {
     pub cfg_loaded: bool,
     /// Whether any `.m1dbc` was loaded (T042/T108–T110 CAN checks run).
     pub dbc_loaded: bool,
+
+    /// The firmware/manual target the intrinsic catalogue was captured from
+    /// (#260). The catalogue is not universal — this names what the intrinsic
+    /// checks (library methods, builtin enums, class docs) were verified
+    /// against. See [`intrinsics::active_target`].
+    pub catalogue_target: &'static str,
 }
 
 impl CompletenessReport {
@@ -123,6 +129,7 @@ pub fn analyze(
         scripts_total: scripts.len(),
         cfg_loaded,
         dbc_loaded,
+        catalogue_target: intrinsics::active_target(),
         ..Default::default()
     };
 
@@ -321,6 +328,16 @@ mod tests {
         let scripts = parse_one("local x = 1;\n");
         let r = analyze(None, &scripts, true, true);
         assert!(r.cfg_loaded && r.dbc_loaded);
+    }
+
+    #[test]
+    fn report_surfaces_the_catalogue_target() {
+        // The completeness report names the firmware/manual target the intrinsic
+        // catalogue was captured from (#260), never empty.
+        let scripts = parse_one("local x = 1;\n");
+        let r = analyze(None, &scripts, false, false);
+        assert_eq!(r.catalogue_target, crate::intrinsics::active_target());
+        assert!(!r.catalogue_target.is_empty());
     }
 
     #[test]

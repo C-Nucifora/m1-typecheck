@@ -78,6 +78,12 @@ struct Args {
     /// 0. A clean run is not the same as a complete one; this shows the gap.
     #[arg(long)]
     completeness: bool,
+    /// Intrinsic-catalogue firmware/manual target to check against. The embedded
+    /// catalogue (`m1-build-2026-06`) is the default; an unknown target fails
+    /// loud, listing the known ones (never a silent wrong-firmware check). The
+    /// active target is reported by `--completeness`.
+    #[arg(long, value_name = "TARGET")]
+    firmware: Option<String>,
     /// Explain a channel's physical quantity: its declared base unit and the
     /// unit of every symbol directly assigned into it across the project's
     /// scripts (the whole auto-discovered set, like --explain — the positional
@@ -238,6 +244,10 @@ fn print_completeness(report: &m1_typecheck::completeness::CompletenessReport, f
                 "  inputs:          .m1cfg {}, .m1dbc {}",
                 if r.cfg_loaded { "loaded" } else { "absent" },
                 if r.dbc_loaded { "loaded" } else { "absent" },
+            );
+            println!(
+                "  catalogue:       {} (firmware/manual target)",
+                r.catalogue_target
             );
             if !r.cfg_loaded {
                 println!("  note: no .m1cfg — calibration coverage (T041) not checked");
@@ -707,6 +717,16 @@ fn main() {
 
     // Reject unknown T-codes in --select/--ignore up front (#111).
     validate_codes(&args);
+
+    // Reject an unknown `--firmware` target up front: an unrecognised target
+    // must fail loud (listing the known ones), never silently fall back to the
+    // default and check against the wrong firmware (#260).
+    if let Some(target) = &args.firmware
+        && let Err(msg) = m1_typecheck::intrinsics::resolve_target(target)
+    {
+        eprintln!("m1-typecheck: {msg}");
+        process::exit(2);
+    }
 
     // Locate the project and its augmenting config.
     let project_path = find_project(&args);
