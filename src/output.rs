@@ -161,7 +161,8 @@ pub fn render_completeness(r: &CompletenessReport) -> String {
 \"references\":{{\"total\":{},\"resolved\":{},\"opaque\":{},\"unresolved\":{},\"resolved_percent\":{}}},\
 \"intrinsic_calls\":{{\"total\":{},\"unmodelled\":{}}},\
 \"when_subjects\":{{\"total\":{},\"incomplete\":{}}},\
-\"inputs\":{{\"cfg_loaded\":{},\"dbc_loaded\":{}}}}}}}",
+\"inputs\":{{\"cfg_loaded\":{},\"dbc_loaded\":{}}},\
+\"catalogue_target\":{}}}}}",
         r.scripts_total,
         r.scripts_analysed(),
         r.scripts_with_syntax_errors,
@@ -180,6 +181,7 @@ pub fn render_completeness(r: &CompletenessReport) -> String {
         r.when_subjects_incomplete,
         r.cfg_loaded,
         r.dbc_loaded,
+        json_str(r.catalogue_target),
     )
 }
 

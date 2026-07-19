@@ -84,9 +84,20 @@ The catalogue merges curated entries with M1 Build help-pane captures
 (`M1_LIBRARIES_ENUMS_TYPES`): after a new capture set, run
 `python3 assets/merge-help-captures.py <captures-dir>`. Curated entries win on
 conflict (they carry `stateful`/`deprecated`/`calibrationOnly` flags and
-overload unions). Known limits: no firmware-version keying (the catalogue is a
-union across captured versions), and no variadic markers beyond what the
-captures expose.
+overload unions).
+
+The catalogue carries an explicit **firmware/manual target** in `source.target`
+(currently `m1-build-2026-06`), surfaced by `intrinsics::active_target()` and
+selectable with the CLI `--firmware <target>` flag (an unknown target fails
+loud, listing the known ones). Only one catalogue is embedded today, so the flag
+validates the target rather than switching data; a second target would extend
+`known_targets()` and the resolver. The completeness report (`--completeness`)
+prints the active target. Remaining limits: the embedded catalogue is still a
+union across the captured versions behind that single target label, and there
+are no variadic markers beyond what the captures expose. A `m1-tools.toml`
+config knob to select the target (rather than the CLI flag) can follow once a
+second catalogue exists — that schema lives in `m1-workspace`, out of scope
+here.
 
 > Historical note: this section previously specified a `builtins.json`-based
 > design (`Resolution::Builtin`, a `Builtins` registry) as future work. The
