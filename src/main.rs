@@ -71,6 +71,13 @@ struct Args {
     /// Print the T-code catalogue (honours --format json) and exit.
     #[arg(long)]
     rules: bool,
+    /// Report analysis *completeness* rather than findings: how much of the
+    /// project the checker could pin down (expressions typed, references
+    /// resolved, intrinsic calls catalogued, enum membership verified) versus
+    /// the silent `Unknown`/opaque surface. Honours `--format json`, then exits
+    /// 0. A clean run is not the same as a complete one; this shows the gap.
+    #[arg(long)]
+    completeness: bool,
     /// Explain a channel's physical quantity: its declared base unit and the
     /// unit of every symbol directly assigned into it across the project's
     /// scripts (the whole auto-discovered set, like --explain — the positional
@@ -188,6 +195,60 @@ fn print_rules(format: Format) {
     }
 }
 
+/// Print the analysis-completeness report (`--completeness`). SARIF is a
+/// findings format, so it falls back to the JSON coverage document; human mode
+/// prints a readable summary. The report is telemetry, never a gate — this
+/// always precedes an exit 0.
+fn print_completeness(report: &m1_typecheck::completeness::CompletenessReport, format: Format) {
+    match format {
+        Format::Json | Format::Sarif => println!("{}", output::render_completeness(report)),
+        Format::Human => {
+            let r = report;
+            println!("analysis completeness report");
+            println!(
+                "  scripts:         {} analysed ({} total, {} syntax-error, {} too-deep)",
+                r.scripts_analysed(),
+                r.scripts_total,
+                r.scripts_with_syntax_errors,
+                r.scripts_skipped_deep
+            );
+            println!(
+                "  expressions:     {}/{} typed ({:.1}% known)",
+                r.expressions_typed,
+                r.expressions_total,
+                r.typed_percent()
+            );
+            println!(
+                "  references:      {}/{} resolved ({:.1}%); {} opaque, {} unresolved",
+                r.references_resolved,
+                r.references_total,
+                r.resolved_percent(),
+                r.references_opaque,
+                r.references_unresolved
+            );
+            println!(
+                "  intrinsic calls: {}/{} unmodelled (method not in the catalogue)",
+                r.intrinsic_calls_unmodelled, r.intrinsic_calls_total
+            );
+            println!(
+                "  when subjects:   {}/{} with unverifiable enum membership",
+                r.when_subjects_incomplete, r.when_subjects_total
+            );
+            println!(
+                "  inputs:          .m1cfg {}, .m1dbc {}",
+                if r.cfg_loaded { "loaded" } else { "absent" },
+                if r.dbc_loaded { "loaded" } else { "absent" },
+            );
+            if !r.cfg_loaded {
+                println!("  note: no .m1cfg — calibration coverage (T041) not checked");
+            }
+            if !r.dbc_loaded {
+                println!("  note: no .m1dbc — CAN signal checks (T042/T108–T110) not exercised");
+            }
+        }
+    }
+}
+
 /// Trim each `--select`/`--ignore` token and drop the empty ones, so an empty
 /// value (`--ignore ""`), a whitespace-only value, or an empty entry from a
 /// trailing/double comma (`T002,`) is treated as "no code" rather than an
@@ -231,7 +292,15 @@ struct JsonBuf {
 /// notes (project-less / no-cfg / no-dbc) so a green CI run is not mistaken for
 /// "all clean". A bad project/config exits with code 2; a malformed DBC is warned
 /// and skipped without blanking the model.
-fn load_project(project_path: Option<&PathBuf>, config_path: Option<&PathBuf>) -> Option<Project> {
+///
+/// Returns the loaded project (if any) alongside whether a `.m1dbc` was
+/// discovered — the completeness report needs that flag and it cannot be
+/// re-derived after loading (the DBC symbols merge indistinguishably into the
+/// table).
+fn load_project(
+    project_path: Option<&PathBuf>,
+    config_path: Option<&PathBuf>,
+) -> (Option<Project>, bool) {
     // Track whether any `.m1dbc` was discovered so a project that loads but finds
     // none can announce that T042 is skipped (mirroring the cfg/project notes).
     let mut dbc_found = false;
@@ -283,7 +352,7 @@ fn load_project(project_path: Option<&PathBuf>, config_path: Option<&PathBuf>) -
             eprintln!("m1-typecheck: note: no .m1dbc found; T042 (dbc-signal-range) skipped");
         }
     }
-    project
+    (project, dbc_found)
 }
 
 /// Type-check every script on the command line, printing human-mode diagnostics
@@ -673,7 +742,8 @@ fn main() {
     let mut json_buf = JsonBuf::default();
 
     // Load the project model (config + DBCs) and emit degraded-run notes.
-    let mut project = load_project(project_path.as_ref(), config_path.as_ref());
+    let (mut project, dbc_loaded) = load_project(project_path.as_ref(), config_path.as_ref());
+    let cfg_loaded = config_path.is_some();
 
     // The script sources back both return-type inference (#110) and the
     // cross-script invalid-value solve (#78 P3); read them once.
@@ -717,6 +787,21 @@ fn main() {
     // that back no function symbol are simply ignored by the pass.
     if let Some(p) = project.as_mut() {
         p.infer_return_types(&parsed_scripts);
+    }
+
+    // `--completeness`: report how much of the project the analysis could pin
+    // down (not findings), then exit 0. A query mode like `--rules`/`--explain`:
+    // it runs after the model is loaded and return types inferred, so the
+    // coverage reflects the full analysis the normal run would perform.
+    if args.completeness {
+        let report = m1_typecheck::completeness::analyze(
+            project.as_ref(),
+            &parsed_scripts,
+            cfg_loaded,
+            dbc_loaded,
+        );
+        print_completeness(&report, args.format);
+        return;
     }
 
     // Solve the project-wide channel taint graph so cross-script invalid

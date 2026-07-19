@@ -9,6 +9,7 @@
 //! exact byte-for-byte shape the existing CLI tests assert.
 
 use m1_core::Severity;
+use m1_typecheck::completeness::CompletenessReport;
 use m1_typecheck::diagnostics::TypeDiagnostic;
 
 /// One file's buffered diagnostics for the JSON document.
@@ -146,6 +147,40 @@ fn diag_json(d: &TypeDiagnostic) -> String {
     }
     out.push('}');
     out
+}
+
+/// The analysis-completeness report (`--completeness --format json`, #259) as a
+/// machine-readable coverage document. Deterministic field order; percentages
+/// are numbers (one decimal). Dependency-free string building to match the rest
+/// of this module and keep the CLI tests byte-stable.
+pub fn render_completeness(r: &CompletenessReport) -> String {
+    format!(
+        "{{\"version\":1,\"completeness\":{{\
+\"scripts\":{{\"total\":{},\"analysed\":{},\"syntax_errors\":{},\"skipped_deep\":{}}},\
+\"expressions\":{{\"total\":{},\"typed\":{},\"typed_percent\":{}}},\
+\"references\":{{\"total\":{},\"resolved\":{},\"opaque\":{},\"unresolved\":{},\"resolved_percent\":{}}},\
+\"intrinsic_calls\":{{\"total\":{},\"unmodelled\":{}}},\
+\"when_subjects\":{{\"total\":{},\"incomplete\":{}}},\
+\"inputs\":{{\"cfg_loaded\":{},\"dbc_loaded\":{}}}}}}}",
+        r.scripts_total,
+        r.scripts_analysed(),
+        r.scripts_with_syntax_errors,
+        r.scripts_skipped_deep,
+        r.expressions_total,
+        r.expressions_typed,
+        r.typed_percent(),
+        r.references_total,
+        r.references_resolved,
+        r.references_opaque,
+        r.references_unresolved,
+        r.resolved_percent(),
+        r.intrinsic_calls_total,
+        r.intrinsic_calls_unmodelled,
+        r.when_subjects_total,
+        r.when_subjects_incomplete,
+        r.cfg_loaded,
+        r.dbc_loaded,
+    )
 }
 
 /// SARIF 2.1.0 output (`--format sarif`, #185) — the interchange format GitHub
