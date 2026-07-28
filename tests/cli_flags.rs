@@ -75,6 +75,7 @@ fn rules_lists_every_t_code() {
     assert!(s.contains("T002  float-equality"), "got:\n{s}");
     assert!(s.contains("T041  missing-cfg-parameter"));
     assert!(s.contains("T064  wrong-argument-count"));
+    assert!(s.contains("T065  intrinsic-argument-type-mismatch"));
 }
 
 #[test]
@@ -86,6 +87,7 @@ fn rules_json_is_valid_and_covers_codes() {
     let codes: Vec<&str> = rules.iter().map(|r| r["code"].as_str().unwrap()).collect();
     assert!(codes.contains(&"T001"));
     assert!(codes.contains(&"T064"));
+    assert!(codes.contains(&"T065"));
 }
 
 #[test]

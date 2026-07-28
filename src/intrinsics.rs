@@ -10,6 +10,8 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use crate::types::ValueType;
+
 #[derive(Debug, Deserialize)]
 pub struct Param {
     pub name: String,
@@ -41,6 +43,57 @@ pub struct Overload {
     /// completion; surfaced (labelled) in hover.
     #[serde(default, rename = "calibrationOnly")]
     pub calibration_only: bool,
+}
+
+/// Whether the known argument types can select this overload.
+///
+/// `Unknown` arguments remain viable: an incomplete project model must never
+/// turn into a type error. Known arguments use the same widening rules as M1
+/// assignment/function-call conversion (manual pp.43–46): integral values can
+/// satisfy either integer spelling or a floating-point parameter, while a
+/// floating-point value cannot narrow to an integer parameter.
+///
+/// The catalogue spells M1's paired numeric overloads as repeated
+/// `Integer|FloatingPoint` parameters. Those occurrences are one shared
+/// overload choice, not independent unions: for example, `Calculate.Max` is
+/// `(Integer, Integer)` OR `(Floating Point, Floating Point)`. M1 Build rejects
+/// a call that mixes those alternatives, so every known union argument in one
+/// signature must select the same numeric family.
+pub(crate) fn overload_accepts_args(overload: &Overload, args: &[ValueType]) -> bool {
+    if overload.params.len() != args.len() {
+        return false;
+    }
+
+    let mut union_is_float: Option<bool> = None;
+    for (param, &arg) in overload.params.iter().zip(args) {
+        if arg == ValueType::Unknown {
+            continue;
+        }
+        let accepted = match param.ty.as_str() {
+            "Integer" | "UnsignedInteger" => arg.is_integral(),
+            "FloatingPoint" | "FixedPoint7dps" => arg.is_integral() || arg.is_float(),
+            "Boolean" => arg == ValueType::Boolean,
+            "String" => arg == ValueType::String,
+            "Integer|FloatingPoint" if arg.is_integral() || arg.is_float() => {
+                let is_float = arg.is_float();
+                match union_is_float {
+                    Some(selected) => selected == is_float,
+                    None => {
+                        union_is_float = Some(is_float);
+                        true
+                    }
+                }
+            }
+            "Integer|FloatingPoint" => false,
+            // Handle and any future firmware-specific types are not represented
+            // in ValueType. Keep them opaque rather than guessing.
+            _ => true,
+        };
+        if !accepted {
+            return false;
+        }
+    }
+    true
 }
 
 #[derive(Debug, Deserialize)]
