@@ -178,6 +178,43 @@ fn ambiguous_reference_check_is_corpus_clean() {
     eprintln!("T103 ambiguous-reference clean over {checked} corpus scripts");
 }
 
+/// T065's catalogue-driven argument matching is default-on, so it must stay
+/// clean over both M1-Build-valid corpora. This pins the conservative boundary:
+/// known incompatible argument types flag, while unmodelled/Unknown values do
+/// not become guesses.
+#[test]
+fn intrinsic_argument_types_are_corpus_clean() {
+    let corpora = all_corpora();
+    if corpora.is_empty() {
+        eprintln!("corpus absent; skipping");
+        return;
+    }
+    use m1_typecheck::diagnostics::TypeCode::T065;
+    let mut checked = 0usize;
+    for (proj_path, dir) in &corpora {
+        let project = Project::load(proj_path).expect("load project");
+        let mut scripts = Vec::new();
+        scripts_under(dir, &mut scripts);
+        for script in &scripts {
+            let src = std::fs::read_to_string(script).expect("read");
+            let hits: Vec<_> = check_script(&project, script, &src)
+                .diagnostics
+                .into_iter()
+                .filter(|d| d.code == T065)
+                .map(|d| format!("{}: {}", script.display(), d.inner.message))
+                .collect();
+            assert!(
+                hits.is_empty(),
+                "T065 intrinsic argument matching false-positived on the real corpus:\n{}",
+                hits.join("\n")
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "no corpus scripts found");
+    eprintln!("T065 intrinsic argument matching clean over {checked} corpus scripts");
+}
+
 /// (project, all parsed scripts) for a corpus — the COMPLETE script set the
 /// cross-script audits require. Mirrors the CLI's whole-project gather.
 fn load_project_and_scripts(

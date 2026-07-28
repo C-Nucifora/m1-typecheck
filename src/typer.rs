@@ -120,7 +120,10 @@ fn type_of_call(node: Node, scope: &Scope) -> ValueType {
         Resolution::BuiltinFn(overloads) => {
             let arg_types = call_arg_types(node, scope);
             let mut result: Option<ValueType> = None;
-            for ov in &overloads {
+            for ov in overloads
+                .iter()
+                .filter(|ov| crate::intrinsics::overload_accepts_args(ov, &arg_types))
+            {
                 let t = returns_to_type(&ov.returns, &arg_types);
                 match result {
                     None => result = Some(t),
@@ -271,7 +274,7 @@ mod tests {
             ValueType::Float
         );
         assert_eq!(
-            type_of_first_call("local x = Calculate.Between(1.0, 0.0, 2.0);\n"),
+            type_of_first_call("local x = Calculate.Between(1.0, 0.0, 2.0, 0.1);\n"),
             ValueType::Boolean
         );
         assert_eq!(
@@ -279,7 +282,7 @@ mod tests {
             ValueType::Integer
         );
         assert_eq!(
-            type_of_first_call("local x = CanComms.GetTicks();\n"),
+            type_of_first_call("local x = CanComms.GetTicks(h);\n"),
             ValueType::Unsigned
         );
     }

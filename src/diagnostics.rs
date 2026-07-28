@@ -23,6 +23,7 @@ pub enum TypeCode {
     T062, // deprecated-overload
     T063, // calibration-only-call
     T064, // wrong-argument-count (opt-in)
+    T065, // intrinsic-argument-type-mismatch (no library overload accepts the known argument types)
     T070, // when-is-exhaustive
     T071, // name-case-collision (project audit)
     T080, // invalid-value-reaches-finite-sink (NaN/Inf provenance; @requires-finite/@safety-critical)
@@ -81,6 +82,7 @@ impl TypeCode {
             TypeCode::T062 => "T062",
             TypeCode::T063 => "T063",
             TypeCode::T064 => "T064",
+            TypeCode::T065 => "T065",
             TypeCode::T070 => "T070",
             TypeCode::T071 => "T071",
             TypeCode::T080 => "T080",
@@ -143,6 +145,7 @@ impl TypeCode {
             TypeCode::T062 => "deprecated-overload",
             TypeCode::T063 => "calibration-only-call",
             TypeCode::T064 => "wrong-argument-count",
+            TypeCode::T065 => "intrinsic-argument-type-mismatch",
             TypeCode::T070 => "when-is-exhaustive",
             TypeCode::T071 => "name-case-collision",
             TypeCode::T080 => "invalid-value-reaches-finite-sink",
@@ -187,9 +190,9 @@ impl TypeCode {
         use TypeCode::*;
         &[
             T001, T002, T003, T004, T005, T006, T010, T020, T021, T030, T031, T040, T041, T042,
-            T050, T060, T061, T062, T063, T064, T070, T071, T080, T081, T082, T083, T084, T085,
-            T086, T087, T088, T089, T090, T091, T092, T093, T094, T095, T096, T097, T098, T099,
-            T100, T101, T102, T103, T104, T105, T106, T107, T108, T109, T110,
+            T050, T060, T061, T062, T063, T064, T065, T070, T071, T080, T081, T082, T083, T084,
+            T085, T086, T087, T088, T089, T090, T091, T092, T093, T094, T095, T096, T097, T098,
+            T099, T100, T101, T102, T103, T104, T105, T106, T107, T108, T109, T110,
         ]
     }
 }
@@ -326,6 +329,6 @@ mod tests {
             );
         }
         // Catalogue size tracks the enum (bump both together).
-        assert_eq!(codes.len(), 53);
+        assert_eq!(codes.len(), 54);
     }
 }

@@ -20,6 +20,7 @@ pub mod t061_integrated_only;
 pub mod t062_deprecated_overload;
 pub mod t063_calibration_only;
 pub mod t064_arg_count;
+pub mod t065_intrinsic_arg_mismatch;
 pub mod t070_when_exhaustive;
 pub mod t083_static_local_init;
 pub mod t084_expand_bounds;
@@ -103,6 +104,7 @@ impl Default for Registry {
                 Box::new(t061_integrated_only::Rule),
                 Box::new(t062_deprecated_overload::Rule),
                 Box::new(t063_calibration_only::Rule),
+                Box::new(t065_intrinsic_arg_mismatch::Rule),
                 Box::new(t070_when_exhaustive::Rule),
                 Box::new(t083_static_local_init::Rule),
                 Box::new(t085_user_arg_mismatch::Rule),

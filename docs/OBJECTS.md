@@ -56,8 +56,10 @@ These are modelled by the vendored intrinsics catalogue,
   library name is reached via the `This.`/`Library.` anchors.
 - **Rules** that consume resolved built-ins:
   [T064](../src/rules/t064_arg_count.rs) wrong-argument-count (union-aware
-  across overload arities), [T061/T062/T063](../src/rules/) stateful /
-  deprecated / calibration-only usage.
+  across overload arities),
+  [T065](../src/rules/t065_intrinsic_arg_mismatch.rs) argument/overload type
+  matching, and [T061/T062/T063](../src/rules/) stateful / deprecated /
+  calibration-only usage.
 - **Typing**: `BuiltinFn` return types feed the typer, so downstream checks
   (T030 and friends) see through library calls.
 - **Editors**: hover, completion, signature help and the diagnostics all go
