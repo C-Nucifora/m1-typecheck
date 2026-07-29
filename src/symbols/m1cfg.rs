@@ -1,5 +1,5 @@
 //! Parse parameters.m1cfg and augment matching symbols with value type + unit.
-use super::{SymbolTable, TableAxis, TableMeta, XmlParseError};
+use super::{Symbol, SymbolTable, TableAxis, TableMeta, XmlParseError};
 use crate::types::ValueType;
 
 /// Map a `.m1cfg` cell primitive type to a [`ValueType`]. `enum` cells are
@@ -7,6 +7,15 @@ use crate::types::ValueType;
 /// any non-primitive name falls through to `Unknown`.
 pub fn cell_type(t: &str) -> ValueType {
     crate::types::primitive_type(t).unwrap_or(ValueType::Unknown)
+}
+
+/// Record a `<Cell>`'s text on the symbol, ignoring an empty cell. A value
+/// already set from the `.m1prj` (a constant's `<Props Value>`) is left alone —
+/// the project's own literal outranks a cfg export of it.
+fn set_static_value(sym: &mut Symbol, value: &str) {
+    if !value.is_empty() && sym.static_value.is_none() {
+        sym.static_value = Some(value.to_string());
+    }
 }
 
 pub fn augment(table: &mut SymbolTable, xml: &str) -> Result<(), XmlParseError> {
@@ -37,18 +46,26 @@ pub fn augment(table: &mut SymbolTable, xml: &str) -> Result<(), XmlParseError> 
                 let id = candidates[0];
                 table.set_enum_assoc(&path, id);
             }
-            // zero or many -> leave Unknown (silent), but still record the unit.
-            if let Some(sym) = table.get_mut(&path)
-                && sym.unit.is_none()
-            {
-                sym.unit = unit;
+            // zero or many -> leave Unknown (silent), but still record the unit
+            // and the member the cfg holds (a value is a value, resolved or not).
+            if let Some(sym) = table.get_mut(&path) {
+                if sym.unit.is_none() {
+                    sym.unit = unit;
+                }
+                set_static_value(sym, member);
             }
             continue;
         }
 
         let vt = cell_type(type_attr);
+        let value = cell.text().map(str::trim).unwrap_or("");
         if let Some(sym) = table.get_mut(&path) {
             sym.value_type = vt;
+            // The cfg cell is the parameter's *current calibration* — the only
+            // place a parameter's value exists at all (the .m1prj carries none).
+            // Consumers must read it together with the symbol's kind: a retune
+            // moves it. See `Symbol::static_value`.
+            set_static_value(sym, value);
             // The authoritative unit is the quantity's base unit set from the
             // `.m1prj` `<Props Qty>`. A cfg cell unit may be a display unit, so it
             // only *fills* a missing unit — it never overrides the base unit.
@@ -237,6 +254,89 @@ mod tests {
             table.get("Root.Boost.Value").unwrap().unit.as_deref(),
             Some("deg/s"),
             "cfg display unit `rpm` must not override authoritative base unit `deg/s`"
+        );
+    }
+
+    #[test]
+    fn cfg_cell_value_lands_on_the_symbol() {
+        // A parameter's value exists ONLY in the cfg — the .m1prj carries none —
+        // and a constant's `<Props Value>` is fixed by the project. Both surface
+        // as `static_value` so a consumer can resolve a symbol to a number
+        // (e.g. which CAN bus `Datalogger Bus` names) instead of guessing.
+        let prj = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.Parameter" Name="Root.CAN.Datalogger Bus">
+    <Props Type="s32"/>
+  </Component>
+  <Component Classname="BuiltIn.Constant" Name="Root.CAN.Active Bus">
+    <Props Type="s32" Value="0"/>
+  </Component>
+</Project>"#;
+        let mut table = m1prj::parse(prj).unwrap().table;
+        assert_eq!(
+            table
+                .get("Root.CAN.Active Bus")
+                .unwrap()
+                .static_value
+                .as_deref(),
+            Some("0"),
+            "a constant's value comes straight from the .m1prj"
+        );
+        assert_eq!(
+            table.get("Root.CAN.Datalogger Bus").unwrap().static_value,
+            None,
+            "no cfg loaded yet, so the parameter has no value"
+        );
+
+        let cfg = r#"<?xml version="1.0"?>
+<Configuration>
+  <Parameter Name="CAN.Datalogger Bus"><Cell Type="s32">2</Cell></Parameter>
+  <Parameter Name="CAN.Active Bus"><Cell Type="s32">7</Cell></Parameter>
+</Configuration>"#;
+        augment(&mut table, cfg).unwrap();
+
+        assert_eq!(
+            table
+                .get("Root.CAN.Datalogger Bus")
+                .unwrap()
+                .static_value
+                .as_deref(),
+            Some("2"),
+            "the cfg cell is the parameter's current calibration"
+        );
+        assert_eq!(
+            table
+                .get("Root.CAN.Active Bus")
+                .unwrap()
+                .static_value
+                .as_deref(),
+            Some("0"),
+            "the project's own constant literal outranks a cfg export of it"
+        );
+    }
+
+    #[test]
+    fn cfg_enum_cell_value_is_the_member_name() {
+        let prj = r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.Parameter" Name="Root.CAN.Bus.Mode.Value">
+    <Props Type="s32"/>
+  </Component>
+</Project>"#;
+        let mut table = m1prj::parse(prj).unwrap().table;
+        let cfg = r#"<?xml version="1.0"?>
+<Configuration>
+  <Parameter Name="CAN.Bus.Mode.Value"><Cell Type="enum">500kbps</Cell></Parameter>
+</Configuration>"#;
+        augment(&mut table, cfg).unwrap();
+        assert_eq!(
+            table
+                .get("Root.CAN.Bus.Mode.Value")
+                .unwrap()
+                .static_value
+                .as_deref(),
+            Some("500kbps"),
+            "an enum cell contributes its member name"
         );
     }
 }

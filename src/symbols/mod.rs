@@ -184,6 +184,17 @@ pub struct Symbol {
     /// default value as a value is M1 Build Error 1331 (T106). `None` for
     /// non-groups and for groups that declare no usable default value.
     pub default_value: Option<String>,
+    /// The symbol's statically-known scalar value, verbatim: a
+    /// [`SymbolKind::Constant`]'s `.m1prj` `<Props Value="…">`, or the `<Cell>`
+    /// text a loaded `parameters.m1cfg` holds for it (an enum cell contributes
+    /// its member name). `None` when neither source carries one — a channel, a
+    /// table, or a parameter with no cfg entry.
+    ///
+    /// Read it with the symbol's [`Symbol::kind`] in hand: a `Constant`'s value
+    /// is fixed by the project, while a `Parameter`'s is the **current
+    /// calibration** and a retune changes it. Anything concluded from a
+    /// parameter's value holds only for the loaded `.m1cfg`.
+    pub static_value: Option<String>,
 }
 
 /// Shape of a `BuiltIn.Table`, read from the `.m1cfg` `<Table>` element: its
