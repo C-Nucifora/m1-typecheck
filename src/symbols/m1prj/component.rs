@@ -177,6 +177,9 @@ struct ComponentProps {
     /// Raw `<Props Target="…">` of a `BuiltIn.Reference` component, verbatim;
     /// `None` for non-references or references without a `Target`.
     reference_target: Option<String>,
+    /// Raw `<Props Value="…">` of a `BuiltIn.Constant`, verbatim; `None` for
+    /// every other kind.
+    static_value: Option<String>,
     /// A `BuiltIn.GroupCompound`'s Default Value from
     /// `<Props UseDefValue="true" DefValue="…">`; `None` for non-groups and
     /// groups that declare no usable default value (T106 / Error 1331).
@@ -354,9 +357,22 @@ fn component_props(
     } else {
         None
     };
+    // A `BuiltIn.Constant`'s literal value (`<Props Type="s32" Value="0"/>`).
+    // The project fixes it, so it is statically known — unlike a parameter,
+    // whose value only exists in a `.m1cfg` and moves with calibration.
+    let static_value = if kind == SymbolKind::Constant {
+        props
+            .and_then(|p| p.attribute("Value"))
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+    } else {
+        None
+    };
     ComponentProps {
         value_type,
         enum_assoc,
+        static_value,
         declared_type,
         unit,
         qty,
@@ -441,6 +457,7 @@ pub(super) fn symbol_from_component(
         table_meta: props.table_meta,
         reference_target: props.reference_target,
         default_value: props.default_value,
+        static_value: props.static_value,
     })
 }
 
