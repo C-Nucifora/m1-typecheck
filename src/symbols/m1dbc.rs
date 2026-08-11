@@ -103,7 +103,7 @@ pub fn augment(
 /// unbounded for this check) or a missing/zero `Length`.
 fn signal_range(props: roxmltree::Node<'_, '_>) -> Option<(f64, f64)> {
     let ty = props.attribute("Type")?;
-    let length: i32 = props.attribute("Length")?.parse().ok()?;
+    let length = hex_uint(props.attribute("Length")?)? as i32;
     if length <= 0 {
         return None;
     }
@@ -128,17 +128,31 @@ fn signal_range(props: roxmltree::Node<'_, '_>) -> Option<(f64, f64)> {
     Some((a.min(b), a.max(b)))
 }
 
+/// Parse a `.m1dbc` integer attribute. MoTeC writes them in **hexadecimal
+/// without a prefix** — the corpora prove it (`CANId="4B3"`, `StartBit="3F"`,
+/// and AMK's 16-bit Speed field stored as `StartBit="10" Length="10"`) — so a
+/// digit-only value like `133` is 0x133, not 133. An explicit `0x` prefix is
+/// tolerated for hand-authored files.
+fn hex_uint(s: &str) -> Option<u32> {
+    let s = s
+        .strip_prefix("0x")
+        .or_else(|| s.strip_prefix("0X"))
+        .unwrap_or(s);
+    u32::from_str_radix(s, 16).ok()
+}
+
 /// Retain the CAN layout fields a hover wants to show. For a
 /// `BuiltIn.CAN.Message` that is the frame's `CANId` + `DLC`; for a
 /// `BuiltIn.CAN.Signal` it is the `StartBit`/`Length` bit layout and the
 /// `Multiplier`/`Offset` scaling. Returns `None` (rather than an empty struct)
 /// when no relevant attribute is present, and for other classnames.
 fn can_meta(props: roxmltree::Node<'_, '_>, classname: &str) -> Option<CanMeta> {
-    let uint = |attr: &str| props.attribute(attr).and_then(|s| s.parse::<u32>().ok());
+    let uint = |attr: &str| props.attribute(attr).and_then(hex_uint);
     let float = |attr: &str| props.attribute(attr).and_then(|s| s.parse::<f64>().ok());
     let meta = match classname {
         "BuiltIn.CAN.Message" => CanMeta {
             can_id: uint("CANId"),
+            extended: props.attribute("IdType") == Some("Extended"),
             dlc: uint("DLC"),
             // `Transmit="RX"|"TX"` is the message's direction; anything else
             // (or absent) leaves it unknown so the direction check stays silent.
@@ -195,7 +209,8 @@ mod tests {
         let msg = table.get("Balls3EV25.DashVals").expect("message symbol");
         assert_eq!(msg.kind, SymbolKind::Object);
         let msg_can = msg.can.as_ref().expect("message CAN meta");
-        assert_eq!(msg_can.can_id, Some(291));
+        // `CANId="291"` is hex: 0x291.
+        assert_eq!(msg_can.can_id, Some(0x291));
         assert_eq!(msg_can.dlc, Some(8));
         // `Transmit="RX"` is captured as the receive direction (T109 input).
         assert_eq!(msg_can.transmit, Some(CanDirection::Rx));
@@ -208,7 +223,8 @@ mod tests {
         assert_eq!(sig.unit.as_deref(), Some("deg")); // from Qty
         let sig_can = sig.can.as_ref().expect("signal CAN meta");
         assert_eq!(sig_can.start_bit, Some(0));
-        assert_eq!(sig_can.length, Some(10));
+        // `Length="10"` is hex: a 16-bit field.
+        assert_eq!(sig_can.length, Some(0x10));
         assert_eq!(sig_can.multiplier, Some(0.5));
         assert_eq!(sig_can.offset, Some(2.0));
 
@@ -266,6 +282,118 @@ mod tests {
                 .unwrap()
                 .transmit,
             None
+        );
+    }
+
+    // `.m1dbc` integer attributes are HEXADECIMAL without a prefix — the real
+    // corpora prove it: the DTI inverter files declare `CANId="4B3"`/`"4D4"`
+    // (impossible as decimal) whose ids only satisfy the DTI `command<<5|node`
+    // scheme read as hex, and the AMK file's Speed signal is
+    // `StartBit="10" Length="10"` — the datasheet's 16-bit field at bit 16.
+    #[test]
+    fn parses_can_id_as_hex() {
+        let xml = r#"<?xml version="1.0"?>
+<DBC>
+ <ComponentStream>
+  <List>
+   <Component Classname="BuiltIn.CAN.DBC" Name="DTI"/>
+   <Component Classname="BuiltIn.CAN.Message" Name="DTI.Lettered"><Props CANId="4B3" DLC="8"/></Component>
+   <Component Classname="BuiltIn.CAN.Message" Name="DTI.DigitsOnly"><Props CANId="133" DLC="8"/></Component>
+  </List>
+ </ComponentStream>
+</DBC>"#;
+        let mut table = SymbolTable::default();
+        augment(&mut table, xml, "dbc/DTI.m1dbc").unwrap();
+        // A hex-lettered id must not be dropped …
+        assert_eq!(
+            table
+                .get("DTI.Lettered")
+                .unwrap()
+                .can
+                .as_ref()
+                .unwrap()
+                .can_id,
+            Some(0x4B3)
+        );
+        // … and a digit-only id is still hex: `133` is 0x133 = 307, not 133.
+        assert_eq!(
+            table
+                .get("DTI.DigitsOnly")
+                .unwrap()
+                .can
+                .as_ref()
+                .unwrap()
+                .can_id,
+            Some(0x133)
+        );
+    }
+
+    #[test]
+    fn parses_signal_layout_as_hex() {
+        let xml = r#"<?xml version="1.0"?>
+<DBC>
+ <ComponentStream>
+  <List>
+   <Component Classname="BuiltIn.CAN.DBC" Name="AMK"/>
+   <Component Classname="BuiltIn.CAN.Message" Name="AMK.Actual Values 1"><Props CANId="284" DLC="8"/></Component>
+   <Component Classname="BuiltIn.CAN.Signal" Name="AMK.Actual Values 1.Speed">
+    <Props Type="s32" StartBit="10" Length="10" Multiplier="1.00000000000000000e+00" Offset="0.00000000000000000e+00"/>
+   </Component>
+   <Component Classname="BuiltIn.CAN.Signal" Name="AMK.Actual Values 1.Last Bit">
+    <Props Type="bool" StartBit="3F" Length="1"/>
+   </Component>
+  </List>
+ </ComponentStream>
+</DBC>"#;
+        let mut table = SymbolTable::default();
+        augment(&mut table, xml, "dbc/AMK.m1dbc").unwrap();
+        let speed = table.get("AMK.Actual Values 1.Speed").unwrap();
+        let speed_can = speed.can.as_ref().unwrap();
+        // AMK's actual-speed field: 16 bits (0x10) at bit 16 (0x10).
+        assert_eq!(speed_can.start_bit, Some(16));
+        assert_eq!(speed_can.length, Some(16));
+        // The T042 range follows the 16-bit width: s16 raw −32768..32767.
+        assert_eq!(speed.dbc_range, Some((-32768.0, 32767.0)));
+        // Bit 0x3F = 63, the last bit of an 8-byte frame — droppable as decimal 3F.
+        assert_eq!(
+            table
+                .get("AMK.Actual Values 1.Last Bit")
+                .unwrap()
+                .can
+                .as_ref()
+                .unwrap()
+                .start_bit,
+            Some(63)
+        );
+    }
+
+    // `IdType="Extended"` marks a 29-bit id (the corpora only write IdType when
+    // extended); its absence means a standard 11-bit frame.
+    #[test]
+    fn captures_extended_id_type() {
+        let xml = r#"<?xml version="1.0"?>
+<DBC>
+ <ComponentStream>
+  <List>
+   <Component Classname="BuiltIn.CAN.DBC" Name="Steering"/>
+   <Component Classname="BuiltIn.CAN.Message" Name="Steering.Status"><Props IdType="Extended" CANId="2968" DLC="8"/></Component>
+   <Component Classname="BuiltIn.CAN.Message" Name="Steering.Std"><Props CANId="171" DLC="8"/></Component>
+  </List>
+ </ComponentStream>
+</DBC>"#;
+        let mut table = SymbolTable::default();
+        augment(&mut table, xml, "dbc/Steering.m1dbc").unwrap();
+        let ext = table.get("Steering.Status").unwrap().can.clone().unwrap();
+        assert_eq!(ext.can_id, Some(0x2968));
+        assert!(ext.extended);
+        assert!(
+            !table
+                .get("Steering.Std")
+                .unwrap()
+                .can
+                .as_ref()
+                .unwrap()
+                .extended
         );
     }
 
