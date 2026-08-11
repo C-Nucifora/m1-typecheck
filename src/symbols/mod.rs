@@ -242,8 +242,13 @@ pub enum CanDirection {
 /// path to combine the two in one tooltip.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CanMeta {
-    /// CAN identifier of the message (decimal, as stored in the `.m1dbc`).
+    /// CAN identifier of the message. The `.m1dbc` stores it in **hexadecimal
+    /// without a prefix** (`CANId="4B3"` is 0x4B3); this is the parsed number.
     pub can_id: Option<u32>,
+    /// True when the message declares `IdType="Extended"` (a 29-bit id). The
+    /// corpora only write `IdType` for extended frames, so absence means a
+    /// standard 11-bit id.
+    pub extended: bool,
     /// Data-length code — the message payload size in bytes.
     pub dlc: Option<u32>,
     /// Transmit direction of the message (`Rx`/`Tx`), from `<Props Transmit>`.
