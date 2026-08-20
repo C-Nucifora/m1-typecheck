@@ -161,6 +161,8 @@ struct ComponentProps {
     /// Raw `<Props><Locale><Default Unit>` (the display unit to validate).
     display_unit: Option<String>,
     security: Option<String>,
+    flash_backed: bool,
+    io_resource_assigned: bool,
     call_rate_hz: Option<f64>,
     /// True when `<Props SelectedTrigger="…">` is present and non-empty — the
     /// function is bound to a schedule event (any clock, `On Startup`, or a
@@ -378,6 +380,13 @@ fn component_props(
         qty,
         display_unit,
         security,
+        flash_backed: kind == SymbolKind::Channel
+            && props.and_then(|p| p.attribute("Storage")) == Some("Flash"),
+        io_resource_assigned: matches!(
+            classname,
+            "BuiltIn.IOResourceValueInput" | "BuiltIn.IOResourceValueOutput"
+        ) && props.and_then(|p| p.attribute("NameCreation"))
+            == Some("AutoParam"),
         call_rate_hz,
         scheduled,
         log_rate_hz,
@@ -441,6 +450,8 @@ pub(super) fn symbol_from_component(
         qty: props.qty,
         display_unit: props.display_unit,
         security: props.security,
+        flash_backed: props.flash_backed,
+        io_resource_assigned: props.io_resource_assigned,
         filename,
         enum_assoc: props.enum_assoc,
         class: props.class,

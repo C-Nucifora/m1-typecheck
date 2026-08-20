@@ -297,56 +297,36 @@ pub fn audit_name_collisions(project: &Project) -> Vec<TypeDiagnostic> {
     out
 }
 
-/// Project-level tags audit (T092, default-on) — M1 Build tag-warning parity.
-///
-/// Manual p.67 (*Tags*): every object can carry tags in three groups — System
-/// (`Engine`/`Vehicle`/`Driver`), Type (`Normal`/`Diagnostic`/`Advanced`/
-/// `Pin`/`Tune`/`Setup`) and the optional I/O group — and *"If a tag in this
-/// group is not selected, M1 Build will emit a warning"* for the first two.
-/// This mirrors those two warnings per user-defined Channel/Parameter, using
-/// each symbol's **effective** tag set ([`crate::symbols::Symbol::tags`]: own
-/// `SelectedTags` ∪ inherited group tags, #170). Package-object internals are
-/// exempt (same `ObjectOwnership` rule as the naming audit).
-///
-/// Default-on: M1 Build emits exactly these warnings itself (the real AV-M1
-/// project has hundreds), so surfacing them is parity, not noise. (Severity stays
-/// Warning; teams that don't tag can `--ignore T092`.)
+/// Project-level mandatory-Type-tag audit (T092 / M1 Build warning 1142).
+/// Ordinary untagged channels and parameters are legal. The known local cases
+/// are project-owned tables and IO resources that create an assigned parameter.
+/// Package-owned tables are exempt because their effective module tags are not
+/// serialised in `Project.m1prj`.
 pub fn audit_tags(project: &Project) -> Vec<TypeDiagnostic> {
-    const SYSTEM_TAGS: [&str; 3] = ["Engine", "Vehicle", "Driver"];
     const TYPE_TAGS: [&str; 6] = ["Normal", "Diagnostic", "Advanced", "Pin", "Tune", "Setup"];
     let table = project.symbols();
     let ownership = ObjectOwnership::new(table);
     let mut out = Vec::new();
     for sym in table.iter() {
-        if !matches!(sym.kind, SymbolKind::Channel | SymbolKind::Parameter) {
-            continue;
-        }
-        if ownership.owned_by_object(&sym.path) {
-            continue;
-        }
         let has_tag_in = |group: &[&str]| {
             sym.tags
                 .iter()
                 .any(|t| group.iter().any(|g| g.eq_ignore_ascii_case(t)))
         };
-        if !has_tag_in(&SYSTEM_TAGS) {
+        let project_table = sym.kind == SymbolKind::Table && !ownership.owned_by_object(&sym.path);
+        let assigned_resource = sym.io_resource_assigned;
+        if (project_table || assigned_resource) && !has_tag_in(&TYPE_TAGS) {
+            let subject = if project_table {
+                "project-owned table"
+            } else {
+                "assigned IO resource"
+            };
             out.push(make_project_for(
                 TypeCode::T092,
                 Severity::Warning,
                 format!(
-                    "{:?} `{}` has no System tag selected (Engine/Vehicle/Driver) — M1 Build will warn",
-                    sym.kind, sym.path
-                ),
-                &sym.path,
-            ));
-        }
-        if !has_tag_in(&TYPE_TAGS) {
-            out.push(make_project_for(
-                TypeCode::T092,
-                Severity::Warning,
-                format!(
-                    "{:?} `{}` has no Type tag selected (Normal/Diagnostic/Advanced/Pin/Tune/Setup) — M1 Build will warn",
-                    sym.kind, sym.path
+                    "{subject} `{}` has no Type tag selected (known M1 Build warning 1142 case)",
+                    sym.path
                 ),
                 &sym.path,
             ));

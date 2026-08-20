@@ -38,7 +38,7 @@ pub enum TypeCode {
     T089, // rate-inversion (opt-in: a faster script reads a channel written only at a slower rate)
     T090, // expression-nesting-too-deep (analysis skipped to avoid a stack overflow)
     T091, // local-object-case-ambiguity (a local's name matches a referenced object leaf modulo case; manual pp.64-65)
-    T092, // untagged-component (M1 Build parity 1142/1549: no System / Type tag selected, manual p.67)
+    T092, // untagged-component (known M1 Build 1142 cases: project tables and assigned IO resources)
     T093, // unassigned-channel (M1 Build Error 1627: a channel no script writes)
     T094, // unread-parameter (M1 Build Error 1631: a parameter no script reads)
     T095, // invalid-display-unit (M1 Build Error 1017: display unit not valid for the quantity)
@@ -57,6 +57,7 @@ pub enum TypeCode {
     T108, // dbc-unresolved-reference (M1 Build Error 1338/1352: a DBC module/message/signal segment that does not exist)
     T109, // dbc-message-direction (a message method disagrees with its Transmit direction: .Receive on TX, .Tx*/.Transmit on RX)
     T110, // dbc-signal-accessor-type (a raw signal accessor disagrees with the signal's declared Type, e.g. .SetFloat on an integer signal)
+    T111, // flash-without-preserve (flash-backed channels exist but no reachable script calls System.Preserve)
 }
 
 impl TypeCode {
@@ -116,6 +117,7 @@ impl TypeCode {
             TypeCode::T108 => "T108",
             TypeCode::T109 => "T109",
             TypeCode::T110 => "T110",
+            TypeCode::T111 => "T111",
         }
     }
 
@@ -179,6 +181,7 @@ impl TypeCode {
             TypeCode::T108 => "dbc-unresolved-reference",
             TypeCode::T109 => "dbc-message-direction",
             TypeCode::T110 => "dbc-signal-accessor-type",
+            TypeCode::T111 => "flash-without-preserve",
         }
     }
 
@@ -192,7 +195,7 @@ impl TypeCode {
             T001, T002, T003, T004, T005, T006, T010, T020, T021, T030, T031, T040, T041, T042,
             T050, T060, T061, T062, T063, T064, T065, T070, T071, T080, T081, T082, T083, T084,
             T085, T086, T087, T088, T089, T090, T091, T092, T093, T094, T095, T096, T097, T098,
-            T099, T100, T101, T102, T103, T104, T105, T106, T107, T108, T109, T110,
+            T099, T100, T101, T102, T103, T104, T105, T106, T107, T108, T109, T110, T111,
         ]
     }
 }
@@ -329,6 +332,6 @@ mod tests {
             );
         }
         // Catalogue size tracks the enum (bump both together).
-        assert_eq!(codes.len(), 54);
+        assert_eq!(codes.len(), 55);
     }
 }

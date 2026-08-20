@@ -149,7 +149,7 @@ fn t087_flags_bool_channels_and_parameters() {
     assert_eq!(msgs.len(), 2, "exactly the two bool symbols: {all}");
 }
 
-// ---- T092 untagged-component (#158, opt-in M1 Build tag-warning parity) ----
+// ---- T092 untagged-component (calibrated M1 Build warning 1142 cases) -------
 
 fn t092_messages(p: &Project) -> Vec<String> {
     p.audit_tags()
@@ -160,42 +160,36 @@ fn t092_messages(p: &Project) -> Vec<String> {
 }
 
 #[test]
-fn t092_flags_missing_system_and_type_tags() {
+fn t092_matches_known_m1_build_1142_cases() {
     let msgs = t092_messages(&load("tags.m1prj"));
     let all = msgs.join("\n");
-    // `Untagged` has no tags at all: one warning per missing group, mirroring
-    // M1 Build's two separate warnings.
     assert!(
-        all.contains("`Root.Bare.Untagged` has no System tag"),
-        "untagged channel must flag System: {all}"
+        all.contains("Root.Bare.UntaggedTable"),
+        "project-local table: {all}"
     );
     assert!(
-        all.contains("`Root.Bare.Untagged` has no Type tag"),
-        "untagged channel must flag Type: {all}"
+        all.contains("Root.Bare.AssignedResource"),
+        "assigned resource: {all}"
     );
-    // `NoTypeTag` inherits the group's `Engine` (System) tag, so only the Type
-    // group is missing.
-    assert!(
-        all.contains("`Root.Tagged.NoTypeTag` has no Type tag"),
-        "inheriting channel must still flag Type: {all}"
-    );
-    assert!(
-        !all.contains("`Root.Tagged.NoTypeTag` has no System tag"),
-        "inherited group tag must satisfy the System group: {all}"
-    );
-    // Fully covered symbols (own + inherited, channel or parameter) are clean.
-    assert!(!all.contains("FullyTagged"), "covered channel clean: {all}");
-    assert!(
-        !all.contains("TunedParam"),
-        "covered parameter clean: {all}"
-    );
-    assert_eq!(msgs.len(), 3, "exactly three findings: {all}");
+    for accepted in [
+        "Root.Bare.Untagged`",
+        "Root.Tagged.NoTypeTag",
+        "Root.Bare.TunedParam",
+        "Root.Bare.Sensor.Translation",
+        "Root.Bare.UnassignedResource",
+    ] {
+        assert!(
+            !all.contains(accepted),
+            "accepted object flagged: {accepted}: {all}"
+        );
+    }
+    assert_eq!(msgs.len(), 2, "exactly the known 1142 cases: {all}");
 }
 
 #[test]
 fn t092_is_not_part_of_the_default_audit() {
-    // Opt-in (#158): the default project audit must not emit T092 — the CLI
-    // runs it only under `--select T092`.
+    // The general naming audit stays separate. The CLI runs audit_tags on every
+    // project and applies --select/--ignore there.
     let p = load("tags.m1prj");
     assert!(
         p.audit().iter().all(|d| d.code != TypeCode::T092),

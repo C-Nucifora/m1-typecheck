@@ -15,12 +15,10 @@ pub(super) struct ProjectXmlIndex {
     /// object's class is the type source (#25).
     pub(super) classname_by_path: HashMap<String, String>,
     /// Every component's path -> the tags it declares directly (`<Props
-    /// SelectedTags="a b c">`, space-separated). Collected up front so a channel
+    /// SelectedTags="a b c">` or `<List.UserTags><Entry Value="…">`). Collected up front so a channel
     /// can inherit its ancestor groups' tags regardless of document order
-    /// (#170). NOTE: `SelectedTags` is the attribute name documented in the
-    /// issue; it is absent from both verification corpora, so this is
-    /// spec-grounded but unverified against real data — an absent attribute is a
-    /// pure no-op, and a future schema correction is a one-line change here.
+    /// (#170). Real M1-Build projects use `List.UserTags`; `SelectedTags` remains
+    /// accepted for older fixtures and hand-authored inputs.
     pub(super) selected_tags_by_path: HashMap<String, Vec<String>>,
 }
 
@@ -44,13 +42,27 @@ impl ProjectXmlIndex {
             .filter(|n| n.has_tag_name("Component"))
             .filter_map(|n| {
                 let name = n.attribute("Name")?;
-                let tags = n
-                    .children()
-                    .find(|c| c.has_tag_name("Props"))?
-                    .attribute("SelectedTags")?
-                    .split_whitespace()
+                let props = n.children().find(|c| c.has_tag_name("Props"))?;
+                let mut tags = props
+                    .attribute("SelectedTags")
+                    .into_iter()
+                    .flat_map(str::split_whitespace)
                     .map(str::to_string)
                     .collect::<Vec<_>>();
+                if let Some(list) = props.children().find(|c| c.has_tag_name("List.UserTags")) {
+                    for tag in list
+                        .children()
+                        .filter(|entry| entry.has_tag_name("Entry"))
+                        .filter_map(|entry| entry.attribute("Value"))
+                    {
+                        if !tags
+                            .iter()
+                            .any(|existing| existing.eq_ignore_ascii_case(tag))
+                        {
+                            tags.push(tag.to_string());
+                        }
+                    }
+                }
                 (!tags.is_empty()).then(|| (name.to_string(), tags))
             })
             .collect();

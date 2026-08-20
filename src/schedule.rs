@@ -63,6 +63,7 @@ struct ScriptIo {
     /// User functions/methods this script calls (resolved symbol paths) — the
     /// edges of the T097 call graph.
     calls: BTreeSet<String>,
+    calls_preserve: bool,
 }
 
 /// Walk one script, resolving every project-symbol reference into the
@@ -88,6 +89,7 @@ fn script_io(project: &Project, file_name: &str, cst: &m1_core::Cst) -> Option<S
         writes: BTreeSet::new(),
         reads: BTreeSet::new(),
         calls: BTreeSet::new(),
+        calls_preserve: false,
     };
     collect(cst.root(), &scope, &mut Vec::new(), &mut io);
     Some(io)
@@ -172,6 +174,9 @@ fn collect(n: Node, scope: &Scope, bindings: &mut ExpandBindings, io: &mut Scrip
             .find(|c| matches!(c.kind(), Kind::Identifier | Kind::MemberExpression))
     {
         let text = path_text(callee);
+        if text == "System.Preserve" {
+            io.calls_preserve = true;
+        }
         // T097: a callee that resolves to a user function/method is a call-graph
         // edge. Recorded in addition to (not instead of) the read/write logic
         // below — `Chan.Set(…)` still counts as a channel write, and the
@@ -792,6 +797,75 @@ pub fn check_reachability(
     out
 }
 
+/// Warn when flash-backed channels exist but no scheduled execution path calls
+/// `System.Preserve()`. An orphan helper does not satisfy the audit because it
+/// never runs. The warning also calls out the flash-write cadence constraint.
+pub fn check_flash_preserve(
+    project: &Project,
+    scripts: &[crate::parsed::ParsedScript],
+) -> Vec<TypeDiagnostic> {
+    let mut flash_channels: Vec<&str> = project
+        .symbols()
+        .iter()
+        .filter(|symbol| symbol.flash_backed)
+        .map(|symbol| symbol.path.as_str())
+        .collect();
+    if flash_channels.is_empty() {
+        return Vec::new();
+    }
+    flash_channels.sort_unstable();
+
+    let ios: Vec<ScriptIo> = scripts
+        .iter()
+        .filter_map(|script| script_io(project, &script.name, &script.cst))
+        .collect();
+    let by_function: BTreeMap<&str, &ScriptIo> =
+        ios.iter().map(|io| (io.fn_path.as_str(), io)).collect();
+    let table = project.symbols();
+    let mut reachable = BTreeSet::new();
+    let mut queue: Vec<&str> = table
+        .iter()
+        .filter(|symbol| symbol.scheduled && is_user_function(symbol.classname.as_deref()))
+        .map(|symbol| symbol.path.as_str())
+        .collect();
+    while let Some(function) = queue.pop() {
+        if !reachable.insert(function) {
+            continue;
+        }
+        if let Some(io) = by_function.get(function) {
+            if io.calls_preserve {
+                return Vec::new();
+            }
+            for callee in &io.calls {
+                if !reachable.contains(callee.as_str()) {
+                    queue.push(callee.as_str());
+                }
+            }
+        }
+    }
+
+    let count = flash_channels.len();
+    let examples = flash_channels
+        .iter()
+        .take(3)
+        .map(|path| format!("`{path}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    vec![make_project_for(
+        TypeCode::T111,
+        Severity::Warning,
+        format!(
+            "{count} flash-backed {} ({examples}) but no reachable script calls System.Preserve(); values will not persist, and preserve cadence controls flash-write cadence and must be no more than 1 Hz",
+            if count == 1 {
+                "channel exists"
+            } else {
+                "channels exist"
+            }
+        ),
+        flash_channels[0],
+    )]
+}
+
 #[cfg(test)]
 mod cross_fn_tests {
     use super::*;
@@ -1001,6 +1075,66 @@ mod reachability_tests {
         for d in &diags {
             assert_eq!(d.inner.severity, Severity::Error, "{}", d.inner.message);
         }
+    }
+}
+
+#[cfg(test)]
+mod flash_preserve_tests {
+    use super::*;
+    use crate::project::Project;
+
+    fn project(storage: &str) -> Project {
+        Project::from_xml(&format!(
+            r#"<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root.Ctrl"/>
+  <Component Classname="BuiltIn.FuncUser" Filename="Ctrl.Update.m1scr" Name="Root.Ctrl.Update"><Props SelectedTrigger="Root.Events.On 100Hz"/></Component>
+  <Component Classname="BuiltIn.FuncUserParam" Filename="Ctrl.Helper.m1scr" Name="Root.Ctrl.Helper"/>
+  <Component Classname="BuiltIn.FuncUserParam" Filename="Ctrl.Orphan.m1scr" Name="Root.Ctrl.Orphan"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.Menu A"><Props {storage} Security="Tune"/></Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.Menu B"><Props {storage} Security="Tune"/></Component>
+</Project>"#
+        ))
+        .unwrap()
+    }
+
+    fn scripts(update: &str, helper: &str, orphan: &str) -> Vec<crate::parsed::ParsedScript> {
+        crate::parsed::parse_all(&[
+            ("Ctrl.Update.m1scr".to_string(), update.to_string()),
+            ("Ctrl.Helper.m1scr".to_string(), helper.to_string()),
+            ("Ctrl.Orphan.m1scr".to_string(), orphan.to_string()),
+        ])
+    }
+
+    #[test]
+    fn flash_channels_without_reachable_preserve_warn() {
+        let diags = check_flash_preserve(
+            &project(r#"Storage="Flash""#),
+            &scripts("Helper();", "", "System.Preserve();"),
+        );
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].code, TypeCode::T111);
+        assert_eq!(diags[0].inner.severity, Severity::Warning);
+        let message = &diags[0].inner.message;
+        assert!(message.contains("2 flash-backed channels"), "{message}");
+        assert!(message.contains("Root.Ctrl.Menu A"), "{message}");
+        assert!(message.contains("1 Hz"), "{message}");
+    }
+
+    #[test]
+    fn reachable_preserve_satisfies_flash_audit() {
+        let diags = check_flash_preserve(
+            &project(r#"Storage="Flash""#),
+            &scripts("Helper();", "System.Preserve();", ""),
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn volatile_channels_do_not_need_preserve() {
+        let diags = check_flash_preserve(&project(""), &scripts("", "", ""));
+        assert!(diags.is_empty(), "{diags:?}");
     }
 }
 
