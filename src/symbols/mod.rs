@@ -94,6 +94,11 @@ pub struct Symbol {
     /// `<Props Security="…">` (e.g. `Tune`, `Calibration`, `Master Calibration`,
     /// `Resource`). `None` when the project declares none. Surfaced in hover.
     pub security: Option<String>,
+    /// True for a `BuiltIn.Channel` with `<Props Storage="Flash">`.
+    pub flash_backed: bool,
+    /// True for an IO resource whose `<Props NameCreation="AutoParam">`
+    /// creates an assigned resource parameter.
+    pub io_resource_assigned: bool,
     pub filename: Option<String>,
     /// Enum type this symbol's value belongs to, if known (set during .m1cfg
     /// back-resolution). When set, the typer reports `ValueType::Enum(_)`.
@@ -466,6 +471,8 @@ mod tests {
         assert_eq!(s.qty, None);
         assert_eq!(s.display_unit, None);
         assert_eq!(s.security, None);
+        assert!(!s.flash_backed);
+        assert!(!s.io_resource_assigned);
         assert_eq!(s.filename, None);
         assert_eq!(s.enum_assoc, None);
         assert_eq!(s.class, None);

@@ -482,9 +482,9 @@ fn audit_project(
         );
     }
 
-    // Tags audit (T092, default-on): M1 Build tag-warning parity (Warning 1142/
-    // 1549). Runs whenever a project is loaded; `allows_subject` still honours
-    // `--select`/`--ignore`. Mirrors M1 Build, which emits these warnings itself.
+    // Mandatory-Type-tag audit (T092, default-on): known M1 Build warning 1142
+    // cases. Runs whenever a project is loaded; `allows_subject` still honours
+    // `--select`/`--ignore`.
     if let Some(p) = project {
         had_error |= emit_project_diags(args, p.audit_tags(), filter, path, json, json_buf);
     }
@@ -876,6 +876,21 @@ fn main() {
     project_had_error |= emit_project_diags(
         &args,
         schedule_diags,
+        &filter,
+        project_path.as_deref(),
+        json,
+        &mut json_buf,
+    );
+
+    // Flash persistence audit (T111): a flash-backed channel only survives a
+    // power cycle when scheduled code reaches System.Preserve().
+    let flash_preserve_diags: Vec<TypeDiagnostic> = project
+        .as_ref()
+        .map(|p| m1_typecheck::schedule::check_flash_preserve(p, &parsed_scripts))
+        .unwrap_or_default();
+    project_had_error |= emit_project_diags(
+        &args,
+        flash_preserve_diags,
         &filter,
         project_path.as_deref(),
         json,

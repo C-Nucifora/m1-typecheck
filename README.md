@@ -71,6 +71,10 @@ unsanitised invalid value that can reach it — including through channels
 written by *other* scripts — is reported with its full backward provenance
 chain.
 
+The project audits also report flash-backed channels when no scheduled call
+path reaches `System.Preserve()`. The diagnostic names affected channels and
+reminds callers that preserve cadence must stay at 1 Hz or slower.
+
 Individual findings can be suppressed in source with `// @m1:allow(T0xx)` on
 the construct, or filtered project-wide via the `[diagnostics]` section of the
 workspace `m1-tools.toml` (see the

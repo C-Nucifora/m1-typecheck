@@ -50,8 +50,8 @@ impl Registry {
     ///   faster script reading a slower-written channel — downsampled reads are
     ///   intentional and accepted — so default-on would diverge from M1 Build.
     ///
-    /// T088 (circular dependency = M1 Build 1640), T092 (untagged = M1 Build
-    /// 1142/1549), T093/T094 (unassigned/unread = M1 Build 1627/1631),
+    /// T088 (circular dependency = M1 Build 1640), T092 (known mandatory-tag
+    /// cases = M1 Build 1142), T093/T094 (unassigned/unread = M1 Build 1627/1631),
     /// T095 (invalid display unit = M1 Build 1017), T096 (multiple scheduled
     /// writers = M1 Build 1022), T097 (user-function call cycle), T102
     /// (cross-function multiple-assignment = M1 Build 1317), T103 (ambiguous

@@ -10,6 +10,11 @@
     <Component Classname="BuiltIn.GroupCompound" Name="Root.Bare"/>
     <Component Classname="BuiltIn.Channel" Name="Root.Bare.Untagged"><Props/></Component>
     <Component Classname="BuiltIn.Parameter" Name="Root.Bare.TunedParam"><Props SelectedTags="Vehicle Tune"/></Component>
+    <Component Classname="BuiltIn.Table" Name="Root.Bare.UntaggedTable"><Props/></Component>
+    <Component Classname="MoTeC Input.Sensor" Name="Root.Bare.Sensor"/>
+    <Component Classname="BuiltIn.Table" Name="Root.Bare.Sensor.Translation"><Props/></Component>
+    <Component Classname="BuiltIn.IOResourceValueInput" Name="Root.Bare.AssignedResource"><Props NameCreation="AutoParam" NameTarget="This.Value"/></Component>
+    <Component Classname="BuiltIn.IOResourceValueInput" Name="Root.Bare.UnassignedResource"><Props/></Component>
    </List>
   </ComponentStream>
  </Project>

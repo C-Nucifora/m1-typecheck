@@ -19,6 +19,7 @@ const PROJECT: &str = r#"<?xml version="1.0"?>
    <List>
     <Component Classname="BuiltIn.GroupCompound" Name="Root.Foo"/>
     <Component Classname="BuiltIn.Parameter" Name="Root.Foo.Gain.Value"><Props/></Component>
+    <Component Classname="BuiltIn.Table" Name="Root.Foo.Map"><Props/></Component>
     <Component Classname="BuiltIn.FuncUser" Filename="Foo Update.m1scr" Name="Root.Foo.Update"/>
    </List>
   </ComponentStream>
@@ -76,6 +77,7 @@ fn rules_lists_every_t_code() {
     assert!(s.contains("T041  missing-cfg-parameter"));
     assert!(s.contains("T064  wrong-argument-count"));
     assert!(s.contains("T065  intrinsic-argument-type-mismatch"));
+    assert!(s.contains("T111  flash-without-preserve"));
 }
 
 #[test]
@@ -88,6 +90,7 @@ fn rules_json_is_valid_and_covers_codes() {
     assert!(codes.contains(&"T001"));
     assert!(codes.contains(&"T064"));
     assert!(codes.contains(&"T065"));
+    assert!(codes.contains(&"T111"));
 }
 
 #[test]
@@ -380,6 +383,47 @@ fn no_warnings_drops_warnings_before_strict_counts_them() {
         Some(0),
         "a dropped warning is not a finding for --strict"
     );
+}
+
+#[test]
+fn flash_preserve_audit_runs_end_to_end() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("flash_preserve_cli");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let project = r#"<?xml version="1.0"?>
+<MoTeCM1BuildSession><Project Name="Demo"><ComponentStream><List>
+<Component Classname="BuiltIn.FuncUser" Filename="Update.m1scr" Name="Root.Update"><Props SelectedTrigger="Root.Events.On 100Hz"/></Component>
+<Component Classname="BuiltIn.Channel" Name="Root.Menu"><Props Storage="Flash" Security="Tune"/></Component>
+</List></ComponentStream></Project></MoTeCM1BuildSession>"#;
+    let project_path = dir.join("Project.m1prj");
+    let script = dir.join("Update.m1scr");
+    fs::write(&project_path, project).unwrap();
+    fs::write(&script, "local x = 1;\n").unwrap();
+
+    let missing = run(&[
+        "--project",
+        project_path.to_str().unwrap(),
+        "--select",
+        "T111",
+        script.to_str().unwrap(),
+    ]);
+    assert!(
+        out_of(&missing).contains("warning[T111]"),
+        "{}",
+        out_of(&missing)
+    );
+    assert_eq!(missing.status.code(), Some(0));
+
+    fs::write(&script, "System.Preserve();\n").unwrap();
+    let present = run(&[
+        "--project",
+        project_path.to_str().unwrap(),
+        "--select",
+        "T111",
+        script.to_str().unwrap(),
+    ]);
+    assert!(!out_of(&present).contains("T111"), "{}", out_of(&present));
+    let _ = fs::remove_dir_all(&dir);
 }
 
 // ---- T095 invalid-display-unit (default-on, M1 Build Error 1017) ------------
