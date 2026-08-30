@@ -15,6 +15,7 @@ pub mod intrinsics;
 pub mod invalid_value;
 pub mod parsed;
 pub mod project;
+pub mod project_check;
 pub mod resolve;
 pub mod rules;
 pub mod schedule;
