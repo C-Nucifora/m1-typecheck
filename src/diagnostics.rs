@@ -210,7 +210,7 @@ pub struct TypeDiagnostic {
     /// diagnostics — those are suppressed in-source with `@m1:allow`.
     pub subject: Option<String>,
     /// Secondary locations of a two-location diagnostic (#200): T030 points
-    /// at the assignment but the declared type lives on a `.m1prj`
+    /// at the assignment but the declared type lives on a project or DBC
     /// `<Component>`; T085's signature and T086's unit likewise. Empty for
     /// single-location diagnostics. The CLI prints these as `note:` lines and
     /// the LSP maps them to `DiagnosticRelatedInformation`.
@@ -225,26 +225,42 @@ pub struct RelatedLocation {
     pub message: String,
 }
 
-/// Where a [`RelatedLocation`] lives. Rules only know a symbol's `def_line`,
-/// not which file the project was loaded from — the consumer (CLI, LSP) knows
-/// the project path and resolves `Project` to it.
+/// Where a [`RelatedLocation`] lives. The project path itself belongs to the
+/// loaded [`crate::project::Project`] context, so consumers resolve `Project`
+/// against that path. DBC symbols retain their project-relative defining path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RelatedPlace {
-    /// A 0-based line of the project file (`Project.m1prj` or a `.m1dbc` —
-    /// the line numbering follows [`crate::symbols::Symbol::def_line`]).
+    /// A 0-based line in the loaded `Project.m1prj`.
     Project { line: u32 },
+    /// A 0-based line in a `.m1dbc`; `path` is relative to the project root
+    /// when the DBC was loaded that way.
+    Dbc { path: String, line: u32 },
 }
 
-/// The related-location for a symbol's declaration site, if the symbol came
-/// from the project file ([`crate::symbols::Symbol::def_line`] is `None` otherwise).
+/// The related-location for a symbol's declaration site, if it has one.
+/// Project components point to `Project.m1prj`; DBC components point to the
+/// project-relative `.m1dbc` retained in [`crate::symbols::Symbol::filename`].
 pub fn related_to_def(
     sym: &crate::symbols::Symbol,
     message: impl Into<String>,
 ) -> Option<RelatedLocation> {
+    let line = sym.def_line?;
+    let place = match sym.filename.as_deref() {
+        Some(path)
+            if std::path::Path::new(path)
+                .extension()
+                .and_then(std::ffi::OsStr::to_str)
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("m1dbc")) =>
+        {
+            RelatedPlace::Dbc {
+                path: path.to_string(),
+                line,
+            }
+        }
+        _ => RelatedPlace::Project { line },
+    };
     Some(RelatedLocation {
-        place: RelatedPlace::Project {
-            line: sym.def_line?,
-        },
+        place,
         message: message.into(),
     })
 }

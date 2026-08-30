@@ -49,6 +49,17 @@ Run `m1-typecheck --rules` for the complete catalogue of checks with
 descriptions, and `--help` for all flags (rule selection, per-symbol ignores,
 explicit project/config paths).
 
+### Complete library pipeline
+
+Library consumers should call `m1_typecheck::project_check::check` rather than
+copying the CLI's pass list. Supply the fully loaded `Project`, the complete
+project script set parsed once with `parsed::parse_all`, and the source buffers
+whose file-level findings are needed. `ProjectCheckOptions::discover` applies
+the nearest `m1-tools.toml` diagnostics policy, including opt-in selections,
+global ignores, and symbol-scoped ignores. The result keeps source and project
+diagnostics separate while guaranteeing that both came from the same model,
+cross-script solve, rule registry, and filter.
+
 ## How it works
 
 The `.m1prj` (plus `parameters.m1cfg` for parameter value types and units, and

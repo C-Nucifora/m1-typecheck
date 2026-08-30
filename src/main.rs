@@ -6,8 +6,8 @@ use m1_typecheck::cross_script::{self, ChannelTaints};
 use m1_typecheck::diagnostics::{TypeCode, TypeDiagnostic};
 use m1_typecheck::filter::DiagFilter;
 use m1_typecheck::project::Project;
-use m1_typecheck::rules::check_script_with_channels;
-use output::{JsonFile, json_str, render_json, render_sarif, severity_str};
+use m1_typecheck::project_check::{ProjectCheckOptions, SourceCheck, SourceInput};
+use output::{JsonFile, json_str, related_path_and_line, render_json, render_sarif, severity_str};
 use std::path::{Path, PathBuf};
 use std::process;
 
@@ -365,148 +365,72 @@ fn load_project(
     (project, dbc_found)
 }
 
-/// Type-check every script on the command line, printing human-mode diagnostics
-/// as it goes (or buffering them for JSON). Returns `true` if any error-severity
-/// diagnostic, syntax error, or unreadable file was seen.
-fn check_files(
+/// Print or buffer source results returned by the reusable project pipeline.
+/// Returns `true` if any syntax or kept error-severity diagnostic was seen.
+fn emit_source_checks(
     args: &Args,
-    project: Option<&Project>,
-    project_path: Option<&std::path::PathBuf>,
-    enabled_opt_in: &std::collections::HashSet<String>,
-    filter: &DiagFilter,
-    channels: &ChannelTaints,
+    project_path: Option<&Path>,
+    checks: Vec<SourceCheck>,
     mut json_buf: Option<&mut JsonBuf>,
 ) -> bool {
     let json = json_buf.is_some();
     let mut had_error = false;
-    for file in &args.files {
-        // Read tolerantly: MoTeC `.m1scr` sources may carry Windows-1252 bytes
-        // (e.g. `°` in a unit comment), which strict UTF-8 would reject (#86).
-        let src = match m1_workspace::read_text(file) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("m1-typecheck: {}: {e}", file.display());
-                had_error = true;
-                continue;
-            }
-        };
-        let result = check_script_with_channels(
-            enabled_opt_in,
-            project,
-            Some(file.as_path()),
-            &src,
-            channels,
-        );
+    for check in checks {
+        let path = check
+            .path
+            .as_deref()
+            .map(Path::display)
+            .map(|display| display.to_string())
+            .unwrap_or_else(|| "<inline>".to_string());
         // Syntax errors are not T-coded and always fail the run; the filter only
         // governs the T-code diagnostics.
-        for d in &result.syntax_errors {
+        for diagnostic in &check.syntax_errors {
             had_error = true;
             if !json {
                 println!(
                     "{}:{}:{}: error[syntax]: {}",
-                    file.display(),
-                    d.range.start.line + 1,
-                    d.range.start.column + 1,
-                    d.message
+                    path,
+                    diagnostic.range.start.line + 1,
+                    diagnostic.range.start.column + 1,
+                    diagnostic.message
                 );
             }
         }
-        let kept: Vec<&TypeDiagnostic> = result
+        let kept: Vec<TypeDiagnostic> = check
             .diagnostics
-            .iter()
-            .filter(|d| filter.allows(d.code.as_str()))
+            .into_iter()
             // --no-warnings drops warning findings from both output and JSON (#199).
-            .filter(|d| !finding_disposition(args, d.inner.severity).0)
+            .filter(|diagnostic| !finding_disposition(args, diagnostic.inner.severity).0)
             .collect();
-        for d in &kept {
-            had_error |= finding_disposition(args, d.inner.severity).1;
+        for diagnostic in &kept {
+            had_error |= finding_disposition(args, diagnostic.inner.severity).1;
             if !json {
                 println!(
                     "{}:{}:{}: {}[{}]: {}",
-                    file.display(),
-                    d.inner.range.start.line + 1,
-                    d.inner.range.start.column + 1,
-                    severity_str(d.inner.severity),
-                    d.code.as_str(),
-                    d.inner.message
+                    path,
+                    diagnostic.inner.range.start.line + 1,
+                    diagnostic.inner.range.start.column + 1,
+                    severity_str(diagnostic.inner.severity),
+                    diagnostic.code.as_str(),
+                    diagnostic.inner.message
                 );
                 // Two-location diagnostics carry the other end (#200) — the
-                // declaration in the project file, rustc-note style.
-                for r in &d.related {
-                    let m1_typecheck::diagnostics::RelatedPlace::Project { line } = r.place;
-                    let label = project_path
-                        .map(|p| p.display().to_string())
-                        .unwrap_or_else(|| "<project>".into());
-                    println!("    note: {}: {label}:{}", r.message, line + 1);
+                // declaration in the project or DBC file, rustc-note style.
+                for related in &diagnostic.related {
+                    let project_label = project_path
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|| "<project>".to_string());
+                    let (label, line) = related_path_and_line(&related.place, &project_label);
+                    println!("    note: {}: {label}:{}", related.message, line + 1);
                 }
             }
         }
         if let Some(buf) = json_buf.as_deref_mut() {
             buf.files.push(JsonFile {
-                path: file.display().to_string(),
-                syntax_errors: result.syntax_errors,
-                diagnostics: kept.into_iter().cloned().collect(),
+                path,
+                syntax_errors: check.syntax_errors,
+                diagnostics: kept,
             });
-        }
-    }
-    had_error
-}
-
-/// Project-level audits that run once per invocation (not per file): the
-/// calibration-coverage check (T041, always when a project + cfg loaded) and,
-/// when `--audit-names` is set, the naming-convention audit (T050). Human-mode
-/// output is printed; JSON-mode diagnostics are buffered into `json_buf.project`.
-fn audit_project(
-    args: &Args,
-    project: Option<&Project>,
-    project_path: Option<&PathBuf>,
-    filter: &DiagFilter,
-    json: bool,
-    json_buf: &mut JsonBuf,
-) -> bool {
-    let mut had_error = false;
-    let path = project_path.map(PathBuf::as_path);
-
-    // Project-level audit: parameters declared in the .m1prj but missing from the
-    // loaded .m1cfg (T041). Emitted on every run that has a project + cfg so CI
-    // validates calibration coverage. Hint severity (#156) — riding the default
-    // is normal M1 behaviour, so it informs without drowning real findings.
-    if let Some(p) = project {
-        had_error |= emit_project_diags(
-            args,
-            p.missing_cfg_parameters(),
-            filter,
-            path,
-            json,
-            json_buf,
-        );
-    }
-
-    // Mandatory-Type-tag audit (T092, default-on): known M1 Build warning 1142
-    // cases. Runs whenever a project is loaded; `allows_subject` still honours
-    // `--select`/`--ignore`.
-    if let Some(p) = project {
-        had_error |= emit_project_diags(args, p.audit_tags(), filter, path, json, json_buf);
-    }
-
-    // Display-unit audit (T095, default-on): M1 Build Error 1017 parity ("Invalid
-    // display unit" — a `<Default Unit>` from a different dimension than the
-    // object's `Qty`). Runs whenever a project is loaded, like the tags audit;
-    // `allows_subject` honours `--select`/`--ignore`.
-    if let Some(p) = project {
-        had_error |=
-            emit_project_diags(args, p.audit_display_units(), filter, path, json, json_buf);
-    }
-
-    if args.audit_names {
-        match project {
-            // Routes through the shared `emit_project_diags` like every other
-            // project-level audit, so T050's `--strict`/`--no-warnings`
-            // disposition matches the rest (it used to bypass it).
-            Some(p) => {
-                had_error |= emit_project_diags(args, p.audit(), filter, path, json, json_buf)
-            }
-            None => eprintln!("m1-typecheck: --audit-names needs a project; skipping"),
         }
     }
     had_error
@@ -747,15 +671,6 @@ fn main() {
         args.ignore_symbol.clone(),
     );
 
-    // Opt-in rules (e.g. T064) run only when explicitly selected. A code is
-    // "enabled" if it is opt-in AND named in the resolved `select` set.
-    let enabled_opt_in: std::collections::HashSet<String> =
-        m1_typecheck::rules::Registry::opt_in_codes()
-            .iter()
-            .map(|c| c.as_str().to_string())
-            .filter(|c| filter.select.contains(c))
-            .collect();
-
     // In JSON/SARIF mode diagnostics are buffered and rendered as one document
     // at the end; human mode prints as it goes.
     let json = args.format != Format::Human;
@@ -765,15 +680,27 @@ fn main() {
     let (mut project, dbc_loaded) = load_project(project_path.as_ref(), config_path.as_ref());
     let cfg_loaded = config_path.is_some();
 
-    // The script sources back both return-type inference (#110) and the
-    // cross-script invalid-value solve (#78 P3); read them once.
-    let scripts: Vec<(String, String)> = args
+    // Read requested sources tolerantly once. MoTeC `.m1scr` files may carry
+    // Windows-1252 bytes, which the shared decoder handles. Unreadable requested
+    // files fail the run; unreadable background project files remain skipped by
+    // `gather_project_scripts`, matching the previous CLI behavior.
+    let mut had_unreadable = false;
+    let source_files: Vec<(PathBuf, String)> = args
         .files
         .iter()
-        .filter_map(|f| {
-            let name = f.file_name()?.to_str()?.to_string();
-            let src = m1_workspace::read_text(f).ok()?;
-            Some((name, src))
+        .filter_map(|path| match m1_workspace::read_text(path) {
+            Ok(source) => Some((path.clone(), source)),
+            Err(error) => {
+                eprintln!("m1-typecheck: {}: {error}", path.display());
+                had_unreadable = true;
+                None
+            }
+        })
+        .collect();
+    let scripts: Vec<(String, String)> = source_files
+        .iter()
+        .filter_map(|(path, source)| {
+            Some((path.file_name()?.to_str()?.to_string(), source.clone()))
         })
         .collect();
 
@@ -802,11 +729,12 @@ fn main() {
     // source independently — 5+ parses per script per run (#192).
     let parsed_scripts = m1_typecheck::parsed::parse_all(&all_scripts);
 
-    // Infer user-function/method return types from the script bodies on the
-    // command line, so call sites in other scripts type-check (#110). Scripts
-    // that back no function symbol are simply ignored by the pass.
-    if let Some(p) = project.as_mut() {
-        p.infer_return_types(&parsed_scripts);
+    // Query modes need the inferred model before they return. Normal checking
+    // performs this preparation inside the shared project pipeline below.
+    if (args.completeness || args.explain.is_some() || args.explain_units.is_some())
+        && let Some(project) = project.as_mut()
+    {
+        project.infer_return_types(&parsed_scripts);
     }
 
     // `--completeness`: report how much of the project the analysis could pin
@@ -824,16 +752,12 @@ fn main() {
         return;
     }
 
-    // Solve the project-wide channel taint graph so cross-script invalid
-    // values reach each file's T080/T081 sinks (project-less runs have no
-    // channel identity to propagate through, so the map stays empty).
-    let channel_taints = project
-        .as_ref()
-        .map(|p| cross_script::solve(p, &parsed_scripts))
-        .unwrap_or_default();
-
     // `--explain <CHANNEL>`: report that channel's solved status and exit.
     if let Some(channel) = &args.explain {
+        let channel_taints = project
+            .as_ref()
+            .map(|project| cross_script::solve(project, &parsed_scripts))
+            .unwrap_or_default();
         explain_channel(
             project.as_ref(),
             &channel_taints,
@@ -850,132 +774,45 @@ fn main() {
         return;
     }
 
-    // Scheduling checks (#145). T088 (same-rate circular dependency) is default-on:
-    // it matches M1 Build's Warning 1640 "circular schedule dependency found and
-    // resolved" (1 cycle each on the real AV-M1 project). T089 (rate inversion)
-    // stays OPT-IN — M1 Build does not flag it (downsampled reads are intentional
-    // and accepted), so default-on would diverge from M1 Build. T097 (recursive
-    // user-function call cycle) is default-on at Error severity: a call cycle
-    // can never complete on the fixed-stack runtime.
-    // Any kept project-level diagnostic at Error severity must fail the run
-    // (#170): T093/T094 are M1 Build Errors 1627/1631, so CI has to gate on
-    // them exactly as it does on script-level errors.
-    let mut project_had_error = false;
-    let schedule_diags: Vec<TypeDiagnostic> = project
-        .as_ref()
-        .map(|p| {
-            m1_typecheck::schedule::check(
-                p,
-                &parsed_scripts,
-                true,
-                filter.select.contains("T089"),
-                true,
-            )
-        })
-        .unwrap_or_default();
-    project_had_error |= emit_project_diags(
+    if args.audit_names && project.is_none() {
+        eprintln!("m1-typecheck: --audit-names needs a project; skipping");
+    }
+
+    // One reusable entry point owns the complete pass list and applies the same
+    // resolved diagnostics policy to source and project findings.
+    let source_inputs: Vec<SourceInput<'_>> = source_files
+        .iter()
+        .map(|(path, source)| SourceInput::at_path(path, source))
+        .collect();
+    let result = m1_typecheck::project_check::check(
+        project.as_mut(),
+        &parsed_scripts,
+        &source_inputs,
+        &ProjectCheckOptions {
+            filter: filter.clone(),
+            audit_names: args.audit_names,
+        },
+    );
+    let project_had_error = emit_project_diags(
         &args,
-        schedule_diags,
+        result.project_diagnostics,
         &filter,
         project_path.as_deref(),
         json,
         &mut json_buf,
     );
-
-    // Flash persistence audit (T111): a flash-backed channel only survives a
-    // power cycle when scheduled code reaches System.Preserve().
-    let flash_preserve_diags: Vec<TypeDiagnostic> = project
-        .as_ref()
-        .map(|p| m1_typecheck::schedule::check_flash_preserve(p, &parsed_scripts))
-        .unwrap_or_default();
-    project_had_error |= emit_project_diags(
-        &args,
-        flash_preserve_diags,
-        &filter,
-        project_path.as_deref(),
-        json,
-        &mut json_buf,
-    );
-
-    // Usage audit (default-on): channels never assigned (T093) / parameters never
-    // read (T094) by any script — M1 Build Errors 1627/1631. Run over the COMPLETE
-    // project script set (`all_scripts`) so it matches M1 Build; `allows_subject`
-    // still honours `--select`/`--ignore`. Exemptions (CAN, package objects,
-    // table/compound `.Value`) keep it false-positive-free on real projects.
-    let usage_diags: Vec<TypeDiagnostic> = project
-        .as_ref()
-        .map(|p| {
-            let mut v = m1_typecheck::schedule::check_usage(p, &parsed_scripts, true, true);
-            // T096 (default-on): channel assigned by >1 periodically scheduled
-            // function — M1 Build Error 1022.
-            v.extend(m1_typecheck::schedule::check_multi_writers(
-                p,
-                &parsed_scripts,
-            ));
-            // T102 (default-on): a channel reset in a caller and re-assigned by a
-            // callee on one path — M1 Build Error 1317 (the cross-function gap
-            // T040 misses).
-            v.extend(m1_typecheck::schedule::check_cross_fn_assignment(
-                p,
-                &parsed_scripts,
-            ));
-            // T104 (default-on): a user function no scheduled function reaches —
-            // M1 Build Error 1642.
-            v.extend(m1_typecheck::schedule::check_reachability(
-                p,
-                &parsed_scripts,
-            ));
-            v
-        })
-        .unwrap_or_default();
-    project_had_error |= emit_project_diags(
-        &args,
-        usage_diags,
-        &filter,
-        project_path.as_deref(),
-        json,
-        &mut json_buf,
-    );
-
-    // DBC-Init audit (default-on, T107): a DBC object whose generated accessors
-    // are used but whose Init function is never called — M1 Build Error 1375,
-    // which fails Validate Project. Whole-project, so it runs over every script.
-    let dbc_diags: Vec<TypeDiagnostic> = project
-        .as_ref()
-        .map(|p| m1_typecheck::dbc_init::check(p, &parsed_scripts))
-        .unwrap_or_default();
-    project_had_error |= emit_project_diags(
-        &args,
-        dbc_diags,
-        &filter,
-        project_path.as_deref(),
-        json,
-        &mut json_buf,
-    );
-
-    // Per-file checks, then the once-per-run project-level audits.
-    let had_error = check_files(
-        &args,
-        project.as_ref(),
-        project_path.as_ref(),
-        &enabled_opt_in,
-        &filter,
-        &channel_taints,
-        json.then_some(&mut json_buf),
-    );
-    let audit_had_error = audit_project(
-        &args,
-        project.as_ref(),
-        project_path.as_ref(),
-        &filter,
-        json,
-        &mut json_buf,
-    );
+    let had_error = had_unreadable
+        || emit_source_checks(
+            &args,
+            project_path.as_deref(),
+            result.sources,
+            json.then_some(&mut json_buf),
+        );
 
     // Emit the buffered JSON document (no-op in human mode).
     emit_output(project_path.as_ref(), args.format, &json_buf);
 
-    if had_error || project_had_error || audit_had_error {
+    if had_error || project_had_error {
         process::exit(1);
     }
 }

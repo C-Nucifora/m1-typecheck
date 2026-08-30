@@ -1,6 +1,6 @@
 //! T042 dbc-signal-range: a literal assigned to a CAN signal outside its
 //! derived physical range is flagged; in-range and computed RHS are not.
-use m1_typecheck::diagnostics::TypeCode;
+use m1_typecheck::diagnostics::{RelatedPlace, TypeCode};
 use m1_typecheck::project::Project;
 use m1_typecheck::rules::check_script;
 use std::path::Path;
@@ -49,6 +49,30 @@ fn flags_literal_above_signal_range() {
     assert_eq!(
         t042_count(&project_with_signal(), "Bus.Msg.Sig = 300;\n"),
         1
+    );
+}
+
+#[test]
+fn type_mismatch_points_to_the_defining_dbc() {
+    let p = project_with_signal();
+    let def_line = p
+        .symbols()
+        .get("Bus.Msg.Sig")
+        .unwrap()
+        .def_line
+        .expect("DBC signal has a declaration line");
+    let diagnostics = check_script(&p, Path::new("X.m1scr"), "Bus.Msg.Sig = 1.5;\n").diagnostics;
+    let mismatch = diagnostics
+        .iter()
+        .find(|d| d.code == TypeCode::T030)
+        .expect("float-to-u32 mismatch");
+
+    assert_eq!(
+        mismatch.related[0].place,
+        RelatedPlace::Dbc {
+            path: "bus.m1dbc".to_string(),
+            line: def_line,
+        }
     );
 }
 

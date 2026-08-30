@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "m1-typecheck"
-version = "0.50.0"
+version = "0.51.0"
 dependencies = [
  "clap",
  "m1-core",

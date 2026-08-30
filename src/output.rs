@@ -10,7 +10,8 @@
 
 use m1_core::Severity;
 use m1_typecheck::completeness::CompletenessReport;
-use m1_typecheck::diagnostics::TypeDiagnostic;
+use m1_typecheck::diagnostics::{RelatedPlace, TypeDiagnostic};
+use std::path::Path;
 
 /// One file's buffered diagnostics for the JSON document.
 pub struct JsonFile {
@@ -48,6 +49,26 @@ pub fn json_str(s: &str) -> String {
     out
 }
 
+/// Resolve a related declaration to the label emitted by the CLI and its
+/// 0-based line. DBC paths are retained project-relative by the library and
+/// become concrete beside the loaded `Project.m1prj` here at the output edge.
+pub fn related_path_and_line(place: &RelatedPlace, project_label: &str) -> (String, u32) {
+    match place {
+        RelatedPlace::Project { line } => (project_label.to_string(), *line),
+        RelatedPlace::Dbc { path, line } => {
+            let dbc = Path::new(path);
+            let label = if dbc.is_absolute() || project_label == "<project>" {
+                dbc.to_path_buf()
+            } else {
+                Path::new(project_label)
+                    .parent()
+                    .map_or_else(|| dbc.to_path_buf(), |root| root.join(dbc))
+            };
+            (label.display().to_string(), *line)
+        }
+    }
+}
+
 fn range_json(range: &m1_core::Range, byte: &std::ops::Range<usize>) -> String {
     format!(
         ",\"range\":{{\"start\":{{\"line\":{},\"column\":{}}},\"end\":{{\"line\":{},\"column\":{}}}}},\"byte_range\":{{\"start\":{},\"end\":{}}}",
@@ -62,6 +83,8 @@ fn range_json(range: &m1_core::Range, byte: &std::ops::Range<usize>) -> String {
 
 /// Machine-parsable diagnostics document, shaped like `m1-lint --format json`:
 /// `{"version":1,"files":[{path,syntax_errors,diagnostics}],"project":[…],"summary":{…}}`.
+/// A related location carries an explicit `kind`, resolved `path`, and 0-based
+/// `line`; project declarations also retain the legacy `project_line` alias.
 pub fn render_json(files: &[JsonFile], project: &[TypeDiagnostic], project_label: &str) -> String {
     let mut errors = 0usize;
     let mut warnings = 0usize;
@@ -95,7 +118,7 @@ pub fn render_json(files: &[JsonFile], project: &[TypeDiagnostic], project_label
                 Severity::Warning => warnings += 1,
                 _ => {}
             }
-            out.push_str(&diag_json(d));
+            out.push_str(&diag_json(d, project_label));
         }
         out.push_str("]}");
     }
@@ -109,7 +132,7 @@ pub fn render_json(files: &[JsonFile], project: &[TypeDiagnostic], project_label
             Severity::Warning => warnings += 1,
             _ => {}
         }
-        out.push_str(&diag_json(d));
+        out.push_str(&diag_json(d, project_label));
     }
     out.push_str("],\"project_path\":");
     out.push_str(&json_str(project_label));
@@ -120,7 +143,7 @@ pub fn render_json(files: &[JsonFile], project: &[TypeDiagnostic], project_label
     out
 }
 
-fn diag_json(d: &TypeDiagnostic) -> String {
+fn diag_json(d: &TypeDiagnostic, project_label: &str) -> String {
     let mut out = String::from("{\"code\":");
     out.push_str(&json_str(d.code.as_str()));
     out.push_str(",\"name\":");
@@ -131,15 +154,29 @@ fn diag_json(d: &TypeDiagnostic) -> String {
     out.push_str(&json_str(&d.inner.message));
     out.push_str(&range_json(&d.inner.range, &d.inner.byte_range));
     if !d.related.is_empty() {
-        // Secondary locations (#200). `project_line` is 0-based in the file
-        // named by the document's `project_path`.
+        // Secondary locations (#200). `path` identifies the actual declaration
+        // file and `line` is 0-based, matching diagnostic ranges. Keep the
+        // original `project_line` field for Project.m1prj locations so existing
+        // version-1 JSON consumers remain compatible.
         out.push_str(",\"related\":[");
         for (i, r) in d.related.iter().enumerate() {
             if i > 0 {
                 out.push(',');
             }
-            let m1_typecheck::diagnostics::RelatedPlace::Project { line } = r.place;
-            out.push_str(&format!("{{\"project_line\":{line},\"message\":"));
+            let (path, line) = related_path_and_line(&r.place, project_label);
+            let kind = match &r.place {
+                RelatedPlace::Project { .. } => "project",
+                RelatedPlace::Dbc { .. } => "dbc",
+            };
+            out.push_str("{\"kind\":");
+            out.push_str(&json_str(kind));
+            out.push_str(",\"path\":");
+            out.push_str(&json_str(&path));
+            out.push_str(&format!(",\"line\":{line}"));
+            if matches!(&r.place, RelatedPlace::Project { .. }) {
+                out.push_str(&format!(",\"project_line\":{line}"));
+            }
+            out.push_str(",\"message\":");
             out.push_str(&json_str(&r.message));
             out.push('}');
         }
@@ -284,11 +321,11 @@ pub fn render_sarif(files: &[JsonFile], project: &[TypeDiagnostic], project_labe
         related
             .iter()
             .map(|r| {
-                let m1_typecheck::diagnostics::RelatedPlace::Project { line } = r.place;
+                let (path, line) = related_path_and_line(&r.place, project_label);
                 json!({
                     "message": {"text": r.message},
                     "physicalLocation": {
-                        "artifactLocation": {"uri": project_label},
+                        "artifactLocation": {"uri": path},
                         "region": {"startLine": line + 1},
                     },
                 })
