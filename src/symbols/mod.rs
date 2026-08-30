@@ -99,6 +99,9 @@ pub struct Symbol {
     /// True for an IO resource whose `<Props NameCreation="AutoParam">`
     /// creates an assigned resource parameter.
     pub io_resource_assigned: bool,
+    /// The backing `.m1scr` path for a project function/method, or the defining
+    /// project-relative `.m1dbc` path for a DBC component. `None` when the
+    /// component declares no separate file.
     pub filename: Option<String>,
     /// Enum type this symbol's value belongs to, if known (set during .m1cfg
     /// back-resolution). When set, the typer reports `ValueType::Enum(_)`.
@@ -116,9 +119,10 @@ pub struct Symbol {
     /// completion (#47). See [`crate::classname::valid_parent_classes`] for the schema
     /// of which parent classes a given child class is conventionally nested under.
     pub classname: Option<String>,
-    /// 0-based line of this symbol's declaration in the `.m1prj` (the
-    /// `<Component>` element), for goto-definition. `None` for symbols not
-    /// sourced from the project file (e.g. DBC signals).
+    /// 0-based line of this symbol's declaring `<Component>` in either the
+    /// `.m1prj` or the defining `.m1dbc`, for goto-definition and diagnostic
+    /// related locations. [`Symbol::filename`] distinguishes DBC declarations;
+    /// `None` means the line belongs to the loaded project file.
     pub def_line: Option<u32>,
     /// For a `BuiltIn.CAN.Signal`, its `(min, max)` *physical* value range,
     /// derived from the `.m1dbc` `Length`/`Type` (raw range) scaled by

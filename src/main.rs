@@ -7,7 +7,7 @@ use m1_typecheck::diagnostics::{TypeCode, TypeDiagnostic};
 use m1_typecheck::filter::DiagFilter;
 use m1_typecheck::project::Project;
 use m1_typecheck::project_check::{ProjectCheckOptions, SourceCheck, SourceInput};
-use output::{JsonFile, json_str, render_json, render_sarif, severity_str};
+use output::{JsonFile, json_str, related_path_and_line, render_json, render_sarif, severity_str};
 use std::path::{Path, PathBuf};
 use std::process;
 
@@ -415,12 +415,12 @@ fn emit_source_checks(
                     diagnostic.inner.message
                 );
                 // Two-location diagnostics carry the other end (#200) — the
-                // declaration in the project file, rustc-note style.
+                // declaration in the project or DBC file, rustc-note style.
                 for related in &diagnostic.related {
-                    let m1_typecheck::diagnostics::RelatedPlace::Project { line } = related.place;
-                    let label = project_path
+                    let project_label = project_path
                         .map(|path| path.display().to_string())
                         .unwrap_or_else(|| "<project>".to_string());
+                    let (label, line) = related_path_and_line(&related.place, &project_label);
                     println!("    note: {}: {label}:{}", related.message, line + 1);
                 }
             }
