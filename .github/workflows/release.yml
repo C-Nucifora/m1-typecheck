@@ -2,13 +2,11 @@ name: Release binaries
 
 # Publishes the m1-typecheck CLI as prebuilt binaries (Linux/macOS/Windows) on a
 # GitHub Release named after the crate version. m1-ci downloads these to run the
-# M1 toolchain without building from source. A release is cut automatically
-# whenever the Cargo.toml version changes (i.e. no release tag exists for it
-# yet); can also be run manually.
+# M1 toolchain without building from source. A release is dispatched manually
+# from a reviewed, pre-existing version tag. Maintenance releases never replace
+# the latest release on the main line.
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -26,14 +24,29 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
       should_release: ${{ steps.v.outputs.should_release }}
+      tag_object: ${{ steps.v.outputs.tag_object }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
       - id: v
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"(.*)".*/\1/')
+          if [ "$GITHUB_REF_TYPE" != "tag" ] || [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "Maintenance releases must run from the matching version tag." >&2
+            exit 1
+          fi
+          tag_ref="refs/tags/v$VERSION"
+          if [ "$(git cat-file -t "$tag_ref")" != "tag" ] || \
+             [ "$(git rev-parse "$tag_ref^{commit}")" != "$GITHUB_SHA" ]; then
+            echo "The annotated version tag must point to the workflow commit." >&2
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag_object=$(git rev-parse "$tag_ref")" >> "$GITHUB_OUTPUT"
           # Release when the tag is absent OR the existing release is missing any
           # of the per-platform binaries. Keying only on "release exists" meant a
           # release tagged before its binaries uploaded (or created by hand) could
@@ -83,6 +96,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -128,7 +144,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: v${{ needs.check.outputs.version }}
+          TAG_OBJECT: ${{ needs.check.outputs.tag_object }}
         run: |
+          # The tag must still name the object that the check job verified.
+          remote_tag=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')
+          if [ "$remote_tag" != "$TAG_OBJECT" ]; then
+            echo "The version tag changed after release validation." >&2
+            exit 1
+          fi
+
           # Checksum manifest covering every released binary; the release notes
           # explain how to verify it (and the build provenance) after download.
           (cd out && sha256sum * > SHA256SUMS)
@@ -179,6 +203,7 @@ jobs:
             gh release upload "$TAG" out/* --clobber --repo "$GITHUB_REPOSITORY"
           else
             gh release create "$TAG" out/* \
+              --verify-tag --latest=false \
               --repo "$GITHUB_REPOSITORY" \
               --title "m1-typecheck $TAG" \
               --notes-file body.md

@@ -13,11 +13,12 @@
 //!   accepted — so default-on would diverge from M1 Build; it stays an opt-in
 //!   exploration aid.
 use crate::diagnostics::{TypeCode, TypeDiagnostic, make_project_for};
+use crate::expand::{ExpandBindings, expand_binding, substituted};
 use crate::project::Project;
 use crate::resolve::{Resolution, Scope, resolve};
 use crate::symbols::SymbolKind;
 use crate::typer::{is_expr, path_text};
-use m1_core::{Field, Kind, Node, Severity};
+use m1_core::{Kind, Node, Severity};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 /// Maximum DFS path length explored by [`find_cycles`] — a guard against
@@ -90,51 +91,6 @@ fn script_io(project: &Project, file_name: &str, cst: &m1_core::Cst) -> Option<S
     };
     collect(cst.root(), &scope, &mut Vec::new(), &mut io);
     Some(io)
-}
-
-/// Active `expand` variable bindings, innermost last: `(name, start, end)`.
-type ExpandBindings = Vec<(String, i64, i64)>;
-
-/// The `(variable, start, end)` binding of an `expand` statement whose bounds
-/// are integer literals. Constant-named bounds (allowed by the manual) are not
-/// evaluated — their bodies keep the pre-#170 behaviour (templated paths stay
-/// unresolved).
-fn expand_binding(n: &Node) -> Option<(String, i64, i64)> {
-    let var = n.child_by_field(Field::Variable)?.text().trim().to_string();
-    let lo: i64 = n.child_by_field(Field::Start)?.text().trim().parse().ok()?;
-    let hi: i64 = n.child_by_field(Field::End)?.text().trim().parse().ok()?;
-    // A degenerate or huge range is not worth enumerating (T084 flags bad
-    // bounds; real corpora use single-digit ranges).
-    (lo <= hi && hi - lo < 256).then_some((var, lo, hi))
-}
-
-/// Every compile-time substitution of `$(VAR)` templates in `text` under the
-/// active `expand` bindings — `expand` is text substitution (manual p.33), so
-/// `Seg $(SEG).Volt` under `expand (SEG = 1 to 2)` accesses `Seg 1.Volt` AND
-/// `Seg 2.Volt`. Text without templates passes through as itself; a runaway
-/// combination count returns empty (treated as unresolvable).
-fn substituted(text: &str, bindings: &ExpandBindings) -> Vec<String> {
-    if !text.contains("$(") {
-        return vec![text.to_string()];
-    }
-    let mut variants = vec![text.to_string()];
-    for (var, lo, hi) in bindings {
-        let needle = format!("$({var})");
-        if !variants[0].contains(&needle) {
-            continue;
-        }
-        let mut next = Vec::with_capacity(variants.len() * (hi - lo + 1) as usize);
-        for v in &variants {
-            for val in *lo..=*hi {
-                next.push(v.replace(&needle, &val.to_string()));
-            }
-        }
-        variants = next;
-        if variants.len() > 4096 {
-            return Vec::new();
-        }
-    }
-    variants
 }
 
 /// Every channel/parameter symbol path `n` accesses, after `expand`
