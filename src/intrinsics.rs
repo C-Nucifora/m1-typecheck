@@ -19,6 +19,10 @@ pub struct Param {
     pub ty: String,
     #[serde(default)]
     pub doc: String,
+    /// Native validation can require a parameter's declared type even where
+    /// ordinary numeric function arguments allow assignment conversions.
+    #[serde(default, rename = "exactType")]
+    pub exact_type: bool,
 }
 
 /// One callable signature. A function with several signatures appears as several
@@ -69,6 +73,9 @@ pub(crate) fn overload_accepts_args(overload: &Overload, args: &[ValueType]) -> 
         if arg == ValueType::Unknown {
             continue;
         }
+        if param.exact_type && !exact_parameter_accepts_arg(param, arg) {
+            return false;
+        }
         let accepted = match param.ty.as_str() {
             "Integer" | "UnsignedInteger" => arg.is_integral(),
             "FloatingPoint" | "FixedPoint7dps" => arg.is_integral() || arg.is_float(),
@@ -94,6 +101,22 @@ pub(crate) fn overload_accepts_args(overload: &Overload, args: &[ValueType]) -> 
         }
     }
     true
+}
+
+/// Compare only catalogue types represented by the checker. Unknown arguments
+/// and firmware-specific types retain their conservative, opaque behavior.
+pub(crate) fn exact_parameter_accepts_arg(param: &Param, arg: ValueType) -> bool {
+    if arg == ValueType::Unknown {
+        return true;
+    }
+    match param.ty.as_str() {
+        "Integer" => arg == ValueType::Integer,
+        "UnsignedInteger" => arg == ValueType::Unsigned,
+        "FloatingPoint" | "FixedPoint7dps" => arg == ValueType::Float,
+        "Boolean" => arg == ValueType::Boolean,
+        "String" => arg == ValueType::String,
+        _ => true,
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -300,7 +323,7 @@ mod tests {
         // Switch, TC, UnixTime, VCS).
         assert_eq!(i.library.len(), 23, "23 library objects");
         let total: usize = i.library.values().map(|o| o.functions.len()).sum();
-        assert_eq!(total, 279, "279 library overloads");
+        assert_eq!(total, 280, "280 library overloads");
         assert!(i.library_object("Calculate").is_some());
         assert!(i.library_object("CanComms").is_some());
         assert!(i.library_object("J1939").is_some(), "capture library loads");
