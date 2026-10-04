@@ -103,11 +103,14 @@ fn native_unsigned_receive_value_is_checked_with_and_without_project() {
     use m1_typecheck::rules::{check_script, check_script_no_project};
 
     let project = Project::from_xml(PROJECT).unwrap();
+    let module = r#"<MoTecM1BuildModuleSet Name="Test Module"><Modules><ModuleStream><List><Module Base="BuiltIn.GroupCompound" Name="Group.Example"><ComponentStream><List><Component Classname="BuiltIn.GroupCompound" Name="Base"/></List></ComponentStream></Module></List></ModuleStream></Modules></MoTecM1BuildModuleSet>"#;
+    let project_with_module = Project::from_xml_with_modules(PROJECT, &[module]).unwrap();
     for value in ["0", "(0)", "-1"] {
         let source = receive_source(value);
         for result in [
             check_script_no_project(&source),
             check_script(&project, Path::new("Receive.m1scr"), &source),
+            check_script(&project_with_module, Path::new("Receive.m1scr"), &source),
         ] {
             let finding = result
                 .diagnostics
@@ -126,6 +129,7 @@ fn native_unsigned_receive_value_is_checked_with_and_without_project() {
         for result in [
             check_script_no_project(&source),
             check_script(&project, Path::new("Receive.m1scr"), &source),
+            check_script(&project_with_module, Path::new("Receive.m1scr"), &source),
         ] {
             assert!(
                 !result.diagnostics.iter().any(|d| d.code == TypeCode::T065),
