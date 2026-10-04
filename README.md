@@ -14,8 +14,21 @@ diagnostic source) and a **CLI** (the type-checking gate in
 ## Install
 
 Prebuilt binaries for Linux, macOS, and Windows are attached to each
-[release](https://github.com/C-Nucifora/m1-typecheck/releases). Or build from
-source:
+[release](https://github.com/C-Nucifora/m1-typecheck/releases). Each release
+includes the checker and the `m1-cfg-export` configuration exporter:
+
+| Platform | Checker asset | Exporter asset |
+| --- | --- | --- |
+| Linux x86_64 | `m1-typecheck-x86_64-unknown-linux-gnu` | `m1-cfg-export-x86_64-unknown-linux-gnu` |
+| macOS Apple Silicon | `m1-typecheck-aarch64-apple-darwin` | `m1-cfg-export-aarch64-apple-darwin` |
+| Windows x86_64 | `m1-typecheck-x86_64-pc-windows-msvc.exe` | `m1-cfg-export-x86_64-pc-windows-msvc.exe` |
+
+Download the desired tools, remove the target suffix, and put them on your
+`PATH`. Keep `.exe` on Windows. On Unix, mark them executable with `chmod +x`;
+on macOS, clear download quarantine with `xattr -d com.apple.quarantine`.
+Verify downloads against the release's `SHA256SUMS` manifest.
+
+Or build both tools from source:
 
 ```sh
 cargo install --git https://github.com/C-Nucifora/m1-typecheck.git --tag <latest>

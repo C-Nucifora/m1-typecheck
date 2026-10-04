@@ -38,7 +38,7 @@ jobs:
           # of the per-platform binaries. Keying only on "release exists" meant a
           # release tagged before its binaries uploaded (or created by hand) could
           # never self-heal — the consumers would be left with a 404.
-          required="m1-typecheck-x86_64-unknown-linux-gnu m1-typecheck-aarch64-apple-darwin m1-typecheck-x86_64-pc-windows-msvc.exe m1-cfg-export-x86_64-unknown-linux-gnu m1-cfg-export-aarch64-apple-darwin m1-cfg-export-x86_64-pc-windows-msvc.exe"
+          required="m1-typecheck-x86_64-unknown-linux-gnu m1-typecheck-aarch64-apple-darwin m1-typecheck-x86_64-pc-windows-msvc.exe m1-cfg-export-x86_64-unknown-linux-gnu m1-cfg-export-aarch64-apple-darwin m1-cfg-export-x86_64-pc-windows-msvc.exe SHA256SUMS"
           if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             assets=$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json assets -q '.assets[].name')
             missing=
@@ -157,7 +157,15 @@ jobs:
           | macOS Apple Silicon | [`m1-typecheck-aarch64-apple-darwin`](https://github.com/{{REPO}}/releases/download/{{TAG}}/m1-typecheck-aarch64-apple-darwin) |
           | Windows x86_64 | [`m1-typecheck-x86_64-pc-windows-msvc.exe`](https://github.com/{{REPO}}/releases/download/{{TAG}}/m1-typecheck-x86_64-pc-windows-msvc.exe) |
 
-          Each platform also includes `m1-cfg-export` with the same target suffix (and `.exe` on Windows), for exporting project configuration without a source build.
+          The **m1-cfg-export** configuration exporter is also available without a source build:
+
+          | Platform | Asset |
+          | --- | --- |
+          | Linux x86_64 | [`m1-cfg-export-x86_64-unknown-linux-gnu`](https://github.com/{{REPO}}/releases/download/{{TAG}}/m1-cfg-export-x86_64-unknown-linux-gnu) |
+          | macOS Apple Silicon | [`m1-cfg-export-aarch64-apple-darwin`](https://github.com/{{REPO}}/releases/download/{{TAG}}/m1-cfg-export-aarch64-apple-darwin) |
+          | Windows x86_64 | [`m1-cfg-export-x86_64-pc-windows-msvc.exe`](https://github.com/{{REPO}}/releases/download/{{TAG}}/m1-cfg-export-x86_64-pc-windows-msvc.exe) |
+
+          Rename the exporter to `m1-cfg-export` (`m1-cfg-export.exe` on Windows), mark it executable on Unix (`chmod +x m1-cfg-export`), and move it onto your `PATH`. On macOS, clear quarantine with `xattr -d com.apple.quarantine m1-cfg-export`. Run `m1-cfg-export --help` for export options.
 
           Download the binary for your platform, rename it to `m1-typecheck` (`m1-typecheck.exe` on Windows), mark it executable (`chmod +x m1-typecheck`), and move it onto your `PATH`. On macOS, clear the download quarantine first: `xattr -d com.apple.quarantine m1-typecheck`.
 
