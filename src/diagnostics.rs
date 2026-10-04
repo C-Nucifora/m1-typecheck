@@ -49,7 +49,7 @@ pub enum TypeCode {
     T100, // bare-parameter-reference (M1 Build Error 1338: a param referenced by bare name, not `In.<name>`)
     T101, // return-statement (M1 Build Error 1338: a C-style `return <expr>`; M1 has no `return` keyword)
     T102, // channel-multiple-assignment-cross-function (M1 Build Error 1317: a channel reset in a caller and written by a callee on one path)
-    T103, // ambiguous-reference (M1 Build Error 1339: a bare name matching both a sibling channel and an enum type)
+    T103, // ambiguous-reference (M1 Build Error 1334/1339: bare group/DBC or channel/enum collision)
     T104, // unscheduled-function (M1 Build Error 1642: a user function no scheduled function reaches)
     T105, // local-use-before-definition (manual p.34: a local may only be used after it has been defined)
     T106, // group-not-a-value-provider (M1 Build Error 1331: a group with no Default Value used where a value is expected)
