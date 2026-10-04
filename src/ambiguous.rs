@@ -139,7 +139,8 @@ pub fn check(root: Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>) {
 }
 
 /// Find a same-named project group visible through rooted or enclosing-group
-/// lookup. A group deeper than the current scope is not a bare candidate.
+/// lookup. Direct children of each enclosing group are reachable; deeper
+/// descendants outside that lookup are not bare candidates.
 fn group_reachable_bare<'a>(name: &str, group: &str, table: &'a SymbolTable) -> Option<&'a Symbol> {
     let is_group = |s: &&Symbol| s.kind == SymbolKind::Group;
     if let Some(s) = table.get(&format!("Root.{name}")).filter(is_group) {
