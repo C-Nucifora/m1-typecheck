@@ -33,6 +33,7 @@ pub struct Project {
     /// symbol-table keys, e.g. `Root.Foo.Bar`). `None` when no cfg was loaded —
     /// the missing-parameter audit (T041) is then skipped.
     cfg_params: Option<HashSet<String>>,
+    native_tag_diagnostics: Vec<TypeDiagnostic>,
 }
 
 #[derive(Debug)]
@@ -63,6 +64,26 @@ impl Project {
     /// disk-sourced and unchanged by such edits, is applied separately via
     /// [`Project::with_config`] / [`Project::with_dbc`].
     pub fn from_xml(xml: &str) -> Result<Project, LoadError> {
+        Self::from_xml_with_modules(xml, &[])
+    }
+
+    /// Build the symbol model and shared native tag audit with optional selected
+    /// `.m1mod` definitions. Missing module metadata stays unknown: the shared
+    /// validator does not infer inherited tags from an opaque module name.
+    pub fn from_xml_with_modules(xml: &str, module_xmls: &[&str]) -> Result<Project, LoadError> {
+        let native_tag_diagnostics = m1_project::validate_with_modules(xml, module_xmls)
+            .map_err(|e| LoadError::Parse(e.to_string()))?
+            .into_iter()
+            .filter(|finding| matches!(finding.code, Some(1140 | 1141 | 1647 | 1648 | 1649)))
+            .map(|finding| {
+                make_project_for(
+                    TypeCode::T112,
+                    Severity::Warning,
+                    finding.message,
+                    &finding.path,
+                )
+            })
+            .collect();
         let parsed = m1prj::parse(xml).map_err(|e| LoadError::Parse(e.to_string()))?;
         let mut opaque_roots: HashSet<String> =
             STATIC_OPAQUE_ROOTS.iter().map(|s| s.to_string()).collect();
@@ -72,6 +93,7 @@ impl Project {
             opaque_roots,
             file_to_group: parsed.file_to_group,
             cfg_params: None,
+            native_tag_diagnostics,
         })
     }
 
@@ -163,10 +185,15 @@ impl Project {
         crate::audit::audit_project(self)
     }
 
-    /// Mandatory-Type-tag audit (T092, default-on): known M1 Build 1142 cases — see
-    /// [`crate::audit::audit_tags`].
+    /// Default-on native tag audit: mandatory Type tags (T092 / warning 1142)
+    /// plus the shared m1-project component rules (T112 / warnings 1140, 1141,
+    /// 1647, 1648 and 1649). Structural findings outside tag rules stay in
+    /// m1-project; each native rule is emitted once.
     pub fn audit_tags(&self) -> Vec<crate::diagnostics::TypeDiagnostic> {
-        crate::audit::audit_tags(self)
+        let mut findings = crate::audit::audit_tags(self);
+        findings.extend(self.native_tag_diagnostics.iter().cloned());
+        findings.sort_by(|a, b| a.inner.message.cmp(&b.inner.message));
+        findings
     }
 
     /// Display-unit audit (T095, default-on): M1 Build Error 1017 parity — see

@@ -173,15 +173,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "m1-project"
+version = "0.15.0"
+source = "git+https://github.com/nedlane/m1-project.git?tag=v0.15.0#7596a34b438710bd0c868a862b466648ba16af77"
+dependencies = [
+ "clap",
+ "m1-workspace 0.13.0",
+ "roxmltree",
+]
+
+[[package]]
 name = "m1-typecheck"
 version = "0.51.1"
 dependencies = [
  "clap",
  "m1-core",
- "m1-workspace",
+ "m1-project",
+ "m1-workspace 0.14.1",
  "roxmltree",
  "serde",
  "serde_json",
+ "toml",
+]
+
+[[package]]
+name = "m1-workspace"
+version = "0.13.0"
+source = "git+https://github.com/nedlane/m1-workspace.git?tag=v0.13.0#cf1b5b862d255cc4ecb89a7b708016bd9a9f33db"
+dependencies = [
+ "serde",
+ "serde_ignored",
  "toml",
 ]
 
