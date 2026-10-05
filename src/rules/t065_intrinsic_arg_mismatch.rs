@@ -60,12 +60,13 @@ impl super::Rule for Rule {
             node,
             Severity::Error,
             format!(
-                "`{path}` has no overload matching argument types ({}){}",
+                "`{path}` has no overload matching argument types ({}){}{}",
                 args.iter()
                     .map(|&ty| render_type(ty))
                     .collect::<Vec<_>>()
                     .join(", "),
                 union_explanation(&same_arity),
+                exact_type_explanation(&same_arity, &args),
             ),
         ));
     }
@@ -81,6 +82,29 @@ fn render_type(ty: ValueType) -> &'static str {
         ValueType::String => "String",
         ValueType::Unknown => "Unknown",
     }
+}
+
+fn exact_type_explanation(
+    overloads: &[&crate::intrinsics::Overload],
+    args: &[ValueType],
+) -> String {
+    if let [overload] = overloads {
+        for (param, &arg) in overload.params.iter().zip(args) {
+            if param.exact_type && !crate::intrinsics::exact_parameter_accepts_arg(param, arg) {
+                let expected = match param.ty.as_str() {
+                    "UnsignedInteger" => "Unsigned Integer",
+                    "FloatingPoint" => "Floating Point",
+                    other => other,
+                };
+                return format!(
+                    "; argument `{}` requires {expected}, but {} supplied",
+                    param.name,
+                    render_type(arg),
+                );
+            }
+        }
+    }
+    String::new()
 }
 
 fn union_explanation(overloads: &[&crate::intrinsics::Overload]) -> &'static str {
