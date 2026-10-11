@@ -29,6 +29,7 @@ pub mod t086_unit_mismatch;
 pub mod t091_local_case;
 pub mod t105_local_use_before_def;
 pub mod t106_group_not_value_provider;
+pub mod t114_user_return_calls;
 
 pub trait Rule: Send + Sync {
     fn check_node(&self, node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>);
@@ -101,6 +102,7 @@ impl Default for Registry {
                 Box::new(t030_assign_mismatch::Rule),
                 Box::new(t042_dbc_signal_range::Rule),
                 Box::new(t060_stateful_conditional::Rule),
+                Box::new(t114_user_return_calls::Rule),
                 Box::new(t061_integrated_only::Rule),
                 Box::new(t062_deprecated_overload::Rule),
                 Box::new(t063_calibration_only::Rule),

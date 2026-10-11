@@ -58,6 +58,10 @@ pub enum TypeCode {
     T109, // dbc-message-direction (a message method disagrees with its Transmit direction: .Receive on TX, .Tx*/.Transmit on RX)
     T110, // dbc-signal-accessor-type (a raw signal accessor disagrees with the signal's declared Type, e.g. .SetFloat on an integer signal)
     T111, // flash-without-preserve (flash-backed channels exist but no reachable script calls System.Preserve)
+    T112, // return-multiple-assignment (M1 Build Error 1354)
+    T113, // return-not-assigned-on-all-paths (M1 Build Error 1366)
+    T114, // discarded-user-return (M1 Build Error 1349)
+    T115, // user-call-in-condition-or-argument (M1 Build Error 1372)
 }
 
 impl TypeCode {
@@ -118,6 +122,10 @@ impl TypeCode {
             TypeCode::T109 => "T109",
             TypeCode::T110 => "T110",
             TypeCode::T111 => "T111",
+            TypeCode::T112 => "T112",
+            TypeCode::T113 => "T113",
+            TypeCode::T114 => "T114",
+            TypeCode::T115 => "T115",
         }
     }
 
@@ -182,6 +190,10 @@ impl TypeCode {
             TypeCode::T109 => "dbc-message-direction",
             TypeCode::T110 => "dbc-signal-accessor-type",
             TypeCode::T111 => "flash-without-preserve",
+            TypeCode::T112 => "return-multiple-assignment",
+            TypeCode::T113 => "return-not-assigned-on-all-paths",
+            TypeCode::T114 => "discarded-user-return",
+            TypeCode::T115 => "user-call-in-condition-or-argument",
         }
     }
 
@@ -195,7 +207,8 @@ impl TypeCode {
             T001, T002, T003, T004, T005, T006, T010, T020, T021, T030, T031, T040, T041, T042,
             T050, T060, T061, T062, T063, T064, T065, T070, T071, T080, T081, T082, T083, T084,
             T085, T086, T087, T088, T089, T090, T091, T092, T093, T094, T095, T096, T097, T098,
-            T099, T100, T101, T102, T103, T104, T105, T106, T107, T108, T109, T110, T111,
+            T099, T100, T101, T102, T103, T104, T105, T106, T107, T108, T109, T110, T111, T112,
+            T113, T114, T115,
         ]
     }
 }
@@ -348,6 +361,6 @@ mod tests {
             );
         }
         // Catalogue size tracks the enum (bump both together).
-        assert_eq!(codes.len(), 55);
+        assert_eq!(codes.len(), 59);
     }
 }

@@ -12,4 +12,6 @@
 <Signature ReturnType="s32"><Params/></Signature></Component>
 <Component Classname="BuiltIn.FuncUserParam" Name="Root.Test.Void" Filename="Test.Void.m1scr">
 <Signature ReturnType=""><Params/><Returns/></Signature></Component>
+<Component Classname="BuiltIn.FuncUserParam" Name="Root.Test.Bool" Filename="Test.Bool.m1scr">
+<Signature><Params/><Returns><Return Type="bool"/></Returns></Signature></Component>
 </List></ComponentStream></Project></MoTeCM1BuildSession>
