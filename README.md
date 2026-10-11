@@ -127,6 +127,9 @@ unrecognized metadata defaults to 1.4.5.0556. An unsupported explicit version
 is an error. This choice is independent of `--firmware`, which selects the
 intrinsic catalogue.
 
+Projects declaring a newer numeric FileFormat are rejected before checking.
+Stable supports formats through 10108, and Beta through 10109.
+
 Stable recognizes scalar `Signature ReturnType` declarations. Beta also
 recognizes ordered `Returns/Return` declarations. Stable does not infer a
 return type from a body when a signature is present. Legacy scalar return

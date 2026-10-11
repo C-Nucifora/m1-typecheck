@@ -89,6 +89,26 @@ impl Project {
         xml: &str,
         build_version: crate::compatibility::BuildVersion,
     ) -> Result<Project, LoadError> {
+        // A newer project format is rejected before symbol validation by the
+        // selected compiler. Missing metadata remains usable for synthetic XML.
+        let format = roxmltree::Document::parse(xml).ok().and_then(|doc| {
+            let root = doc.root_element();
+            let project = if root.has_tag_name("Project") {
+                Some(root)
+            } else {
+                root.children().find(|n| n.has_tag_name("Project"))
+            }?;
+            project.attribute("FileFormat")?.parse::<u32>().ok()
+        });
+        let maximum = match build_version {
+            crate::compatibility::BuildVersion::Stable144981 => 10108,
+            crate::compatibility::BuildVersion::Beta145556 => 10109,
+        };
+        if let Some(format) = format.filter(|format| *format > maximum) {
+            return Err(LoadError::Parse(format!(
+                "project FileFormat {format} is not supported by M1 Build {build_version}; maximum supported format is {maximum}"
+            )));
+        }
         let parsed = m1prj::parse_for_build(xml, build_version)
             .map_err(|e| LoadError::Parse(e.to_string()))?;
         let mut opaque_roots: HashSet<String> =

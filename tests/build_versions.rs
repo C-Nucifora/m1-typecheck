@@ -179,3 +179,42 @@ fn x_axis_index_return_type_changes_with_the_compiler_profile() {
         ));
     }
 }
+
+#[test]
+fn selected_profile_rejects_newer_project_file_formats_before_checking() {
+    let text = xml("1.4.5.556", RETURNS).replace("<Project>", "<Project FileFormat=\"10109\">");
+    assert!(Project::from_xml(&text).is_ok());
+    let error = Project::from_xml_for_build(&text, BuildVersion::Stable144981)
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(error.contains("10109") && error.contains("1.4.4.0981"));
+    let future = text.replace("10109", "10110");
+    assert!(Project::from_xml_for_build(&future, BuildVersion::Stable144981).is_err());
+    assert!(Project::from_xml_for_build(&future, BuildVersion::Beta145556).is_err());
+    assert!(
+        Project::from_xml_for_build("<Project FileFormat=\"10110\"/>", BuildVersion::Beta145556)
+            .is_err()
+    );
+    let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join("build-format-rejection");
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("Project.m1prj");
+    std::fs::write(&path, &text).unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_m1-typecheck"))
+        .args([
+            "--project",
+            path.to_str().unwrap(),
+            "--m1-build-version",
+            "1.4.4.0981",
+            "--completeness",
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("FileFormat 10109"));
+    assert!(output.stdout.is_empty());
+    let legacy = text.replace("10109", "10108");
+    assert!(Project::from_xml_for_build(&legacy, BuildVersion::Stable144981).is_ok());
+}
