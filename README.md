@@ -117,3 +117,26 @@ GPL-3.0-or-later — see [LICENSE](LICENSE).
 Independent, community-built open-source tooling for the MoTeC® M1 script
 language. Not affiliated with, authorised, or endorsed by MoTeC Pty Ltd.
 "MoTeC" and "M1" are trademarks of MoTeC Pty Ltd.
+
+### M1 Build version selection
+
+`--m1-build-version 1.4.4.0981` selects the stable project-format profile;
+`--m1-build-version 1.4.5.0556` selects the Beta profile. Without an override,
+supported root `ProductVersion` metadata selects the profile. Missing or
+unrecognized metadata defaults to 1.4.5.0556. An unsupported explicit version
+is an error. This choice is independent of `--firmware`, which selects the
+intrinsic catalogue.
+
+Stable recognizes scalar `Signature ReturnType` declarations. Beta also
+recognizes ordered `Returns/Return` declarations. Stable does not infer a
+return type from a body when a signature is present. Legacy scalar return
+checks apply in both profiles. For a known table and floating-point input,
+`XAxisIndex` returns a float in stable and an integer in Beta. Other table
+methods and unmodeled arguments remain unknown.
+
+These profiles cover the verified signature and X-axis index differences; they do not promise complete compiler parity or multiple
+return-value validation.
+
+Library consumers can use `Project::load_for_build` or
+`Project::from_xml_for_build` to override metadata, and `Project::build_version`
+to inspect the selected profile. Profiles are stored per project.

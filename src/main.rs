@@ -2,6 +2,7 @@ mod output;
 
 use clap::{Parser, ValueEnum};
 use m1_core::Severity;
+use m1_typecheck::compatibility::BuildVersion;
 use m1_typecheck::cross_script::{self, ChannelTaints};
 use m1_typecheck::diagnostics::{TypeCode, TypeDiagnostic};
 use m1_typecheck::filter::DiagFilter;
@@ -84,6 +85,10 @@ struct Args {
     /// active target is reported by `--completeness`.
     #[arg(long, value_name = "TARGET")]
     firmware: Option<String>,
+    /// M1 Build project-format baseline: 1.4.4.0981 or 1.4.5.0556.
+    /// Defaults to supported ProductVersion metadata, otherwise 1.4.5.0556.
+    #[arg(long, value_name = "VERSION")]
+    m1_build_version: Option<BuildVersion>,
     /// Explain a channel's physical quantity: its declared base unit and the
     /// unit of every symbol directly assigned into it across the project's
     /// scripts (the whole auto-discovered set, like --explain — the positional
@@ -211,6 +216,9 @@ fn print_completeness(report: &m1_typecheck::completeness::CompletenessReport, f
         Format::Human => {
             let r = report;
             println!("analysis completeness report");
+            if let Some(version) = r.m1_build_version {
+                println!("  M1 Build:        {version} (project-format profile)");
+            }
             println!(
                 "  scripts:         {} analysed ({} total, {} syntax-error, {} too-deep)",
                 r.scripts_analysed(),
@@ -310,40 +318,46 @@ struct JsonBuf {
 fn load_project(
     project_path: Option<&PathBuf>,
     config_path: Option<&PathBuf>,
+    build_version: Option<BuildVersion>,
 ) -> (Option<Project>, bool) {
     // Track whether any `.m1dbc` was discovered so a project that loads but finds
     // none can announce that T042 is skipped (mirroring the cfg/project notes).
     let mut dbc_found = false;
-    let project = project_path.map(|path| match Project::load(path) {
-        Ok(mut p) => {
-            if let Some(cfg) = config_path {
-                p = p.with_config(cfg).unwrap_or_else(|e| {
-                    eprintln!("m1-typecheck: config {}: {e}", cfg.display());
-                    process::exit(2);
-                });
-            }
-            // Auto-load `.m1dbc` files under the project directory so CAN signals
-            // resolve and the T042 range check applies. Sorted for stable output.
-            if let Some(root) = path.parent() {
-                for dbc in m1_workspace::find_dbc_files(root) {
-                    dbc_found = true;
-                    let rel = dbc
-                        .strip_prefix(root)
-                        .unwrap_or(&dbc)
-                        .to_string_lossy()
-                        .into_owned();
-                    // A malformed/unreadable DBC must not blank the whole model:
-                    // warn and skip just that file, keeping every other symbol.
-                    if let Err(e) = p.augment_dbc(&dbc, &rel) {
-                        eprintln!("m1-typecheck: dbc {} skipped: {e}", dbc.display());
+    let project = project_path.map(|path| {
+        match build_version.map_or_else(
+            || Project::load(path),
+            |version| Project::load_for_build(path, version),
+        ) {
+            Ok(mut p) => {
+                if let Some(cfg) = config_path {
+                    p = p.with_config(cfg).unwrap_or_else(|e| {
+                        eprintln!("m1-typecheck: config {}: {e}", cfg.display());
+                        process::exit(2);
+                    });
+                }
+                // Auto-load `.m1dbc` files under the project directory so CAN signals
+                // resolve and the T042 range check applies. Sorted for stable output.
+                if let Some(root) = path.parent() {
+                    for dbc in m1_workspace::find_dbc_files(root) {
+                        dbc_found = true;
+                        let rel = dbc
+                            .strip_prefix(root)
+                            .unwrap_or(&dbc)
+                            .to_string_lossy()
+                            .into_owned();
+                        // A malformed/unreadable DBC must not blank the whole model:
+                        // warn and skip just that file, keeping every other symbol.
+                        if let Err(e) = p.augment_dbc(&dbc, &rel) {
+                            eprintln!("m1-typecheck: dbc {} skipped: {e}", dbc.display());
+                        }
                     }
                 }
+                p
             }
-            p
-        }
-        Err(e) => {
-            eprintln!("m1-typecheck: project {}: {e}", path.display());
-            process::exit(2);
+            Err(e) => {
+                eprintln!("m1-typecheck: project {}: {e}", path.display());
+                process::exit(2);
+            }
         }
     });
     if project.is_none() {
@@ -677,7 +691,11 @@ fn main() {
     let mut json_buf = JsonBuf::default();
 
     // Load the project model (config + DBCs) and emit degraded-run notes.
-    let (mut project, dbc_loaded) = load_project(project_path.as_ref(), config_path.as_ref());
+    let (mut project, dbc_loaded) = load_project(
+        project_path.as_ref(),
+        config_path.as_ref(),
+        args.m1_build_version,
+    );
     let cfg_loaded = config_path.is_some();
 
     // Read requested sources tolerantly once. MoTeC `.m1scr` files may carry

@@ -199,7 +199,7 @@ pub fn render_completeness(r: &CompletenessReport) -> String {
 \"intrinsic_calls\":{{\"total\":{},\"unmodelled\":{}}},\
 \"when_subjects\":{{\"total\":{},\"incomplete\":{}}},\
 \"inputs\":{{\"cfg_loaded\":{},\"dbc_loaded\":{}}},\
-\"catalogue_target\":{}}}}}",
+\"catalogue_target\":{},\"m1_build_version\":{}}}}}",
         r.scripts_total,
         r.scripts_analysed(),
         r.scripts_with_syntax_errors,
@@ -219,6 +219,8 @@ pub fn render_completeness(r: &CompletenessReport) -> String {
         r.cfg_loaded,
         r.dbc_loaded,
         json_str(r.catalogue_target),
+        r.m1_build_version
+            .map_or_else(|| "null".to_string(), |v| json_str(v.as_str())),
     )
 }
 

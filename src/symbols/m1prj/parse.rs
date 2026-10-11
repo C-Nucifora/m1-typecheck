@@ -9,6 +9,17 @@ use m1_workspace::LineIndex;
 use std::collections::{HashMap, HashSet};
 
 pub fn parse(xml: &str) -> Result<Parsed, XmlParseError> {
+    parse_for_build(
+        xml,
+        crate::compatibility::BuildVersion::from_project_xml(xml),
+    )
+}
+
+/// Parse with an explicit compiler baseline, overriding project metadata.
+pub fn parse_for_build(
+    xml: &str,
+    build_version: crate::compatibility::BuildVersion,
+) -> Result<Parsed, XmlParseError> {
     let doc = roxmltree::Document::parse(xml).map_err(XmlParseError::in_context(".m1prj"))?;
     // Map byte offsets to 0-based source lines in O(log N) for per-component
     // goto-definition, instead of roxmltree's `text_pos_at` (documented "very
@@ -21,7 +32,7 @@ pub fn parse(xml: &str) -> Result<Parsed, XmlParseError> {
 
     // Pre-pass: index every component's path -> Classname and -> declared tags,
     // so the component pass can type/tag a node regardless of document order.
-    let index = ProjectXmlIndex::build(&doc);
+    let index = ProjectXmlIndex::build(&doc, build_version);
 
     // Register all enum types (firmware-supplied "open" enums plus project-local
     // `<Type Storage="enum">` declarations) before any component is typed.

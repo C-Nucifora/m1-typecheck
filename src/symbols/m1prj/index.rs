@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 /// Pre-pass indexes built from the project XML, read by the component pass.
 pub(super) struct ProjectXmlIndex {
+    pub(super) build_version: crate::compatibility::BuildVersion,
     /// Every component's path -> its `Classname`, so a channel that carries no
     /// inline `<Props Type>`/`Qty` can be typed from the class of the object
     /// that owns it (its parent). M1 Build derives these the same way — the
@@ -25,7 +26,10 @@ pub(super) struct ProjectXmlIndex {
 impl ProjectXmlIndex {
     /// Build both pre-pass indexes in a pair of descendant walks over the
     /// project document.
-    pub(super) fn build(doc: &roxmltree::Document) -> Self {
+    pub(super) fn build(
+        doc: &roxmltree::Document,
+        build_version: crate::compatibility::BuildVersion,
+    ) -> Self {
         let classname_by_path: HashMap<String, String> = doc
             .descendants()
             .filter(|n| n.has_tag_name("Component"))
@@ -68,6 +72,7 @@ impl ProjectXmlIndex {
             .collect();
 
         ProjectXmlIndex {
+            build_version,
             classname_by_path,
             selected_tags_by_path,
         }

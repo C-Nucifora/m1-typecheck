@@ -2,6 +2,7 @@
 pub mod ambiguous;
 pub mod audit;
 pub mod classname;
+pub mod compatibility;
 pub mod completeness;
 pub mod cross_script;
 pub mod dbc_init;

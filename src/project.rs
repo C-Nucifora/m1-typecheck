@@ -26,6 +26,7 @@ const STATIC_OPAQUE_ROOTS: &[&str] = &[
 ];
 
 pub struct Project {
+    build_version: crate::compatibility::BuildVersion,
     table: SymbolTable,
     opaque_roots: HashSet<String>,
     file_to_group: HashMap<String, String>,
@@ -56,6 +57,20 @@ impl Project {
         Self::from_xml(&xml)
     }
 
+    /// Load using an explicit M1 Build baseline.
+    pub fn load_for_build(
+        path: &Path,
+        version: crate::compatibility::BuildVersion,
+    ) -> Result<Project, LoadError> {
+        let xml = m1_workspace::read_motec_xml(path).map_err(LoadError::Io)?;
+        Self::from_xml_for_build(&xml, version)
+    }
+
+    /// Active project-format baseline.
+    pub fn build_version(&self) -> crate::compatibility::BuildVersion {
+        self.build_version
+    }
+
     /// Build a project from `.m1prj` XML already in memory, without reading from
     /// disk. Used to rebuild the model from edited-but-unsaved project text (e.g.
     /// the LSP refreshing its symbol table immediately after a rename, before the
@@ -63,11 +78,24 @@ impl Project {
     /// disk-sourced and unchanged by such edits, is applied separately via
     /// [`Project::with_config`] / [`Project::with_dbc`].
     pub fn from_xml(xml: &str) -> Result<Project, LoadError> {
-        let parsed = m1prj::parse(xml).map_err(|e| LoadError::Parse(e.to_string()))?;
+        Self::from_xml_for_build(
+            xml,
+            crate::compatibility::BuildVersion::from_project_xml(xml),
+        )
+    }
+
+    /// Build with an explicit baseline, overriding `ProductVersion` metadata.
+    pub fn from_xml_for_build(
+        xml: &str,
+        build_version: crate::compatibility::BuildVersion,
+    ) -> Result<Project, LoadError> {
+        let parsed = m1prj::parse_for_build(xml, build_version)
+            .map_err(|e| LoadError::Parse(e.to_string()))?;
         let mut opaque_roots: HashSet<String> =
             STATIC_OPAQUE_ROOTS.iter().map(|s| s.to_string()).collect();
         opaque_roots.extend(parsed.module_roots);
         Ok(Project {
+            build_version,
             table: parsed.table,
             opaque_roots,
             file_to_group: parsed.file_to_group,
@@ -202,11 +230,12 @@ impl Project {
             };
             // A `<Signature ReturnType>` declared in the .m1prj is
             // authoritative (#110); only infer when nothing is declared.
-            if self
-                .table
-                .get(&sym_path)
-                .is_some_and(|s| s.return_type.is_some() || !s.declared_returns.is_empty())
-            {
+            if self.table.get(&sym_path).is_some_and(|s| {
+                s.return_type.is_some()
+                    || !s.declared_returns.is_empty()
+                    || (self.build_version == crate::compatibility::BuildVersion::Stable144981
+                        && s.in_params.is_some())
+            }) {
                 continue;
             }
             let cst = &script.cst;

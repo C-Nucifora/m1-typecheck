@@ -314,7 +314,9 @@ fn component_props(
     // `<Params><Param Name="Timeout" Type="f32">…`. Present on user functions
     // and the auto-created FuncGenerated components in real projects.
     let signature = node.children().find(|c| c.has_tag_name("Signature"));
-    let declared_returns = signature.map(declared_returns).unwrap_or_default();
+    let declared_returns = signature
+        .map(|s| declared_returns(s, index.build_version))
+        .unwrap_or_default();
     // A scalar call result is available only for one known return slot.
     let return_type = match declared_returns.as_slice() {
         [slot] if slot.value_type != ValueType::Unknown => Some(slot.value_type),
@@ -616,10 +618,16 @@ fn constant_value_type(value: &str) -> ValueType {
 
 /// Preserve return order and unknown types. Legacy scalar fields remain
 /// supported for an unnamed singleton.
-fn declared_returns(signature: roxmltree::Node<'_, '_>) -> Vec<DeclaredReturn> {
+fn declared_returns(
+    signature: roxmltree::Node<'_, '_>,
+    build_version: crate::compatibility::BuildVersion,
+) -> Vec<DeclaredReturn> {
     let mut slots: Vec<_> = signature
         .children()
-        .find(|n| n.has_tag_name("Returns"))
+        .find(|n| {
+            n.has_tag_name("Returns")
+                && build_version == crate::compatibility::BuildVersion::Beta145556
+        })
         .into_iter()
         .flat_map(|n| n.children())
         .filter(|n| n.has_tag_name("Return"))
