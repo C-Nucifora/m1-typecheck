@@ -268,3 +268,45 @@ fn cli_auto_detects_each_project_version_without_an_override() {
         );
     }
 }
+
+#[test]
+fn module_aware_loaders_preserve_detection_and_explicit_overrides() {
+    let text = xml("1.4.4.981", RETURNS);
+    let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join("module-build-version");
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("Project.m1prj");
+    std::fs::write(&path, &text).unwrap();
+    for project in [
+        Project::load_with_module_dirs(&path, &[]).unwrap(),
+        Project::from_xml_with_module_dirs(&text, &[]).unwrap(),
+        Project::from_xml_with_modules(&text, &[]).unwrap(),
+    ] {
+        assert_eq!(project.build_version(), BuildVersion::Stable144981);
+        assert!(
+            project
+                .symbols()
+                .get("Root.Test.Value")
+                .unwrap()
+                .declared_returns
+                .is_empty()
+        );
+    }
+    for project in [
+        Project::load_with_module_dirs_for_build(&path, &[], Some(BuildVersion::Beta145556))
+            .unwrap(),
+        Project::from_xml_with_module_dirs_for_build(&text, &[], Some(BuildVersion::Beta145556))
+            .unwrap(),
+        Project::from_xml_with_modules_for_build(&text, &[], BuildVersion::Beta145556).unwrap(),
+    ] {
+        assert_eq!(project.build_version(), BuildVersion::Beta145556);
+        assert_eq!(
+            project
+                .symbols()
+                .get("Root.Test.Value")
+                .unwrap()
+                .declared_returns
+                .len(),
+            1
+        );
+    }
+}

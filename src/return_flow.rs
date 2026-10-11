@@ -16,7 +16,7 @@ pub(crate) fn check(root: Node, out: &mut Vec<TypeDiagnostic>) {
     let Some(counts) = counts(root) else { return };
     if counts.max >= 2 {
         out.push(make(
-            TypeCode::T112,
+            TypeCode::T114,
             &root,
             Severity::Error,
             "return value `Out` is assigned more than once on a single code path (M1 Build Error 1354)".into(),
@@ -24,7 +24,7 @@ pub(crate) fn check(root: Node, out: &mut Vec<TypeDiagnostic>) {
     }
     if counts.incomplete_join || (counts.max > 0 && counts.min == 0) {
         out.push(make(
-            TypeCode::T113,
+            TypeCode::T115,
             &root,
             Severity::Error,
             "not all code paths assign to return value `Out` (M1 Build Error 1366)".into(),

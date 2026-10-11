@@ -10,14 +10,14 @@ fn codes(source: &str) -> Vec<TypeCode> {
         .diagnostics
         .into_iter()
         .map(|d| d.code)
-        .filter(|code| matches!(code, TypeCode::T114 | TypeCode::T115))
+        .filter(|code| matches!(code, TypeCode::T116 | TypeCode::T117))
         .collect()
 }
 
 #[test]
 fn discarded_direct_or_parenthesized_user_results_are_errors() {
     for source in ["Bool();", "(Bool());"] {
-        assert_eq!(codes(source), [TypeCode::T114]);
+        assert_eq!(codes(source), [TypeCode::T116]);
     }
 }
 
@@ -33,13 +33,13 @@ fn user_calls_in_conditions_are_errors() {
         "if (not Bool()) { }",
         "if (Bool() and true) { }",
     ] {
-        assert_eq!(codes(source), [TypeCode::T115]);
+        assert_eq!(codes(source), [TypeCode::T117]);
     }
 }
 
 #[test]
 fn user_calls_inside_other_call_arguments_are_errors() {
-    assert_eq!(codes("System.Unused(Bool());"), [TypeCode::T115]);
+    assert_eq!(codes("System.Unused(Bool());"), [TypeCode::T117]);
 }
 
 #[test]

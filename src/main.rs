@@ -45,6 +45,10 @@ struct Args {
     /// Project.m1prj (defaults to nearest upward, or $M1_PROJECT)
     #[arg(long)]
     project: Option<PathBuf>,
+    /// Directories containing the exact selected .m1mod files (repeatable).
+    /// Defaults to M1_MODULES_PATH and standard M1 Build install locations.
+    #[arg(long = "modules-dir", value_name = "DIR")]
+    module_dirs: Vec<PathBuf>,
     /// parameters.m1cfg (optional)
     #[arg(long)]
     config: Option<PathBuf>,
@@ -318,16 +322,14 @@ struct JsonBuf {
 fn load_project(
     project_path: Option<&PathBuf>,
     config_path: Option<&PathBuf>,
+    module_dirs: &[PathBuf],
     build_version: Option<BuildVersion>,
 ) -> (Option<Project>, bool) {
     // Track whether any `.m1dbc` was discovered so a project that loads but finds
     // none can announce that T042 is skipped (mirroring the cfg/project notes).
     let mut dbc_found = false;
     let project = project_path.map(|path| {
-        match build_version.map_or_else(
-            || Project::load(path),
-            |version| Project::load_for_build(path, version),
-        ) {
+        match Project::load_with_module_dirs_for_build(path, module_dirs, build_version) {
             Ok(mut p) => {
                 if let Some(cfg) = config_path {
                     p = p.with_config(cfg).unwrap_or_else(|e| {
@@ -694,6 +696,7 @@ fn main() {
     let (mut project, dbc_loaded) = load_project(
         project_path.as_ref(),
         config_path.as_ref(),
+        &args.module_dirs,
         args.m1_build_version,
     );
     let cfg_loaded = config_path.is_some();

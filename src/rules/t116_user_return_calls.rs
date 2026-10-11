@@ -30,7 +30,7 @@ impl super::Rule for Rule {
             match p.kind() {
                 Kind::ExpressionStatement if direct_result => {
                     out.push(make(
-                        TypeCode::T114,
+                        TypeCode::T116,
                         node,
                         Severity::Error,
                         format!(
@@ -41,7 +41,7 @@ impl super::Rule for Rule {
                 }
                 Kind::IfStatement | Kind::ArgumentList => {
                     out.push(make(
-                        TypeCode::T115,
+                        TypeCode::T117,
                         node,
                         Severity::Error,
                         format!("function `{path}` cannot be called inside an `if` condition or function argument; assign its result to a local first (M1 Build Error 1372)"),

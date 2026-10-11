@@ -10,7 +10,7 @@ fn codes(function: &str, source: &str) -> Vec<TypeCode> {
         .diagnostics
         .into_iter()
         .map(|d| d.code)
-        .filter(|code| matches!(code, TypeCode::T099 | TypeCode::T112 | TypeCode::T113))
+        .filter(|code| matches!(code, TypeCode::T099 | TypeCode::T114 | TypeCode::T115))
         .collect()
 }
 
@@ -23,7 +23,7 @@ fn missing_output_retains_the_existing_diagnostic() {
 fn straight_line_duplicate_output_is_an_error() {
     assert_eq!(
         codes("Test.Single.m1scr", "Out = 1.0; Out = 2.0;"),
-        [TypeCode::T112]
+        [TypeCode::T114]
     );
 }
 
@@ -31,7 +31,7 @@ fn straight_line_duplicate_output_is_an_error() {
 fn partial_output_is_distinct_from_no_output() {
     assert_eq!(
         codes("Test.Single.m1scr", "if (true) { Out = 1.0; }"),
-        [TypeCode::T113]
+        [TypeCode::T115]
     );
 }
 
@@ -49,7 +49,7 @@ fn alternatives_are_exclusive_and_else_if_is_nested() {
             "Test.Single.m1scr",
             "if (true) { Out = 1.0; } else if (false) { Out = 2.0; }"
         ),
-        [TypeCode::T113]
+        [TypeCode::T115]
     );
 }
 
@@ -57,7 +57,7 @@ fn alternatives_are_exclusive_and_else_if_is_nested() {
 fn later_write_does_not_repair_an_incomplete_conditional_join() {
     assert_eq!(
         codes("Test.Single.m1scr", "if (true) { Out = 1.0; } Out = 2.0;"),
-        [TypeCode::T112, TypeCode::T113]
+        [TypeCode::T114, TypeCode::T115]
     );
 }
 
@@ -65,7 +65,7 @@ fn later_write_does_not_repair_an_incomplete_conditional_join() {
 fn earlier_write_does_not_repair_an_incomplete_conditional_join() {
     assert_eq!(
         codes("Test.Single.m1scr", "Out = 1.0; if (true) { Out = 2.0; }"),
-        [TypeCode::T112, TypeCode::T113]
+        [TypeCode::T114, TypeCode::T115]
     );
 }
 
@@ -73,7 +73,7 @@ fn earlier_write_does_not_repair_an_incomplete_conditional_join() {
 fn legacy_scalar_returns_use_the_same_path_checks() {
     assert_eq!(
         codes("Test.Legacy.m1scr", "Out = 1; Out = 2;"),
-        [TypeCode::T112]
+        [TypeCode::T114]
     );
 }
 

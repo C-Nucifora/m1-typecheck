@@ -142,8 +142,8 @@ scalar. Explicit return contracts also prevent body-based inference from
 replacing unknown or multiple declared results. A known singleton in the new
 layout participates in the existing missing-output assignment check.
 
-Known scalar declarations also enable T112 for repeated `Out` assignment on
-one path and T113 when an `if`/`else` path leaves `Out` unassigned. T099 still
+Known scalar declarations also enable T114 for repeated `Out` assignment on
+one path and T115 when an `if`/`else` path leaves `Out` unassigned. T099 still
 handles a body with no output assignment. These path checks preserve mutually
 exclusive branches. Assigning `Out` after a conditional does not repair a
 join where only some branches assigned it. An assignment before the
@@ -155,7 +155,7 @@ Multiple-result call expressions, output-object resolution and checks for
 assigning every result still need separate support.
 
 Calls to `BuiltIn.FuncUserParam` functions with known scalar return declarations
-also enable T114 when a statement discards the result and T115 when the call
+also enable T116 when a statement discards the result and T117 when the call
 appears inside an `if` condition or another call's arguments. Assigning the
 result to a local before using it is accepted. Calls in branch bodies are
 allowed; these checks do not impose the library stateful-function restriction.

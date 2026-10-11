@@ -1,6 +1,6 @@
 [package]
 name = "m1-typecheck"
-version = "0.51.0"
+version = "0.52.0"
 edition = "2024"
 rust-version = "1.88"
 default-run = "m1-typecheck"
@@ -21,10 +21,12 @@ name = "m1_typecheck"
 path = "src/lib.rs"
 
 [dependencies]
-m1-core = { git = "https://github.com/C-Nucifora/m1-core.git", tag = "v0.15.0" }
-m1-workspace = { git = "https://github.com/nedlane/m1-workspace.git", tag = "v0.14.0" }
+m1-core = { git = "https://github.com/C-Nucifora/m1-core.git", tag = "v0.15.1" }
+m1-workspace = { git = "https://github.com/nedlane/m1-workspace.git", tag = "v0.14.1" }
 roxmltree = "0.21"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1.1"
 clap = { version = "4", features = ["derive"] }
+
+m1-project = { git = "https://github.com/nedlane/m1-project.git", tag = "v0.16.0" }
