@@ -5,7 +5,9 @@
 use super::index::ProjectXmlIndex;
 use super::parent_group;
 use super::type_inference::{type_from_leaf_name, type_from_owner_class};
-use crate::symbols::{EnumId, EnumType, Symbol, SymbolKind, SymbolTable, TableAxis, TableMeta};
+use crate::symbols::{
+    DeclaredReturn, EnumId, EnumType, Symbol, SymbolKind, SymbolTable, TableAxis, TableMeta,
+};
 use crate::types::{ValueType, primitive_type};
 use m1_workspace::LineIndex;
 use std::collections::HashMap;
@@ -174,6 +176,7 @@ struct ComponentProps {
     tags: Vec<String>,
     /// Declared return type from `<Signature ReturnType="…">` (#110).
     return_type: Option<ValueType>,
+    declared_returns: Vec<DeclaredReturn>,
     /// Declared parameters from `<Signature><Params>` (#110).
     in_params: Option<Vec<(String, ValueType)>>,
     /// Raw `<Props Target="…">` of a `BuiltIn.Reference` component, verbatim;
@@ -311,10 +314,12 @@ fn component_props(
     // `<Params><Param Name="Timeout" Type="f32">…`. Present on user functions
     // and the auto-created FuncGenerated components in real projects.
     let signature = node.children().find(|c| c.has_tag_name("Signature"));
-    let return_type = signature
-        .and_then(|sig| sig.attribute("ReturnType"))
-        .filter(|t| !t.is_empty())
-        .and_then(crate::types::primitive_type);
+    let declared_returns = signature.map(declared_returns).unwrap_or_default();
+    // A scalar call result is available only for one known return slot.
+    let return_type = match declared_returns.as_slice() {
+        [slot] if slot.value_type != ValueType::Unknown => Some(slot.value_type),
+        _ => None,
+    };
     let in_params = signature.map(|sig| {
         sig.children()
             .find(|c| c.has_tag_name("Params"))
@@ -392,6 +397,7 @@ fn component_props(
         log_rate_hz,
         class,
         return_type,
+        declared_returns,
         in_params,
         reference_target,
         default_value,
@@ -464,6 +470,7 @@ pub(super) fn symbol_from_component(
         log_rate_hz: props.log_rate_hz,
         tags: props.tags,
         return_type: props.return_type,
+        declared_returns: props.declared_returns,
         in_params: props.in_params,
         table_meta: props.table_meta,
         reference_target: props.reference_target,
@@ -605,6 +612,41 @@ fn constant_value_type(value: &str) -> ValueType {
     } else {
         ValueType::Unknown // e.g. an enum member name like "CAN Bus 2"
     }
+}
+
+/// Preserve return order and unknown types. Legacy scalar fields remain
+/// supported for an unnamed singleton.
+fn declared_returns(signature: roxmltree::Node<'_, '_>) -> Vec<DeclaredReturn> {
+    let mut slots: Vec<_> = signature
+        .children()
+        .find(|n| n.has_tag_name("Returns"))
+        .into_iter()
+        .flat_map(|n| n.children())
+        .filter(|n| n.has_tag_name("Return"))
+        .filter_map(|n| {
+            let ty = n.attribute("Type")?;
+            Some(DeclaredReturn {
+                name: n.attribute("Name").map(str::to_string),
+                declared_type: ty.to_string(),
+                value_type: primitive_type(ty).unwrap_or(ValueType::Unknown),
+            })
+        })
+        .collect();
+    if let Some(ty) = signature.attribute("ReturnType").filter(|t| !t.is_empty()) {
+        if slots.is_empty() {
+            slots.push(DeclaredReturn {
+                name: None,
+                declared_type: ty.to_string(),
+                value_type: primitive_type(ty).unwrap_or(ValueType::Unknown),
+            });
+        } else if slots.len() == 1 && slots[0].name.as_deref().unwrap_or("").is_empty() {
+            // The legacy type applies to an unnamed singleton. Named or multiple
+            // explicit slots retain their own types.
+            slots[0].declared_type = ty.to_string();
+            slots[0].value_type = primitive_type(ty).unwrap_or(ValueType::Unknown);
+        }
+    }
+    slots
 }
 
 #[cfg(test)]

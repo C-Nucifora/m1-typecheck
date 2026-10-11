@@ -205,7 +205,7 @@ impl Project {
             if self
                 .table
                 .get(&sym_path)
-                .is_some_and(|s| s.return_type.is_some())
+                .is_some_and(|s| s.return_type.is_some() || !s.declared_returns.is_empty())
             {
                 continue;
             }

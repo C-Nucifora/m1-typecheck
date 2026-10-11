@@ -128,3 +128,20 @@ help-pane captures (`M1_LIBRARIES_ENUMS_TYPES`, reconstructed 2026-06-11) via
 
 To refresh after a new capture set:
 `python3 assets/merge-help-captures.py <captures-dir>`.
+
+## Function return signatures
+
+The project reader accepts both legacy `<Signature ReturnType="f32">` metadata
+and ordered `<Signature><Returns><Return Type="f32"/></Returns></Signature>`
+metadata. `Symbol::declared_returns` preserves each slot's optional name, raw
+type spelling and mapped value type. Unknown type names remain `Unknown`.
+
+Exactly one known slot supplies the existing scalar `return_type`. Multiple
+slots retain their declarations without projecting the first result as a
+scalar. Explicit return contracts also prevent body-based inference from
+replacing unknown or multiple declared results. A known singleton in the new
+layout participates in the existing missing-output assignment check.
+
+This supports return metadata parsing. Multiple-result call expressions,
+output-object resolution and checks for assigning every result still need
+separate support.
