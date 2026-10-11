@@ -218,3 +218,53 @@ fn selected_profile_rejects_newer_project_file_formats_before_checking() {
     let legacy = text.replace("10109", "10108");
     assert!(Project::from_xml_for_build(&legacy, BuildVersion::Stable144981).is_ok());
 }
+
+#[test]
+fn cli_auto_detects_each_project_version_without_an_override() {
+    for (metadata, expected, signature) in [
+        ("1.4.4.981", "1.4.4.0981", RETURNS),
+        ("1.4.5.556", "1.4.5.0556", RETURNS),
+    ] {
+        let directory =
+            Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("auto-build-{metadata}"));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("Project.m1prj");
+        std::fs::write(&path, xml(metadata, signature)).unwrap();
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_m1-typecheck"))
+            .args([
+                "--project",
+                path.to_str().unwrap(),
+                "--completeness",
+                "--format",
+                "json",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["completeness"]["m1_build_version"], expected);
+        let script = directory.join("Test.Value.m1scr");
+        std::fs::write(&script, "local x = 1;").unwrap();
+        let checked = std::process::Command::new(env!("CARGO_BIN_EXE_m1-typecheck"))
+            .args([
+                "--project",
+                path.to_str().unwrap(),
+                "--select",
+                "T099",
+                "--format",
+                "json",
+                script.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        let findings: serde_json::Value = serde_json::from_slice(&checked.stdout).unwrap();
+        assert_eq!(
+            findings["summary"]["errors"],
+            if metadata == "1.4.4.981" { 0 } else { 1 }
+        );
+    }
+}

@@ -120,6 +120,9 @@ language. Not affiliated with, authorised, or endorsed by MoTeC Pty Ltd.
 
 ### M1 Build version selection
 
+The project file selects validation automatically from its root `ProductVersion`.
+Use `--completeness` to see the selected version.
+
 `--m1-build-version 1.4.4.0981` selects the stable project-format profile;
 `--m1-build-version 1.4.5.0556` selects the Beta profile. Without an override,
 supported root `ProductVersion` metadata selects the profile. Missing or
