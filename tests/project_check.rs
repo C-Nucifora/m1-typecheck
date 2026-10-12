@@ -15,13 +15,13 @@ const PROJECT: &str = r#"<?xml version="1.0"?>
   <ComponentStream>
    <List>
     <Component Classname="BuiltIn.GroupCompound" Name="Root.Foo"/>
-    <Component Classname="BuiltIn.Parameter" Name="Root.Foo.Gain.Value"><Props/></Component>
+    <Component Classname="BuiltIn.Parameter" Name="Root.Foo.Gain.Value"><Props SelectedTags="Setup"/></Component>
     <Component Classname="BuiltIn.Table" Name="Root.Foo.Map"><Props/></Component>
     <Component Classname="BuiltIn.Channel" Name="Root.Foo.Speed">
-     <Props Qty="rad/s"><Locale><Default Unit="%"/></Locale></Props>
+     <Props Qty="rad/s" SelectedTags="Normal"><Locale><Default Unit="%"/></Locale></Props>
     </Component>
     <Component Classname="BuiltIn.Channel" Name="Root.Foo.Menu">
-     <Props Storage="Flash" Security="Tune"/>
+     <Props Storage="Flash" Security="Tune" SelectedTags="Normal"/>
     </Component>
     <Component Classname="BuiltIn.FuncUser" Filename="Foo.Update.m1scr" Name="Root.Foo.Update">
      <Props SelectedTrigger="Root.Events.On 100Hz"/>

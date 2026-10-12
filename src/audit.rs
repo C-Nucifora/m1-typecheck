@@ -308,29 +308,57 @@ pub fn audit_tags(project: &Project) -> Vec<TypeDiagnostic> {
     let ownership = ObjectOwnership::new(table);
     let mut out = Vec::new();
     for sym in table.iter() {
+        // `tags` already includes every ancestor group's tags.
         let has_tag_in = |group: &[&str]| {
             sym.tags
                 .iter()
                 .any(|t| group.iter().any(|g| g.eq_ignore_ascii_case(t)))
         };
-        let project_table = sym.kind == SymbolKind::Table && !ownership.owned_by_object(&sym.path);
-        let assigned_resource = sym.io_resource_assigned;
-        if (project_table || assigned_resource) && !has_tag_in(&TYPE_TAGS) {
-            let subject = if project_table {
-                "project-owned table"
-            } else {
-                "assigned IO resource"
-            };
-            out.push(make_project_for(
-                TypeCode::T092,
-                Severity::Warning,
-                format!(
-                    "{subject} `{}` has no Type tag selected (known M1 Build warning 1142 case)",
-                    sym.path
-                ),
-                &sym.path,
-            ));
+        if has_tag_in(&TYPE_TAGS) {
+            continue;
         }
+        // Package-object members inherit their class's tags, and M1 Build's
+        // generated objects (a table's `.Value`, a reference's target) are
+        // not reported separately.
+        let plain = !ownership.owned_by_object(&sym.path)
+            && !project.is_auto_created(&sym.path)
+            && sym
+                .path
+                .rsplit_once('.')
+                .and_then(|(parent, _)| table.get(parent))
+                .is_none_or(|parent| {
+                    !matches!(
+                        parent.classname.as_deref(),
+                        Some(
+                            "BuiltIn.Reference"
+                                | "BuiltIn.Table"
+                                | "BuiltIn.CalibrationTable"
+                                | "BuiltIn.IOResourceValueInput"
+                                | "BuiltIn.IOResourceValueOutput"
+                        )
+                    )
+                });
+        let subject = if sym.io_resource_assigned {
+            "assigned IO resource"
+        } else if !plain {
+            continue;
+        } else {
+            match (sym.kind, sym.classname.as_deref()) {
+                (SymbolKind::Table, _) => "table",
+                (SymbolKind::Channel, Some("BuiltIn.Channel")) => "channel",
+                (SymbolKind::Parameter, Some("BuiltIn.Parameter")) => "parameter",
+                _ => continue,
+            }
+        };
+        out.push(make_project_for(
+            TypeCode::T092,
+            Severity::Warning,
+            format!(
+                "{subject} `{}` has no Type tag selected (M1 Build warning 1142)",
+                sym.path
+            ),
+            &sym.path,
+        ));
     }
     // Deterministic order for stable CI output.
     out.sort_by(|a, b| a.inner.message.cmp(&b.inner.message));

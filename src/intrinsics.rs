@@ -323,7 +323,7 @@ mod tests {
         // Switch, TC, UnixTime, VCS).
         assert_eq!(i.library.len(), 23, "23 library objects");
         let total: usize = i.library.values().map(|o| o.functions.len()).sum();
-        assert_eq!(total, 280, "280 library overloads");
+        assert_eq!(total, 283, "283 library overloads");
         assert!(i.library_object("Calculate").is_some());
         assert!(i.library_object("CanComms").is_some());
         assert!(i.library_object("J1939").is_some(), "capture library loads");

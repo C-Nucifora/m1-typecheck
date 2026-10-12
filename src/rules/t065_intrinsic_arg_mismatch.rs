@@ -179,6 +179,22 @@ mod tests {
     }
 
     #[test]
+    fn system_unused_accepts_each_sdk_overload() {
+        // The SDK declares unused_bool, unused_s32, unused_u32 and unused_f32.
+        for local in [
+            "local v = true;",
+            "local v = 1;",
+            "local <Unsigned Integer> v = 1;",
+            "local v = 1.0;",
+        ] {
+            assert!(
+                !has_t065(&format!("{local}\nSystem.Unused(v);\n")),
+                "{local}"
+            );
+        }
+    }
+
+    #[test]
     fn wrong_arity_is_left_to_t064() {
         assert!(!has_t065("local x = Calculate.Max(1.0);\n"));
     }
