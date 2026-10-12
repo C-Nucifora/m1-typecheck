@@ -38,6 +38,11 @@ pub struct Project {
     /// User functions known to assign a channel, directly or through calls to
     /// other analysed user functions. Filled by [`Project::infer_channel_writes`].
     channel_writers: HashSet<String>,
+    /// Functions whose `SelectedTrigger` is the `On Startup` event.
+    startup_functions: HashSet<String>,
+    /// Components M1 Build generated (`Caps="AutoCreated"`), such as a table's
+    /// `.Value` output.
+    auto_created: HashSet<String>,
 }
 
 #[derive(Debug)]
@@ -158,6 +163,8 @@ impl Project {
         module_xmls: &[&str],
         build_version: crate::compatibility::BuildVersion,
     ) -> Result<Project, LoadError> {
+        let startup_functions = startup_functions(xml);
+        let auto_created = auto_created_components(xml);
         // A newer project format is rejected before symbol validation by the
         // selected compiler. Missing metadata remains usable for synthetic XML.
         let format = roxmltree::Document::parse(xml).ok().and_then(|doc| {
@@ -204,6 +211,8 @@ impl Project {
             cfg_params: None,
             native_tag_diagnostics,
             channel_writers: HashSet::new(),
+            startup_functions,
+            auto_created,
         })
     }
 
@@ -395,6 +404,16 @@ impl Project {
         self.channel_writers.contains(function)
     }
 
+    /// True when `function` runs on the `On Startup` event.
+    pub(crate) fn is_startup_function(&self, function: &str) -> bool {
+        self.startup_functions.contains(function)
+    }
+
+    /// True when M1 Build generated the component (`Caps="AutoCreated"`).
+    pub(crate) fn is_auto_created(&self, path: &str) -> bool {
+        self.auto_created.contains(path)
+    }
+
     /// The path of the `Function`/`Method` symbol backed by `file_name`: an
     /// explicit `Filename=` match first, else the `Root.<stem>` path convention
     /// real projects use (`Engine.Update.m1scr` → `Root.Engine.Update`).
@@ -407,6 +426,39 @@ impl Project {
         let path = format!("Root.{stem}");
         self.table.get(&path).filter(is_fn).map(|s| s.path.clone())
     }
+}
+
+/// Components carrying `Caps="AutoCreated"`.
+fn auto_created_components(xml: &str) -> HashSet<String> {
+    let Ok(doc) = roxmltree::Document::parse(xml) else {
+        return HashSet::new();
+    };
+    doc.descendants()
+        .filter(|node| {
+            node.has_tag_name("Component") && node.attribute("Caps") == Some("AutoCreated")
+        })
+        .filter_map(|node| node.attribute("Name"))
+        .map(|name| m1_workspace::qualify_root(name).into_owned())
+        .collect()
+}
+
+/// Components whose `SelectedTrigger` names the `On Startup` event, whatever
+/// its relative path prefix.
+fn startup_functions(xml: &str) -> HashSet<String> {
+    let Ok(doc) = roxmltree::Document::parse(xml) else {
+        return HashSet::new();
+    };
+    doc.descendants()
+        .filter(|node| node.has_tag_name("Component"))
+        .filter(|node| {
+            node.children()
+                .find(|child| child.has_tag_name("Props"))
+                .and_then(|props| props.attribute("SelectedTrigger"))
+                .is_some_and(|trigger| trigger.rsplit('.').next() == Some("On Startup"))
+        })
+        .filter_map(|node| node.attribute("Name"))
+        .map(|name| m1_workspace::qualify_root(name).into_owned())
+        .collect()
 }
 
 /// The concrete type all `Out = <expr>` assignments in a function body agree on,
