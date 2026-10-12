@@ -52,9 +52,9 @@ impl super::Rule for Rule {
             out.push(make(
                 TypeCode::T004,
                 node,
-                Severity::Warning,
-                "ordering comparison mixes signed and unsigned; the result can flip on \
-                 wraparound — convert one side with Convert.ToInteger/ToUnsigned"
+                Severity::Error,
+                "ordering comparison mixes signed and unsigned; convert one side with \
+                 Convert.ToInteger/ToUnsigned (M1 Build Error 1367)"
                     .into(),
             ));
         }

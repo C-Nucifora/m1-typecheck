@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<MoTeCM1BuildSession ProductVersion="1.4.5.556">
+ <Project FileFormat="10109" Name="Native parity" TargetHardware="ecu120">
+  <DataTypes>
+   <Type Name="Drive State" Storage="enum" Default="Idle">
+    <Enum Name="Idle" ContainerOrder="0"/>
+    <Enum Name="Run" ContainerOrder="1"/>
+   </Type>
+  </DataTypes>
+  <ComponentStream>
+   <List>
+    <Component Classname="BuiltIn.GroupCompound" Name="Root.Parity"/>
+    <Component Classname="BuiltIn.Channel" Name="Root.Parity.F"><Props Type="f32" Security="Tune"/></Component>
+    <Component Classname="BuiltIn.Channel" Name="Root.Parity.I"><Props Type="s32" Security="Tune"/></Component>
+    <Component Classname="BuiltIn.Channel" Name="Root.Parity.U"><Props Type="u32" Security="Tune"/></Component>
+    <Component Classname="BuiltIn.Channel" Name="Root.Parity.B"><Props Type="bool" Security="Tune"/></Component>
+    <Component Classname="BuiltIn.Channel" Name="Root.Parity.E"><Props Type="::This.Drive State" Security="Tune"/></Component>
+    <Component Classname="BuiltIn.Parameter" Name="Root.Parity.PF"><Props Type="f32" Security="Tune"/></Component>
+    <Component Classname="BuiltIn.Parameter" Name="Root.Parity.PI"><Props Type="s32" Security="Tune"/></Component>
+    <Component Classname="BuiltIn.Parameter" Name="Root.Parity.PU"><Props Type="u32" Security="Tune"/></Component>
+    <Component Classname="BuiltIn.Parameter" Name="Root.Parity.PB"><Props Type="bool" Security="Tune"/></Component>
+    <Component Classname="BuiltIn.Constant" Name="Root.Parity.Limit"><Props Value="1"/></Component>
+    <Component Classname="BuiltIn.FuncUser" Filename="Parity.Update.m1scr" Name="Root.Parity.Update"><Props SelectedTrigger="Parent.Parent.Events.On 10Hz"/></Component>
+    <Component Classname="BuiltIn.FuncUserParam" Filename="Parity.Compute.m1scr" Name="Root.Parity.Compute">
+     <Signature Name="" ReturnType="f32"><Params><Param Name="Flag" Type="bool" Attrs="0"/></Params></Signature>
+    </Component>
+    <Component Classname="BuiltIn.FuncUserParam" Filename="Parity.Pair.m1scr" Name="Root.Parity.Pair">
+     <Signature Name=""><Params/><Returns><Return Name="Value" Type="f32"/><Return Name="Valid" Type="bool"/></Returns></Signature>
+    </Component>
+    <Component Classname="BuiltIn.FuncUserParam" Filename="Parity.Named.m1scr" Name="Root.Parity.Named">
+     <Signature Name=""><Params/><Returns><Return Name="Value" Type="f32"/></Returns></Signature>
+    </Component>
+    <Component Classname="BuiltIn.FuncUserParam" Filename="Parity.Unnamed.m1scr" Name="Root.Parity.Unnamed">
+     <Signature Name=""><Params/><Returns><Return Type="f32"/><Return Type="bool"/></Returns></Signature>
+    </Component>
+    <Component Classname="BuiltIn.GroupCompound" Name="Root.Driver"/>
+    <Component Classname="BuiltIn.Channel" Name="Root.Driver.Average"><Props Type="f32" Security="Tune"/></Component>
+   </List>
+  </ComponentStream>
+ </Project>
+</MoTeCM1BuildSession>

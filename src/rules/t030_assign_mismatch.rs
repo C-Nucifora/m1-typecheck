@@ -107,18 +107,13 @@ fn check_compound_assign(node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnosti
     }
 }
 
-/// Severity of a T030 mismatch. Assigning a **float** value to an **integer**
-/// target is *invalid* per the manual (p.43: "a conversion of … to an integer
-/// data type is not allowed"), so it is an Error — the same call the repo made
-/// for the equally-invalid T040 class (#242). Every other mismatch (sign,
-/// enum, boolean/numeric) stays a Warning: the numeric ones are lossy but the
-/// manual permits the conversion.
-fn t030_severity(target_ty: ValueType, value_ty: ValueType) -> Severity {
-    if value_ty.is_float() && target_ty.is_integral() {
-        Severity::Error
-    } else {
-        Severity::Warning
-    }
+/// Severity of a T030 mismatch. M1 Build rejects every conversion
+/// [`compatible`] refuses — float to integer, numeric to Boolean or enum, and
+/// between different enums — with Error 1320 (assignment) or 1316 (local
+/// initialiser). Widening integers to float and mixing integer signedness are
+/// accepted, so they never reach this function.
+fn t030_severity(_target_ty: ValueType, _value_ty: ValueType) -> Severity {
+    Severity::Error
 }
 
 /// Emit a T030 diagnostic for a type mismatch, optionally linking the
