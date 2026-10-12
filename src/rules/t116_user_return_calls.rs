@@ -1,4 +1,7 @@
 //! Call-site checks for project user functions with known scalar signatures.
+//!
+//! T117 needs [`crate::project::Project::infer_channel_writes`] to have run
+//! over the complete project scripts; without it the rule stays silent.
 use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
 use crate::resolve::{Resolution, Scope, resolve};
 use crate::typer::path_text;
@@ -39,7 +42,13 @@ impl super::Rule for Rule {
                     ));
                     return;
                 }
-                Kind::IfStatement | Kind::ArgumentList => {
+                // M1 Build restricts only callees that write channels,
+                // directly or through other calls (Error 1372).
+                Kind::IfStatement | Kind::ArgumentList
+                    if scope
+                        .project
+                        .is_some_and(|project| project.function_writes_channels(&symbol.path)) =>
+                {
                     out.push(make(
                         TypeCode::T117,
                         node,
@@ -48,6 +57,7 @@ impl super::Rule for Rule {
                     ));
                     return;
                 }
+                Kind::IfStatement | Kind::ArgumentList => return,
                 Kind::LocalDeclaration
                 | Kind::AssignmentStatement
                 | Kind::ExpressionStatement

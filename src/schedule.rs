@@ -723,9 +723,50 @@ fn is_user_function(classname: Option<&str>) -> bool {
     )
 }
 
-/// Reachability audit (default-on, T104): a user function that no scheduled
-/// function reaches through the call graph — M1 Build Error 1642 "Function '…'
-/// not executed by a scheduled function", which fails the build.
+/// User functions that assign a channel directly, or through calls to other
+/// analysed user functions. Writes to parameters, locals and `Out` do not
+/// count; neither do calls whose bodies are unavailable (generated functions,
+/// unparsable scripts), so an absent function means "not established".
+pub(crate) fn channel_writing_functions(
+    project: &Project,
+    scripts: &[crate::parsed::ParsedScript],
+) -> HashSet<String> {
+    let ios: Vec<ScriptIo> = scripts
+        .iter()
+        .filter_map(|s| script_io(project, &s.name, &s.cst))
+        .collect();
+    let table = project.symbols();
+    let mut writers: HashSet<String> = ios
+        .iter()
+        .filter(|io| {
+            io.writes
+                .iter()
+                .any(|w| table.get(w).is_some_and(|s| s.kind == SymbolKind::Channel))
+        })
+        .map(|io| io.fn_path.clone())
+        .collect();
+    // Propagate to callers until nothing changes; each pass adds at least one
+    // function, so this terminates within |ios| passes.
+    loop {
+        let added: Vec<String> = ios
+            .iter()
+            .filter(|io| !writers.contains(&io.fn_path))
+            .filter(|io| io.calls.iter().any(|callee| writers.contains(callee)))
+            .map(|io| io.fn_path.clone())
+            .collect();
+        if added.is_empty() {
+            return writers;
+        }
+        writers.extend(added);
+    }
+}
+
+/// Reachability audit (default-on, T104): a user function that updates
+/// channels but that no scheduled function reaches through the call graph —
+/// M1 Build Error 1642 "The Function '…' updates channel(s), but it is not
+/// executed by a scheduled function", which fails the build. A function that
+/// writes no channel (only locals, `Out`, or generated timer/table methods) is
+/// not reported, matching M1 Build.
 ///
 /// The roots are every user function bound to a schedule event
 /// ([`crate::symbols::Symbol::scheduled`] — any `SelectedTrigger`, including
@@ -772,21 +813,23 @@ pub fn check_reachability(
         }
     }
 
-    // Flag every user function (backed by a parsed script) not reached. Anchoring
-    // on `ios` keeps the check to functions whose body we actually analysed; a
-    // generated/kernel function or one with no script is never reported.
+    // Flag every channel-writing user function (backed by a parsed script) not
+    // reached. Anchoring on `ios` keeps the check to functions whose body we
+    // actually analysed; a generated/kernel function or one with no script is
+    // never reported.
+    let writers = channel_writing_functions(project, scripts);
     let mut out = Vec::new();
     for io in &ios {
         let sym = table.get(&io.fn_path);
         if !sym.is_some_and(|s| is_user_function(s.classname.as_deref())) {
             continue;
         }
-        if !reachable.contains(io.fn_path.as_str()) {
+        if !reachable.contains(io.fn_path.as_str()) && writers.contains(&io.fn_path) {
             out.push(make_project_for(
                 TypeCode::T104,
                 Severity::Error,
                 format!(
-                    "function `{}` is not executed by any scheduled function (M1 Build Error 1642: \"Function not executed by a scheduled function\")",
+                    "function `{}` updates channels but is not executed by any scheduled function (M1 Build Error 1642: \"Function not executed by a scheduled function\")",
                     io.fn_path
                 ),
                 &io.fn_path,
@@ -1058,6 +1101,40 @@ mod reachability_tests {
         assert!(!msgs.iter().any(|m| m.contains("Root.Ctrl.Update")));
         assert!(!msgs.iter().any(|m| m.contains("Root.Ctrl.Init")));
         assert_eq!(msgs.len(), 3, "{msgs:?}");
+    }
+
+    #[test]
+    fn unscheduled_functions_that_only_return_values_are_silent() {
+        assert!(run(&[("Ctrl.Orphan.m1scr", "Out = 1.0;\n")]).is_empty());
+        assert!(
+            run(&[(
+                "Ctrl.Orphan.m1scr",
+                "local value = 1.0; System.Unused(value);\n"
+            )])
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn unscheduled_callers_inherit_channel_writes_transitively() {
+        let messages = run(&[
+            ("Ctrl.Orphan.m1scr", "Helper();\n"),
+            ("Ctrl.Helper.m1scr", "Deep();\n"),
+            ("Ctrl.Deep.m1scr", "X = 1.0;\n"),
+        ]);
+        assert_eq!(messages.len(), 3, "{messages:?}");
+        for function in ["Orphan", "Helper", "Deep"] {
+            assert!(
+                messages
+                    .iter()
+                    .any(|message| message.contains(&format!("Root.Ctrl.{function}")))
+            );
+        }
+    }
+
+    #[test]
+    fn unavailable_callee_bodies_do_not_establish_channel_writes() {
+        assert!(run(&[("Ctrl.Orphan.m1scr", "Helper();\n")]).is_empty());
     }
 
     #[test]

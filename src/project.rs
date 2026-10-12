@@ -35,6 +35,9 @@ pub struct Project {
     /// the missing-parameter audit (T041) is then skipped.
     cfg_params: Option<HashSet<String>>,
     native_tag_diagnostics: Vec<TypeDiagnostic>,
+    /// User functions known to assign a channel, directly or through calls to
+    /// other analysed user functions. Filled by [`Project::infer_channel_writes`].
+    channel_writers: HashSet<String>,
 }
 
 #[derive(Debug)]
@@ -200,6 +203,7 @@ impl Project {
             file_to_group: parsed.file_to_group,
             cfg_params: None,
             native_tag_diagnostics,
+            channel_writers: HashSet::new(),
         })
     }
 
@@ -373,6 +377,22 @@ impl Project {
         for (path, ty) in inferred {
             self.table.set_return_type(&path, ty);
         }
+    }
+
+    /// Record which user functions assign a channel directly or through calls
+    /// to other analysed user functions. M1 Build restricts calls of such
+    /// functions (Error 1372) and requires them to be scheduled (Error 1642).
+    /// Call this with the complete project script set, after the project (and
+    /// any `.m1cfg`/`.m1dbc`) is loaded.
+    pub fn infer_channel_writes(&mut self, scripts: &[crate::parsed::ParsedScript]) {
+        self.channel_writers = crate::schedule::channel_writing_functions(self, scripts);
+    }
+
+    /// True when [`Project::infer_channel_writes`] established that `function`
+    /// assigns a channel. False otherwise, including when no inference ran or
+    /// the function's body (or a callee's) could not be analysed.
+    pub fn function_writes_channels(&self, function: &str) -> bool {
+        self.channel_writers.contains(function)
     }
 
     /// The path of the `Function`/`Method` symbol backed by `file_name`: an
