@@ -761,7 +761,7 @@ pub(crate) fn channel_writing_functions(
     }
 }
 
-/// Reachability audit (default-on, T104): a user function that updates
+/// Reachability audit (default-on, T104): a user function that directly updates
 /// channels but that no scheduled function reaches through the call graph —
 /// M1 Build Error 1642 "The Function '…' updates channel(s), but it is not
 /// executed by a scheduled function", which fails the build. A function that
@@ -817,14 +817,18 @@ pub fn check_reachability(
     // reached. Anchoring on `ios` keeps the check to functions whose body we
     // actually analysed; a generated/kernel function or one with no script is
     // never reported.
-    let writers = channel_writing_functions(project, scripts);
     let mut out = Vec::new();
     for io in &ios {
         let sym = table.get(&io.fn_path);
         if !sym.is_some_and(|s| is_user_function(s.classname.as_deref())) {
             continue;
         }
-        if !reachable.contains(io.fn_path.as_str()) && writers.contains(&io.fn_path) {
+        let writes_channel = io.writes.iter().any(|path| {
+            table
+                .get(path)
+                .is_some_and(|symbol| symbol.kind == SymbolKind::Channel)
+        });
+        if !reachable.contains(io.fn_path.as_str()) && writes_channel {
             out.push(make_project_for(
                 TypeCode::T104,
                 Severity::Error,
@@ -1116,20 +1120,14 @@ mod reachability_tests {
     }
 
     #[test]
-    fn unscheduled_callers_inherit_channel_writes_transitively() {
+    fn scheduling_reports_only_the_direct_writer_in_an_unreachable_call_chain() {
         let messages = run(&[
             ("Ctrl.Orphan.m1scr", "Helper();\n"),
             ("Ctrl.Helper.m1scr", "Deep();\n"),
             ("Ctrl.Deep.m1scr", "X = 1.0;\n"),
         ]);
-        assert_eq!(messages.len(), 3, "{messages:?}");
-        for function in ["Orphan", "Helper", "Deep"] {
-            assert!(
-                messages
-                    .iter()
-                    .any(|message| message.contains(&format!("Root.Ctrl.{function}")))
-            );
-        }
+        assert_eq!(messages.len(), 1, "{messages:?}");
+        assert!(messages[0].contains("Root.Ctrl.Deep"));
     }
 
     #[test]
