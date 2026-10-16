@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<MoTeCM1BuildSession><Project Name="Return slots" TargetHardware="ecu120">
+<ComponentStream><List>
+<Component Classname="BuiltIn.GroupCompound" Name="Root.Test"/>
+<Component Classname="BuiltIn.FuncUserParam" Name="Root.Test.Single" Filename="Test.Single.m1scr">
+<Signature><Params/><Returns><Return Type="f32"/></Returns></Signature></Component>
+<Component Classname="BuiltIn.FuncUserParam" Name="Root.Test.Multi" Filename="Test.Multi.m1scr">
+<Signature><Params/><Returns><Return Name="Value" Type="f32"/><Return Name="Valid" Type="bool"/></Returns></Signature></Component>
+<Component Classname="BuiltIn.FuncUserParam" Name="Root.Test.Unknown" Filename="Test.Unknown.m1scr">
+<Signature><Params/><Returns><Return Type="Firmware.Custom"/></Returns></Signature></Component>
+<Component Classname="BuiltIn.FuncUserParam" Name="Root.Test.Legacy" Filename="Test.Legacy.m1scr">
+<Signature ReturnType="s32"><Params/></Signature></Component>
+<Component Classname="BuiltIn.FuncUserParam" Name="Root.Test.Void" Filename="Test.Void.m1scr">
+<Signature ReturnType=""><Params/><Returns/></Signature></Component>
+<Component Classname="BuiltIn.FuncUserParam" Name="Root.Test.Bool" Filename="Test.Bool.m1scr">
+<Signature><Params/><Returns><Return Type="bool"/></Returns></Signature></Component>
+</List></ComponentStream></Project></MoTeCM1BuildSession>

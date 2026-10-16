@@ -128,3 +128,36 @@ help-pane captures (`M1_LIBRARIES_ENUMS_TYPES`, reconstructed 2026-06-11) via
 
 To refresh after a new capture set:
 `python3 assets/merge-help-captures.py <captures-dir>`.
+
+## Function return signatures
+
+The project reader accepts both legacy `<Signature ReturnType="f32">` metadata
+and ordered `<Signature><Returns><Return Type="f32"/></Returns></Signature>`
+metadata. `Symbol::declared_returns` preserves each slot's optional name, raw
+type spelling and mapped value type. Unknown type names remain `Unknown`.
+
+Exactly one known slot supplies the existing scalar `return_type`. Multiple
+slots retain their declarations without projecting the first result as a
+scalar. Explicit return contracts also prevent body-based inference from
+replacing unknown or multiple declared results. A known singleton in the new
+layout participates in the existing missing-output assignment check.
+
+Known scalar declarations also enable T114 for repeated `Out` assignment on
+one path and T115 when an `if`/`else` path leaves `Out` unassigned. T099 still
+handles a body with no output assignment. These path checks preserve mutually
+exclusive branches. Assigning `Out` after a conditional does not repair a
+join where only some branches assigned it. An assignment before the
+conditional also does not repair that branch mismatch. The checks skip
+output writes through members or inside `when`/`expand`. Unknown, inferred-only and multiple return contracts stay
+outside this scalar analysis.
+
+Multiple-result call expressions, output-object resolution and checks for
+assigning every result still need separate support.
+
+Calls to `BuiltIn.FuncUserParam` functions with known scalar return declarations
+also enable T116 when a statement discards the result and T117 when the call
+appears inside an `if` condition or another call's arguments. Assigning the
+result to a local before using it is accepted. Calls in branch bodies are
+allowed; these checks do not impose the library stateful-function restriction.
+Unknown, void, multiple-result and other component classes remain outside
+these call-site checks.

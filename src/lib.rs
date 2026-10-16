@@ -2,6 +2,7 @@
 pub mod ambiguous;
 pub mod audit;
 pub mod classname;
+pub mod compatibility;
 pub mod completeness;
 pub mod cross_script;
 pub mod dbc_init;
@@ -17,6 +18,7 @@ pub mod parsed;
 pub mod project;
 pub mod project_check;
 pub mod resolve;
+mod return_flow;
 pub mod rules;
 pub mod schedule;
 pub mod symbols;

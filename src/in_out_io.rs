@@ -172,19 +172,30 @@ pub fn check(root: Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>) {
         }
     }
 
+    // Path checks require an explicit, known scalar return contract. Inferred,
+    // unknown and multiple returns do not establish a scalar output sink.
+    if sym.declared_returns.len() == 1 && sym.declared_returns[0].value_type.is_known() {
+        crate::return_flow::check(root, out);
+    }
+
     // T099 — a declared, non-empty `ReturnType` with no `Out = …` assignment.
     // `return_type` is `Some` for a declared `<Signature ReturnType>`; an
     // inferred one only exists when an `Out =` is present, so `Some` here with
     // no `Out` in the body can only be a declared return type left unassigned.
     if sym.return_type.is_some() && !has_out {
+        let native_hint = match project.build_version() {
+            crate::compatibility::BuildVersion::Stable144981 => {
+                "Function … must assign a return value"
+            }
+            crate::compatibility::BuildVersion::Beta145556 => "Return value … is not assigned",
+        };
         let mut d = make(
             TypeCode::T099,
             &root,
             Severity::Error,
             format!(
                 "function `{fn_path}` declares a return type but never assigns `Out`; set the \
-                 return value with `Out = <expr>` (M1 Build Error 1353: \"Return value … is not \
-                 assigned\")"
+                 return value with `Out = <expr>` (M1 Build Error 1353: \"{native_hint}\")"
             ),
         );
         d.related.extend(related_to_def(

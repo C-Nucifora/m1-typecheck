@@ -18,7 +18,7 @@ mod index;
 mod parse;
 mod type_inference;
 
-pub use parse::parse;
+pub use parse::{parse, parse_for_build};
 
 use super::SymbolKind;
 use std::collections::{HashMap, HashSet};
