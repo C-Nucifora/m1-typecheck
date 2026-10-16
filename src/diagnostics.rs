@@ -49,7 +49,7 @@ pub enum TypeCode {
     T100, // bare-parameter-reference (M1 Build Error 1338: a param referenced by bare name, not `In.<name>`)
     T101, // return-statement (M1 Build Error 1338: a C-style `return <expr>`; M1 has no `return` keyword)
     T102, // channel-multiple-assignment-cross-function (M1 Build Error 1317: a channel reset in a caller and written by a callee on one path)
-    T103, // ambiguous-reference (M1 Build Error 1339: a bare name matching both a sibling channel and an enum type)
+    T103, // ambiguous-reference (M1 Build Error 1334/1339: bare group/DBC or channel/enum collision)
     T104, // unscheduled-function (M1 Build Error 1642: a user function no scheduled function reaches)
     T105, // local-use-before-definition (manual p.34: a local may only be used after it has been defined)
     T106, // group-not-a-value-provider (M1 Build Error 1331: a group with no Default Value used where a value is expected)
@@ -58,6 +58,8 @@ pub enum TypeCode {
     T109, // dbc-message-direction (a message method disagrees with its Transmit direction: .Receive on TX, .Tx*/.Transmit on RX)
     T110, // dbc-signal-accessor-type (a raw signal accessor disagrees with the signal's declared Type, e.g. .SetFloat on an integer signal)
     T111, // flash-without-preserve (flash-backed channels exist but no reachable script calls System.Preserve)
+    T112, // invalid-component-tags (shared native M1 Build tag validation)
+    T113, // incomplete-module-metadata (selected inherited metadata unavailable)
 }
 
 impl TypeCode {
@@ -118,6 +120,8 @@ impl TypeCode {
             TypeCode::T109 => "T109",
             TypeCode::T110 => "T110",
             TypeCode::T111 => "T111",
+            TypeCode::T112 => "T112",
+            TypeCode::T113 => "T113",
         }
     }
 
@@ -182,6 +186,8 @@ impl TypeCode {
             TypeCode::T109 => "dbc-message-direction",
             TypeCode::T110 => "dbc-signal-accessor-type",
             TypeCode::T111 => "flash-without-preserve",
+            TypeCode::T112 => "invalid-component-tags",
+            TypeCode::T113 => "incomplete-module-metadata",
         }
     }
 
@@ -195,7 +201,8 @@ impl TypeCode {
             T001, T002, T003, T004, T005, T006, T010, T020, T021, T030, T031, T040, T041, T042,
             T050, T060, T061, T062, T063, T064, T065, T070, T071, T080, T081, T082, T083, T084,
             T085, T086, T087, T088, T089, T090, T091, T092, T093, T094, T095, T096, T097, T098,
-            T099, T100, T101, T102, T103, T104, T105, T106, T107, T108, T109, T110, T111,
+            T099, T100, T101, T102, T103, T104, T105, T106, T107, T108, T109, T110, T111, T112,
+            T113,
         ]
     }
 }
@@ -348,6 +355,6 @@ mod tests {
             );
         }
         // Catalogue size tracks the enum (bump both together).
-        assert_eq!(codes.len(), 55);
+        assert_eq!(codes.len(), 57);
     }
 }

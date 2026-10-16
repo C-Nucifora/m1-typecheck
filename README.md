@@ -14,8 +14,21 @@ diagnostic source) and a **CLI** (the type-checking gate in
 ## Install
 
 Prebuilt binaries for Linux, macOS, and Windows are attached to each
-[release](https://github.com/C-Nucifora/m1-typecheck/releases). Or build from
-source:
+[release](https://github.com/C-Nucifora/m1-typecheck/releases). Each release
+includes the checker and the `m1-cfg-export` configuration exporter:
+
+| Platform | Checker asset | Exporter asset |
+| --- | --- | --- |
+| Linux x86_64 | `m1-typecheck-x86_64-unknown-linux-gnu` | `m1-cfg-export-x86_64-unknown-linux-gnu` |
+| macOS Apple Silicon | `m1-typecheck-aarch64-apple-darwin` | `m1-cfg-export-aarch64-apple-darwin` |
+| Windows x86_64 | `m1-typecheck-x86_64-pc-windows-msvc.exe` | `m1-cfg-export-x86_64-pc-windows-msvc.exe` |
+
+Download the desired tools, remove the target suffix, and put them on your
+`PATH`. Keep `.exe` on Windows. On Unix, mark them executable with `chmod +x`;
+on macOS, clear download quarantine with `xattr -d com.apple.quarantine`.
+Verify downloads against the release's `SHA256SUMS` manifest.
+
+Or build both tools from source:
 
 ```sh
 cargo install --git https://github.com/C-Nucifora/m1-typecheck.git --tag <latest>
@@ -29,6 +42,7 @@ m1-typecheck --audit-names Scripts/*.m1scr       # opt-in project naming audit
 m1-typecheck --format sarif Scripts/*.m1scr      # SARIF for GitHub code scanning
 m1-typecheck --explain Demo.Rate Scripts/*.m1scr # trace a channel's NaN provenance
 m1-typecheck --explain-units Demo.Rate Scripts/*.m1scr # trace a channel's unit provenance
+m1-typecheck --modules-dir ../Modules Scripts/*.m1scr # selected-module search directory
 m1-typecheck --rules                             # the full T-code catalogue
 ```
 
@@ -38,6 +52,13 @@ project gets full type-aware checking with no flags. Pass the whole project's
 scripts in one run — cross-script analyses solve over every file they're
 given. Output formats: human, JSON, SARIF. Exit code is non-zero on any
 error-severity finding, so the CLI is directly usable as a CI gate.
+
+Selected module metadata is discovered from the project and standard module
+directories. Repeat `--modules-dir PATH` to add search directories. Native
+State and IO tag violations produce T112 warnings; missing selected module
+metadata produces a project-level T113 warning so incomplete coverage is
+visible. Library callers can use `Project::load_with_module_dirs` or
+`Project::from_xml_with_module_dirs` for the same checks, including edited XML.
 
 For CI gating, `--strict` fails the run on **any** finding (not just
 error-severity ones), and `-W`/`--no-warnings` drops warning-severity findings

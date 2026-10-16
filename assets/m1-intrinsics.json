@@ -1159,6 +1159,7 @@
       {
        "name": "value",
        "type": "UnsignedInteger",
+       "exactType": true,
        "doc": "to match"
       }
      ],
@@ -1192,6 +1193,25 @@
       }
      ],
      "doc": "Open receive mode CAN handle with 32 entry receive buffer",
+     "stateful": false,
+     "deprecated": false
+    },
+    {
+     "name": "RxOpenStandardBuffered",
+     "returns": "UnsignedInteger",
+     "params": [
+      {
+       "name": "bus",
+       "type": "Integer",
+       "doc": "CAN bus"
+      },
+      {
+       "name": "bigendian",
+       "type": "Boolean",
+       "doc": "true for big endian, false for little endian"
+      }
+     ],
+     "doc": "Open buffered CAN receive handle with filters initialized by RxFindMessage (M1 System 1.4.0.0108; native Build 1.4.5.556)",
      "stateful": false,
      "deprecated": false
     },
