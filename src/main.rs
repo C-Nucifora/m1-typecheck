@@ -801,18 +801,17 @@ fn main() {
         json,
         &mut json_buf,
     );
-    let had_error = had_unreadable
-        || emit_source_checks(
-            &args,
-            project_path.as_deref(),
-            result.sources,
-            json.then_some(&mut json_buf),
-        );
+    let source_had_error = emit_source_checks(
+        &args,
+        project_path.as_deref(),
+        result.sources,
+        json.then_some(&mut json_buf),
+    );
 
     // Emit the buffered JSON document (no-op in human mode).
     emit_output(project_path.as_ref(), args.format, &json_buf);
 
-    if had_error || project_had_error {
+    if had_unreadable || source_had_error || project_had_error {
         process::exit(1);
     }
 }
