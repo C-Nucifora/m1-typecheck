@@ -18,11 +18,21 @@ pub(crate) type ExpandBindings = Vec<(String, i64, i64)>;
 /// unresolved).
 pub(crate) fn expand_binding(n: &Node) -> Option<(String, i64, i64)> {
     let var = n.child_by_field(Field::Variable)?.text().trim().to_string();
-    let lo: i64 = n.child_by_field(Field::Start)?.text().trim().parse().ok()?;
-    let hi: i64 = n.child_by_field(Field::End)?.text().trim().parse().ok()?;
+    let lo = literal_bound(n.child_by_field(Field::Start)?)?;
+    let hi = literal_bound(n.child_by_field(Field::End)?)?;
     // A degenerate or huge range is not worth enumerating (T084 flags bad
     // bounds; real corpora use single-digit ranges).
-    (lo <= hi && hi - lo < 256).then_some((var, lo, hi))
+    (lo <= hi && hi.checked_sub(lo)? < 256).then_some((var, lo, hi))
+}
+
+fn literal_bound(n: Node) -> Option<i64> {
+    let text = n.text().trim().trim_end_matches(['u', 'U']);
+    let value = if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+        i64::from_str_radix(hex, 16).ok()?
+    } else {
+        text.parse().ok()?
+    };
+    (value >= 0).then_some(value)
 }
 
 /// Every compile-time substitution of `$(VAR)` templates in `text` under the
