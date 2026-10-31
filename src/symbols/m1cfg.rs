@@ -39,10 +39,16 @@ pub fn augment(table: &mut SymbolTable, xml: &str) -> Result<(), XmlParseError> 
         let unit = cell.attribute("Unit").map(str::to_string);
 
         if type_attr == "enum" {
-            // Back-resolve the cell's member value to a *unique* enum type.
+            // Back-resolve the cell's member value to a *unique* enum type, but
+            // only when the `.m1prj` left the symbol's enum unknown. A declared
+            // `<Props Type>` is authoritative: builtin enums (`Universal Switch
+            // State`, …) are deliberately absent from the member index, so a
+            // switch holding `Off` would otherwise be re-typed as whichever
+            // project enum also has an `Off` member.
             let member = cell.text().map(str::trim).unwrap_or("");
+            let declared = table.get(&path).and_then(|s| s.enum_assoc).is_some();
             let candidates = table.enums_with_member(member);
-            if candidates.len() == 1 {
+            if !declared && candidates.len() == 1 {
                 let id = candidates[0];
                 table.set_enum_assoc(&path, id);
             }
@@ -338,5 +344,49 @@ mod tests {
             Some("500kbps"),
             "an enum cell contributes its member name"
         );
+    }
+
+    #[test]
+    fn cfg_enum_cell_does_not_retype_a_declared_builtin_enum() {
+        // A switch parameter typed `::Hardware.av_switch.sw_state` holding `Off`
+        // must stay `Universal Switch State`, even when a project enum also has
+        // an `Off` member (builtin members are not in the member index, so that
+        // project enum is the cfg value's only candidate).
+        let prj = r#"<?xml version="1.0"?>
+<Project>
+  <DataTypes>
+    <Type Name="Regen Stage" Storage="enum" Default="Off">
+      <Enum Name="Off" ContainerOrder="0"/>
+      <Enum Name="Lift Off" ContainerOrder="1"/>
+    </Type>
+  </DataTypes>
+  <Component Classname="BuiltIn.Parameter" Name="Root.Gps Aid Disable">
+    <Props Type="::Hardware.av_switch.sw_state"/>
+  </Component>
+  <Component Classname="BuiltIn.Parameter" Name="Root.Untyped Mode"/>
+</Project>"#;
+        let mut table = m1prj::parse(prj).unwrap().table;
+        let declared = table.get("Root.Gps Aid Disable").unwrap().enum_assoc;
+        assert!(declared.is_some(), "sw_state resolves from the .m1prj");
+
+        let cfg = r#"<?xml version="1.0"?>
+<Configuration>
+  <Parameter Name="Gps Aid Disable"><Cell Type="enum">Off</Cell></Parameter>
+  <Parameter Name="Untyped Mode"><Cell Type="enum">Lift Off</Cell></Parameter>
+</Configuration>"#;
+        augment(&mut table, cfg).unwrap();
+
+        let s = table.get("Root.Gps Aid Disable").unwrap();
+        assert_eq!(s.enum_assoc, declared, "the declared enum is kept");
+        assert_eq!(
+            table.enum_type(s.enum_assoc.unwrap()).name,
+            "Universal Switch State"
+        );
+        assert_eq!(s.static_value.as_deref(), Some("Off"));
+
+        // An enum the .m1prj leaves unknown is still back-resolved from the cfg.
+        let u = table.get("Root.Untyped Mode").unwrap();
+        let id = u.enum_assoc.expect("back-resolved from the cfg member");
+        assert_eq!(table.enum_type(id).name, "Regen Stage");
     }
 }
