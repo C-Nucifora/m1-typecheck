@@ -14,4 +14,7 @@
 <Signature ReturnType=""><Params/><Returns/></Signature></Component>
 <Component Classname="BuiltIn.FuncUserParam" Name="Root.Test.Bool" Filename="Test.Bool.m1scr">
 <Signature><Params/><Returns><Return Type="bool"/></Returns></Signature></Component>
+<Component Classname="BuiltIn.FuncUserParam" Name="Root.Test.Helper" Filename="Test.Helper.m1scr">
+<Signature><Params/></Signature></Component>
+<Component Classname="BuiltIn.Channel" Name="Root.Test.Output"><Props Type="f32" Security="Tune"/></Component>
 </List></ComponentStream></Project></MoTeCM1BuildSession>

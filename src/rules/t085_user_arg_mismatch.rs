@@ -75,9 +75,9 @@ impl super::Rule for Rule {
                 let mut d = make(
                     TypeCode::T085,
                     arg,
-                    Severity::Warning,
+                    Severity::Error,
                     format!(
-                        "argument `{}` of `{}` is declared {pty:?}, but a {aty:?} is passed",
+                        "argument `{}` of `{}` is declared {pty:?}, but a {aty:?} is passed (M1 Build Error 1301)",
                         pname, callee_path
                     ),
                 );

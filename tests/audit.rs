@@ -160,20 +160,23 @@ fn t092_messages(p: &Project) -> Vec<String> {
 }
 
 #[test]
-fn t092_matches_known_m1_build_1142_cases() {
+fn t092_matches_m1_build_1142_population() {
+    // M1 Build reports 1142 once per plain channel, parameter or table with no
+    // Type tag of its own or from an ancestor group, and once per untagged
+    // assigned IO resource. Package-object members inherit their class tags,
+    // and unassigned resources are not reported.
     let msgs = t092_messages(&load("tags.m1prj"));
     let all = msgs.join("\n");
-    assert!(
-        all.contains("Root.Bare.UntaggedTable"),
-        "project-local table: {all}"
-    );
-    assert!(
-        all.contains("Root.Bare.AssignedResource"),
-        "assigned resource: {all}"
-    );
-    for accepted in [
+    for flagged in [
+        "Root.Bare.UntaggedTable",
+        "Root.Bare.AssignedResource",
         "Root.Bare.Untagged`",
         "Root.Tagged.NoTypeTag",
+    ] {
+        assert!(all.contains(flagged), "{flagged} must flag: {all}");
+    }
+    for accepted in [
+        "Root.Tagged.FullyTagged",
         "Root.Bare.TunedParam",
         "Root.Bare.Sensor.Translation",
         "Root.Bare.UnassignedResource",
@@ -183,7 +186,28 @@ fn t092_matches_known_m1_build_1142_cases() {
             "accepted object flagged: {accepted}: {all}"
         );
     }
-    assert_eq!(msgs.len(), 2, "exactly the known 1142 cases: {all}");
+    assert_eq!(msgs.len(), 4, "exactly the 1142 population: {all}");
+}
+
+#[test]
+fn t092_accepts_type_tags_inherited_from_groups_and_skips_generated_values() {
+    let project = Project::from_xml(
+        r#"<?xml version="1.0"?>
+<MoTeCM1BuildSession><Project Name="Inherited"><ComponentStream><List>
+<Component Classname="BuiltIn.GroupCompound" Name="Root.Normal Group"><Props SelectedTags="Normal"/></Component>
+<Component Classname="BuiltIn.Channel" Name="Root.Normal Group.Inherits"><Props/></Component>
+<Component Classname="BuiltIn.GroupCompound" Name="Root.Plain"/>
+<Component Classname="BuiltIn.Table" Name="Root.Plain.Map"><Props SelectedTags="Setup"/></Component>
+<Component Classname="BuiltIn.Channel" Caps="AutoCreated" Name="Root.Plain.Map.Value"><Props/></Component>
+<Component Classname="BuiltIn.Reference" Name="Root.Plain.Link"/>
+<Component Classname="BuiltIn.Parameter" Name="Root.Plain.Link.Value"><Props/></Component>
+<Component Classname="BuiltIn.Parameter" Name="Root.Plain.Gain"><Props/></Component>
+</List></ComponentStream></Project></MoTeCM1BuildSession>"#,
+    )
+    .unwrap();
+    let msgs = t092_messages(&project);
+    assert_eq!(msgs.len(), 1, "{msgs:?}");
+    assert!(msgs[0].contains("parameter `Root.Plain.Gain`"), "{msgs:?}");
 }
 
 #[test]

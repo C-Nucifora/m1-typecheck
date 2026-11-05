@@ -95,6 +95,7 @@ pub fn check(
 ) -> ProjectCheckResult {
     if let Some(project) = project.as_deref_mut() {
         project.infer_return_types(all_scripts);
+        project.infer_channel_writes(all_scripts);
     }
 
     let channel_taints = project

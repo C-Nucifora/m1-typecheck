@@ -2940,6 +2940,51 @@
      "doc": "Use to mark unused local variables and suppress validation error 1350",
      "stateful": false,
      "deprecated": false
+    },
+    {
+     "name": "Unused",
+     "returns": "Void",
+     "params": [
+      {
+       "name": "v",
+       "type": "Integer",
+       "exactType": true,
+       "doc": "the deliberately unused local variable"
+      }
+     ],
+     "doc": "Use to mark unused local variables and suppress validation error 1350",
+     "stateful": false,
+     "deprecated": false
+    },
+    {
+     "name": "Unused",
+     "returns": "Void",
+     "params": [
+      {
+       "name": "v",
+       "type": "UnsignedInteger",
+       "exactType": true,
+       "doc": "the deliberately unused local variable"
+      }
+     ],
+     "doc": "Use to mark unused local variables and suppress validation error 1350",
+     "stateful": false,
+     "deprecated": false
+    },
+    {
+     "name": "Unused",
+     "returns": "Void",
+     "params": [
+      {
+       "name": "v",
+       "type": "FloatingPoint",
+       "exactType": true,
+       "doc": "the deliberately unused local variable"
+      }
+     ],
+     "doc": "Use to mark unused local variables and suppress validation error 1350",
+     "stateful": false,
+     "deprecated": false
     }
    ]
   },

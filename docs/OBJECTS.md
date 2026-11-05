@@ -156,7 +156,9 @@ assigning every result still need separate support.
 
 Calls to `BuiltIn.FuncUserParam` functions with known scalar return declarations
 also enable T116 when a statement discards the result and T117 when the call
-appears inside an `if` condition or another call's arguments. Assigning the
+appears inside an `if` condition or another call's arguments and the callee
+updates channels directly or transitively. Project-wide channel-write inference
+must run before T117; unavailable callee bodies remain unknown and silent. Assigning the
 result to a local before using it is accepted. Calls in branch bodies are
 allowed; these checks do not impose the library stateful-function restriction.
 Unknown, void, multiple-result and other component classes remain outside
