@@ -138,7 +138,31 @@ fn type_of_call(node: Node, scope: &Scope) -> ValueType {
         Resolution::Symbol(s) if matches!(s.kind, SymbolKind::Function | SymbolKind::Method) => {
             s.return_type.unwrap_or(ValueType::Unknown)
         }
+        Resolution::Opaque => table_axis_index_type(callee, node, scope),
         _ => ValueType::Unknown,
+    }
+}
+
+/// The X-axis index return type changed between the supported compiler versions.
+/// Keep unmodeled tables, argument types and other methods unknown.
+fn table_axis_index_type(callee: Node, call: Node, scope: &Scope) -> ValueType {
+    let path = path_text(callee);
+    let Some((owner, "XAxisIndex")) = path.rsplit_once('.') else {
+        return ValueType::Unknown;
+    };
+    let Resolution::Symbol(table) = resolve(owner, scope) else {
+        return ValueType::Unknown;
+    };
+    if table.kind != SymbolKind::Table || table.classname.as_deref() != Some("BuiltIn.Table") {
+        return ValueType::Unknown;
+    }
+    if call_arg_types(call, scope).as_slice() != [ValueType::Float] {
+        return ValueType::Unknown;
+    }
+    match scope.project.map(|p| p.build_version()) {
+        Some(crate::compatibility::BuildVersion::Stable144981) => ValueType::Float,
+        Some(crate::compatibility::BuildVersion::Beta145556) => ValueType::Integer,
+        None => ValueType::Unknown,
     }
 }
 

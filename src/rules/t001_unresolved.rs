@@ -86,11 +86,14 @@ impl super::Rule for Rule {
                 ),
             ));
         } else {
+            // M1 Build rejects the read with Error 1338 "does not exist".
             out.push(make(
                 TypeCode::T001,
                 node,
-                Severity::Warning,
-                format!("unresolved reference `{display}`"),
+                Severity::Error,
+                format!(
+                    "unresolved reference `{display}` (M1 Build Error 1338: \"does not exist\")"
+                ),
             ));
         }
     }

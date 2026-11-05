@@ -60,12 +60,13 @@ impl super::Rule for Rule {
             node,
             Severity::Error,
             format!(
-                "`{path}` has no overload matching argument types ({}){}",
+                "`{path}` has no overload matching argument types ({}){}{}",
                 args.iter()
                     .map(|&ty| render_type(ty))
                     .collect::<Vec<_>>()
                     .join(", "),
                 union_explanation(&same_arity),
+                exact_type_explanation(&same_arity, &args),
             ),
         ));
     }
@@ -81,6 +82,29 @@ fn render_type(ty: ValueType) -> &'static str {
         ValueType::String => "String",
         ValueType::Unknown => "Unknown",
     }
+}
+
+fn exact_type_explanation(
+    overloads: &[&crate::intrinsics::Overload],
+    args: &[ValueType],
+) -> String {
+    if let [overload] = overloads {
+        for (param, &arg) in overload.params.iter().zip(args) {
+            if param.exact_type && !crate::intrinsics::exact_parameter_accepts_arg(param, arg) {
+                let expected = match param.ty.as_str() {
+                    "UnsignedInteger" => "Unsigned Integer",
+                    "FloatingPoint" => "Floating Point",
+                    other => other,
+                };
+                return format!(
+                    "; argument `{}` requires {expected}, but {} supplied",
+                    param.name,
+                    render_type(arg),
+                );
+            }
+        }
+    }
+    String::new()
 }
 
 fn union_explanation(overloads: &[&crate::intrinsics::Overload]) -> &'static str {
@@ -152,6 +176,22 @@ mod tests {
     #[test]
     fn unknown_argument_keeps_an_overload_viable() {
         assert!(!has_t065("local x = Calculate.Max(1.0, Firmware.Value);\n"));
+    }
+
+    #[test]
+    fn system_unused_accepts_each_sdk_overload() {
+        // The SDK declares unused_bool, unused_s32, unused_u32 and unused_f32.
+        for local in [
+            "local v = true;",
+            "local v = 1;",
+            "local <Unsigned Integer> v = 1;",
+            "local v = 1.0;",
+        ] {
+            assert!(
+                !has_t065(&format!("{local}\nSystem.Unused(v);\n")),
+                "{local}"
+            );
+        }
     }
 
     #[test]
