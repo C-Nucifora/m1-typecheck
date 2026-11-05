@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<Project>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root.CAN"/>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root.CAN.BMS"/>
+  <Component Classname="BuiltIn.Channel" Name="Root.CAN.BMS.Timeout"><Props Type="u32"/></Component>
+  <Component Classname="BuiltIn.Channel" Name="Root.CAN.BMS.Contactors OK"><Props Type="bool"/></Component>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root.CAN.SBG"/>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root.CAN.TTP"/>
+  <Component Classname="BuiltIn.FuncUser" Filename="CAN.Update.m1scr" Name="Root.CAN.Update"/>
+  <Component Classname="BuiltIn.GroupCompound" Name="Root.Other"/>
+  <Component Classname="BuiltIn.FuncUser" Filename="Other.Update.m1scr" Name="Root.Other.Update"/>
+  <Component Classname="BuiltIn.CAN.DBCRoot" Name="DBC"/>
+  <Component Classname="BuiltIn.CAN.DBC" Name="DBC.BMS"/>
+  <Component Classname="BuiltIn.CAN.DBC" Name="DBC.SBG"/>
+  <Component Classname="BuiltIn.CAN.DBC" Name="DBC.TTP"/>
+</Project>

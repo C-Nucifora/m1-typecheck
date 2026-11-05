@@ -179,11 +179,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "m1-project"
+version = "0.16.0"
+source = "git+https://github.com/nedlane/m1-project.git?tag=v0.16.0#ad3016ce14fda28b43f83997dc7cc3cbf5a9b1fb"
+dependencies = [
+ "clap",
+ "m1-workspace",
+ "roxmltree",
+]
+
+[[package]]
 name = "m1-typecheck"
-version = "0.51.0"
+version = "0.52.0"
 dependencies = [
  "clap",
  "m1-core",
+ "m1-project",
  "m1-workspace",
  "roxmltree",
  "serde",
