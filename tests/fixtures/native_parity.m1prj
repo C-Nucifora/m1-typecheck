@@ -19,7 +19,7 @@
     <Component Classname="BuiltIn.Parameter" Name="Root.Parity.PI"><Props Type="s32" Security="Tune"/></Component>
     <Component Classname="BuiltIn.Parameter" Name="Root.Parity.PU"><Props Type="u32" Security="Tune"/></Component>
     <Component Classname="BuiltIn.Parameter" Name="Root.Parity.PB"><Props Type="bool" Security="Tune"/></Component>
-    <Component Classname="BuiltIn.Constant" Name="Root.Parity.Limit"><Props Value="1"/></Component>
+    <Component Classname="BuiltIn.Constant" Name="Root.Parity.Cap"><Props Value="1"/></Component>
     <Component Classname="BuiltIn.FuncUser" Filename="Parity.Update.m1scr" Name="Root.Parity.Update"><Props SelectedTrigger="Parent.Parent.Events.On 10Hz"/></Component>
     <Component Classname="BuiltIn.FuncUserParam" Filename="Parity.Compute.m1scr" Name="Root.Parity.Compute">
      <Signature Name="" ReturnType="f32"><Params><Param Name="Flag" Type="bool" Attrs="0"/></Params></Signature>

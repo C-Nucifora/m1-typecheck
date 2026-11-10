@@ -64,6 +64,19 @@ pub enum TypeCode {
     T115, // return-not-assigned-on-all-paths (M1 Build Error 1366)
     T116, // discarded-user-return (M1 Build Error 1349)
     T117, // user-call-in-condition-or-argument (M1 Build Error 1372)
+    T118, // unused-local (M1 Build Error 1350: a local declared but never read)
+    T119, // condition-not-boolean (M1 Build Errors 1351/1359: an if or ternary condition that is not Boolean)
+    T120, // constant-condition (M1 Build Errors 1343/1344: an if or ternary condition that is a Boolean literal)
+    T121, // constant-logic-result (M1 Build warning 1342: a logic or comparison operation on two literals)
+    T122, // discarded-logic-result (M1 Build Error 1347: a logic or comparison operation used as a statement)
+    T123, // duplicate-local (M1 Build Error 1312: a local name already declared in the same or an enclosing block)
+    T124, // read-only-assignment (M1 Build Errors 1318/1357: assignment to a parameter, constant or argument)
+    T125, // return-value-use (M1 Build Errors 1356/1338: Out read as a value, or used without a declared return)
+    T126, // ambiguous-logical-operators (M1 Build Error 1365: and/or mixed without parentheses)
+    T127, // operand-type (M1 Build Errors 1324/1329/1367: logic operands that are not Boolean, float/integer ordering comparisons)
+    T128, // not-callable (M1 Build Error 1336: call syntax on a channel, parameter or constant)
+    T129, // local-name-conflict (M1 Build Error 1311: a local named like a visible object, ignoring case)
+    T130, // local-declaration (M1 Build Errors 1025/1313/1314/1348: a local without initial value, invalid type alias, or void initialiser)
 }
 
 impl TypeCode {
@@ -130,6 +143,19 @@ impl TypeCode {
             TypeCode::T115 => "T115",
             TypeCode::T116 => "T116",
             TypeCode::T117 => "T117",
+            TypeCode::T118 => "T118",
+            TypeCode::T119 => "T119",
+            TypeCode::T120 => "T120",
+            TypeCode::T121 => "T121",
+            TypeCode::T122 => "T122",
+            TypeCode::T123 => "T123",
+            TypeCode::T124 => "T124",
+            TypeCode::T125 => "T125",
+            TypeCode::T126 => "T126",
+            TypeCode::T127 => "T127",
+            TypeCode::T128 => "T128",
+            TypeCode::T129 => "T129",
+            TypeCode::T130 => "T130",
         }
     }
 
@@ -200,6 +226,19 @@ impl TypeCode {
             TypeCode::T115 => "return-not-assigned-on-all-paths",
             TypeCode::T116 => "discarded-user-return",
             TypeCode::T117 => "user-call-in-condition-or-argument",
+            TypeCode::T118 => "unused-local",
+            TypeCode::T119 => "condition-not-boolean",
+            TypeCode::T120 => "constant-condition",
+            TypeCode::T121 => "constant-logic-result",
+            TypeCode::T122 => "discarded-logic-result",
+            TypeCode::T123 => "duplicate-local",
+            TypeCode::T124 => "read-only-assignment",
+            TypeCode::T125 => "return-value-use",
+            TypeCode::T126 => "ambiguous-logical-operators",
+            TypeCode::T127 => "operand-type",
+            TypeCode::T128 => "not-callable",
+            TypeCode::T129 => "local-name-conflict",
+            TypeCode::T130 => "local-declaration",
         }
     }
 
@@ -214,7 +253,8 @@ impl TypeCode {
             T050, T060, T061, T062, T063, T064, T065, T070, T071, T080, T081, T082, T083, T084,
             T085, T086, T087, T088, T089, T090, T091, T092, T093, T094, T095, T096, T097, T098,
             T099, T100, T101, T102, T103, T104, T105, T106, T107, T108, T109, T110, T111, T112,
-            T113, T114, T115, T116, T117,
+            T113, T114, T115, T116, T117, T118, T119, T120, T121, T122, T123, T124, T125, T126,
+            T127, T128, T129, T130,
         ]
     }
 }
@@ -367,6 +407,6 @@ mod tests {
             );
         }
         // Catalogue size tracks the enum (bump both together).
-        assert_eq!(codes.len(), 61);
+        assert_eq!(codes.len(), 74);
     }
 }

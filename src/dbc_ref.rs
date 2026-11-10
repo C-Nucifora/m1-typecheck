@@ -461,7 +461,7 @@ mod tests {
         let codes = codes_for(
             PRJ,
             DBC,
-            "if (DBC.BMU.Status.Receive()) {\n  local v = DBC.BMU.Status.Voltage.GetUnsignedInteger();\n}\n",
+            "if (DBC.BMU.Status.Receive()) {\n  local v = DBC.BMU.Status.Voltage.GetUnsignedInteger();\n  System.Unused(v);\n}\n",
         );
         assert!(codes.is_empty(), "expected clean, got {codes:?}");
     }

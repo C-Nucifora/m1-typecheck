@@ -11,7 +11,7 @@ fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_m1-typecheck")
 }
 
-const SCRIPT: &str = "local x = 1 + 2;\n";
+const SCRIPT: &str = "local x = 1 + 2;\nSystem.Unused(x);\n";
 
 fn setup(name: &str) -> PathBuf {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);

@@ -77,11 +77,14 @@ fn walk_refs(
         // Only a *reference* identifier matters: the declaration's own `name`
         // node, a `<Type>` annotation name, and a member-path segment are not
         // value reads of a local.
-        let is_reference = node.parent().is_none_or(|p| {
-            !matches!(
-                p.kind(),
-                Kind::LocalDeclaration | Kind::TypeAnnotation | Kind::MemberExpression
-            )
+        let is_reference = node.parent().is_none_or(|p| match p.kind() {
+            // A bare initializer (`local y = z;`) is a read; only the declared
+            // name is not.
+            Kind::LocalDeclaration => p
+                .child_by_field(Field::Name)
+                .is_none_or(|n| n.byte_range() != node.byte_range()),
+            Kind::TypeAnnotation | Kind::MemberExpression => false,
+            _ => true,
         });
         if is_reference && let Some(&decl_start) = first_decl.get(name) {
             let start = node.byte_range().start;
@@ -130,6 +133,14 @@ mod tests {
             "expected T105 use-before-def, got {:?}",
             r.diagnostics
         );
+    }
+
+    #[test]
+    fn bare_initializer_before_definition_is_flagged() {
+        // M1 Build rejects `z` with Error 1338 before its declaration.
+        let src = "local y = z;\nlocal z = 1.0;\n";
+        let r = check_script_no_project(src);
+        assert!(has(&r, "T105"), "expected T105, got {:?}", r.diagnostics);
     }
 
     #[test]

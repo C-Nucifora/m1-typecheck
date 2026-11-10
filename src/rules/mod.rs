@@ -30,6 +30,21 @@ pub mod t091_local_case;
 pub mod t105_local_use_before_def;
 pub mod t106_group_not_value_provider;
 pub mod t116_user_return_calls;
+pub mod t118_unused_local;
+pub mod t119_condition_type;
+pub mod t120_constant_condition;
+pub mod t121_constant_logic;
+pub mod t122_discarded_logic;
+pub mod t123_duplicate_local;
+pub mod t124_read_only_assignment;
+pub mod t125_return_value_use;
+pub mod t126_ambiguous_logic;
+pub mod t127_operand_type;
+pub mod t128_not_callable;
+pub mod t129_local_name_conflict;
+pub mod t130_local_declaration;
+
+mod native_syntax;
 
 pub trait Rule: Send + Sync {
     fn check_node(&self, node: &Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>);
@@ -113,6 +128,16 @@ impl Default for Registry {
                 Box::new(t086_unit_mismatch::Rule),
                 Box::new(t084_expand_bounds::Rule),
                 Box::new(t106_group_not_value_provider::Rule),
+                Box::new(t119_condition_type::Rule),
+                Box::new(t120_constant_condition::Rule),
+                Box::new(t121_constant_logic::Rule),
+                Box::new(t122_discarded_logic::Rule),
+                Box::new(t124_read_only_assignment::Rule),
+                Box::new(t125_return_value_use::Rule),
+                Box::new(t126_ambiguous_logic::Rule),
+                Box::new(t127_operand_type::Rule),
+                Box::new(t128_not_callable::Rule),
+                Box::new(t130_local_declaration::Rule),
             ],
         }
     }
@@ -345,6 +370,11 @@ pub fn run_with(
     // resolver registers locals position-lessly, so a forward reference still
     // resolves as `Resolution::Local` and the per-node rules can't see it.
     t105_local_use_before_def::check(cst.root(), &scope, &mut diagnostics);
+    // Local-variable checks M1 Build applies to the whole function body:
+    // unused locals (1350), duplicates (1312) and object-name conflicts (1311).
+    t118_unused_local::check(cst.root(), &scope, &mut diagnostics);
+    t123_duplicate_local::check(cst.root(), &scope, &mut diagnostics);
+    t129_local_name_conflict::check(cst.root(), &scope, &mut diagnostics);
     // M1 In/Out function-I/O parity (#233): runs after the per-node walk so it
     // can supersede the generic T001 a bare-param / `return` token produces.
     crate::in_out_io::check(cst.root(), &scope, &mut diagnostics);
@@ -447,7 +477,7 @@ mod tests {
     #[test]
     fn clean_script_no_project_has_no_diagnostics_for_resolution() {
         // simple int math -> no T002/T003 and no spurious diagnostics
-        let r = check_script_no_project("local sum = 1 + 2;\n");
+        let r = check_script_no_project("local sum = 1 + 2;\nSystem.Unused(sum);\n");
         assert!(r.syntax_errors.is_empty());
         assert!(
             r.diagnostics.is_empty(),
@@ -507,14 +537,25 @@ mod tests {
 
     #[test]
     fn corpus_annotation_spellings_are_clean() {
-        // Real-corpus shapes: lowercase <boolean>, <Unsigned Integer> with hex,
-        // <Integer> with a negative literal — all well-typed, no diagnostics.
-        let src = "local <boolean> ok = false;\nlocal <Unsigned Integer> h = 0x00;\nlocal <Integer> i = -1;\nlocal <Float> f = 1;\n";
+        // Real-corpus shapes: lowercase <boolean>, lowercase <floating point>,
+        // <Unsigned Integer> with hex, <Integer> with a negative literal — all
+        // well-typed, no diagnostics.
+        let src = "local <boolean> ok = false;\nlocal <Unsigned Integer> h = 0x00;\nlocal <Integer> i = -1;\nlocal <floating point> f = 1;\nSystem.Unused(ok);\nSystem.Unused(h);\nSystem.Unused(i);\nSystem.Unused(f);\n";
         let r = check_script_no_project(src);
         assert!(
             r.diagnostics.is_empty(),
             "expected clean, got {:?}",
             r.diagnostics
         );
+    }
+
+    #[test]
+    fn non_m1_type_aliases_are_t130() {
+        // M1 Build rejects `<Float>` and `<Bool>` (Error 1313); its names are
+        // `<Floating Point>` and `<Boolean>`.
+        for alias in ["Float", "Bool"] {
+            let src = format!("local <{alias}> x = 1;\nSystem.Unused(x);\n");
+            assert!(has(&check_script_no_project(&src), "T130"), "{alias}");
+        }
     }
 }
