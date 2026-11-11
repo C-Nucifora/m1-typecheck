@@ -1,4 +1,4 @@
-//! M1 Build Error 1339 — ambiguous reference (T103, #234).
+//! M1 Build Errors 1334/1339 — ambiguous reference (T103, #234, m1-tools#68).
 //!
 //! M1 Build rejects a **bare name** that resolves to more than one symbol *kind*
 //! in the same scope. The shape the issue targets: a group has a child channel
@@ -11,7 +11,12 @@
 //!
 //! The idiomatic fix is to qualify the channel as `This.State.Member`.
 //!
-//! ## Why this is corpus-safe (precision)
+//! Native Error 1334 also rejects a bare DBC filename when a same-named project
+//! group is visible (m1-tools#68: BMS/SBG/TTP). `Root.CAN.BMS` and `DBC.BMS`
+//! distinguish the intents. This check requires both declared candidates and
+//! does not change the resolver or infer anything about unmodelled roots.
+//!
+//! ## Why the channel/enum check is corpus-safe (precision)
 //!
 //! The real corpora reference an enum-named-after-something *unambiguously*:
 //! `Precharge State.Run` and `Timeout.EPOS` are bare enumerators whose
@@ -30,7 +35,7 @@
 //! the qualified (`This.`/`Parent.`/path-prefixed) accesses the corpora use.
 use crate::diagnostics::{TypeCode, TypeDiagnostic, make};
 use crate::resolve::Scope;
-use crate::symbols::{SymbolKind, SymbolTable};
+use crate::symbols::{Symbol, SymbolKind, SymbolTable};
 use crate::typer::path_text;
 use m1_core::{Kind, Node, Severity};
 use std::collections::HashSet;
@@ -54,6 +59,16 @@ pub fn check(root: Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>) {
         return;
     };
     let table = project.symbols();
+    // A database can be registered bare by its .m1dbc or as DBC.<Name> by
+    // the project. Only these native global spellings compete with bare groups.
+    let dbc_names: HashSet<&str> = table
+        .iter()
+        .filter(|s| s.classname.as_deref() == Some("BuiltIn.CAN.DBC"))
+        .filter_map(|s| {
+            let name = s.path.strip_prefix("DBC.").unwrap_or(&s.path);
+            (!name.contains('.')).then_some(name)
+        })
+        .collect();
     // One diagnostic per ambiguous name per script (a name used many times is one
     // finding, not a swarm).
     let mut reported: HashSet<String> = HashSet::new();
@@ -81,6 +96,27 @@ pub fn check(root: Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>) {
         if reported.contains(name) {
             continue;
         }
+        // Native Build rejects the *head* even when the remaining path only
+        // exists under one candidate (e.g. BMS.Timeout versus BMS.Init()).
+        // Keep the resolver's local/library precedence and opaque semantics.
+        if dbc_names.contains(name)
+            && crate::intrinsics::get().library_object_name(name).is_none()
+            && let Some(project_group) = group_reachable_bare(name, group, table)
+        {
+            reported.insert(name.to_string());
+            out.push(make(
+                TypeCode::T103,
+                &n,
+                Severity::Error,
+                format!(
+                    "ambiguous reference `{name}`: the bare name matches project group `{}` and \
+                     DBC file `{name}` — qualify the group as `{}` or the database as \
+                     `DBC.{name}` (M1 Build Error 1334: \"Multiple matches found\")",
+                    project_group.path, project_group.path
+                ),
+            ));
+            continue;
+        }
         // Both kinds must be in scope for the name to be ambiguous.
         if table.enum_by_name(name).is_none() {
             continue;
@@ -100,6 +136,24 @@ pub fn check(root: Node, scope: &Scope, out: &mut Vec<TypeDiagnostic>) {
             ),
         ));
     }
+}
+
+/// Find a same-named project group visible through rooted or enclosing-group
+/// lookup. Direct children of each enclosing group are reachable; deeper
+/// descendants outside that lookup are not bare candidates.
+fn group_reachable_bare<'a>(name: &str, group: &str, table: &'a SymbolTable) -> Option<&'a Symbol> {
+    let is_group = |s: &&Symbol| s.kind == SymbolKind::Group;
+    if let Some(s) = table.get(&format!("Root.{name}")).filter(is_group) {
+        return Some(s);
+    }
+    let mut prefix = Some(group);
+    while let Some(g) = prefix {
+        if let Some(s) = table.get(&format!("{g}.{name}")).filter(is_group) {
+            return Some(s);
+        }
+        prefix = g.rfind('.').map(|i| &g[..i]);
+    }
+    None
 }
 
 /// True when the bare `name` resolves, in `group`'s scope, to a plain

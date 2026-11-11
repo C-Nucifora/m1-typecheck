@@ -55,7 +55,7 @@ impl Registry {
     /// T095 (invalid display unit = M1 Build 1017), T096 (multiple scheduled
     /// writers = M1 Build 1022), T097 (user-function call cycle), T102
     /// (cross-function multiple-assignment = M1 Build 1317), T103 (ambiguous
-    /// reference = M1 Build 1339), and T104 (unscheduled function = M1 Build 1642)
+    /// reference = M1 Build 1334/1339), and T104 (unscheduled function = M1 Build 1642)
     /// are now **default-on**: each mirrors a finding M1 Build itself emits, and
     /// the cross-script checks source the whole project's scripts so they no
     /// longer false-positive under a partial invocation.
@@ -346,8 +346,8 @@ pub fn run_with(
     // M1 In/Out function-I/O parity (#233): runs after the per-node walk so it
     // can supersede the generic T001 a bare-param / `return` token produces.
     crate::in_out_io::check(cst.root(), &scope, &mut diagnostics);
-    // M1 ambiguous-reference parity (#234, T103): a bare name resolving to both a
-    // sibling channel and a same-named enum type (M1 Build Error 1339).
+    // M1 ambiguous-reference parity (T103): channel/enum collisions (#234,
+    // Error 1339) and visible project-group/DBC collisions (m1-tools#68, 1334).
     crate::ambiguous::check(cst.root(), &scope, &mut diagnostics);
     // CAN-DBC reference checks (T108/T109/T110): a DBC module/message/signal chain
     // that doesn't exist, a message method vs its Transmit direction, or a signal

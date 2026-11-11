@@ -6,7 +6,7 @@ use crate::typer::{path_text, type_of};
 use crate::types::ValueType;
 use m1_core::{Field, Kind, Node, Severity};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// M1 standard-library roots always treated as opaque (never flagged).
 const STATIC_OPAQUE_ROOTS: &[&str] = &[
@@ -33,6 +33,7 @@ pub struct Project {
     /// symbol-table keys, e.g. `Root.Foo.Bar`). `None` when no cfg was loaded —
     /// the missing-parameter audit (T041) is then skipped.
     cfg_params: Option<HashSet<String>>,
+    native_tag_diagnostics: Vec<TypeDiagnostic>,
 }
 
 #[derive(Debug)]
@@ -52,8 +53,38 @@ impl std::error::Error for LoadError {}
 
 impl Project {
     pub fn load(m1prj_path: &Path) -> Result<Project, LoadError> {
+        Self::load_with_module_dirs(m1prj_path, &[])
+    }
+
+    /// Load a project with the exact selected module metadata from explicit
+    /// directories, or the shared environment/install search when empty.
+    pub fn load_with_module_dirs(
+        m1prj_path: &Path,
+        module_dirs: &[PathBuf],
+    ) -> Result<Project, LoadError> {
         let xml = m1_workspace::read_motec_xml(m1prj_path).map_err(LoadError::Io)?;
-        Self::from_xml(&xml)
+        Self::from_xml_with_module_dirs(&xml, module_dirs)
+    }
+
+    /// Rebuild edited project text using the same disk module discovery as load.
+    /// Missing selected files produce coverage notes rather than guessed tags.
+    pub fn from_xml_with_module_dirs(
+        xml: &str,
+        module_dirs: &[PathBuf],
+    ) -> Result<Project, LoadError> {
+        let selected = m1_project::selected_module_xmls(xml, module_dirs)
+            .map_err(|error| LoadError::Parse(error.to_string()))?;
+        let module_xmls: Vec<_> = selected.xmls.iter().map(String::as_str).collect();
+        let mut project = Self::from_xml_with_modules(xml, &module_xmls)?;
+        for finding in selected.findings {
+            project.native_tag_diagnostics.push(make_project_for(
+                TypeCode::T113,
+                Severity::Warning,
+                finding.message.clone(),
+                &finding.path,
+            ));
+        }
+        Ok(project)
     }
 
     /// Build a project from `.m1prj` XML already in memory, without reading from
@@ -63,6 +94,26 @@ impl Project {
     /// disk-sourced and unchanged by such edits, is applied separately via
     /// [`Project::with_config`] / [`Project::with_dbc`].
     pub fn from_xml(xml: &str) -> Result<Project, LoadError> {
+        Self::from_xml_with_modules(xml, &[])
+    }
+
+    /// Build the symbol model and shared native tag audit with optional selected
+    /// `.m1mod` definitions. Missing module metadata stays unknown: the shared
+    /// validator does not infer inherited tags from an opaque module name.
+    pub fn from_xml_with_modules(xml: &str, module_xmls: &[&str]) -> Result<Project, LoadError> {
+        let native_tag_diagnostics = m1_project::validate_with_modules(xml, module_xmls)
+            .map_err(|e| LoadError::Parse(e.to_string()))?
+            .into_iter()
+            .filter(|finding| matches!(finding.code, Some(1140 | 1141 | 1647 | 1648 | 1649)))
+            .map(|finding| {
+                make_project_for(
+                    TypeCode::T112,
+                    Severity::Warning,
+                    finding.message,
+                    &finding.path,
+                )
+            })
+            .collect();
         let parsed = m1prj::parse(xml).map_err(|e| LoadError::Parse(e.to_string()))?;
         let mut opaque_roots: HashSet<String> =
             STATIC_OPAQUE_ROOTS.iter().map(|s| s.to_string()).collect();
@@ -72,6 +123,7 @@ impl Project {
             opaque_roots,
             file_to_group: parsed.file_to_group,
             cfg_params: None,
+            native_tag_diagnostics,
         })
     }
 
@@ -163,10 +215,16 @@ impl Project {
         crate::audit::audit_project(self)
     }
 
-    /// Mandatory-Type-tag audit (T092, default-on): known M1 Build 1142 cases — see
-    /// [`crate::audit::audit_tags`].
+    /// Default-on native tag audit: mandatory Type tags (T092 / warning 1142)
+    /// plus the shared m1-project component rules (T112 / warnings 1140, 1141,
+    /// 1647, 1648 and 1649), plus metadata coverage warnings (T113). Structural
+    /// findings outside tag rules stay in m1-project; each native rule is
+    /// emitted once.
     pub fn audit_tags(&self) -> Vec<crate::diagnostics::TypeDiagnostic> {
-        crate::audit::audit_tags(self)
+        let mut findings = crate::audit::audit_tags(self);
+        findings.extend(self.native_tag_diagnostics.iter().cloned());
+        findings.sort_by(|a, b| a.inner.message.cmp(&b.inner.message));
+        findings
     }
 
     /// Display-unit audit (T095, default-on): M1 Build Error 1017 parity — see
