@@ -263,3 +263,57 @@ fn cli_and_library_entry_point_produce_identical_code_counts() {
     assert_eq!(cli_project, library_project);
     let _ = fs::remove_dir_all(dir);
 }
+
+#[test]
+fn inference_refreshes_after_edits_and_preserves_declared_signatures() {
+    use m1_typecheck::types::ValueType;
+    let xml = r#"<Project>
+      <Component Classname="BuiltIn.FuncUser" Name="Root.F" Filename="F.m1scr"/>
+      <Component Classname="BuiltIn.FuncUser" Name="Root.Declared" Filename="Declared.m1scr">
+        <Signature ReturnType="f32"/>
+      </Component>
+    </Project>"#;
+    let mut project = Project::from_xml(xml).unwrap();
+    for (body, expected) in [
+        (Some("Out = 1.5;"), Some(ValueType::Float)),
+        (Some("Out = 1;"), Some(ValueType::Integer)),
+        (Some("Out = 1.5;"), Some(ValueType::Float)),
+        (Some("Out = Unknown.Value;"), None),
+        (Some("Out = 1.5;"), Some(ValueType::Float)),
+        (Some("Out = ;"), None),
+        (Some("Out = 1.5;"), Some(ValueType::Float)),
+        (None, None),
+    ] {
+        let mut bodies = vec![("Declared.m1scr".into(), "Out = 1;".into())];
+        if let Some(body) = body {
+            bodies.push(("F.m1scr".into(), body.into()));
+        }
+        let scripts = parsed::parse_all(&bodies);
+        let result = project_check::check(
+            Some(&mut project),
+            &scripts,
+            &[SourceInput::inline("local <Integer> x = F();")],
+            &ProjectCheckOptions::default(),
+        );
+        assert_eq!(
+            project.symbols().get("Root.F").unwrap().return_type,
+            expected,
+            "body {body:?}"
+        );
+        assert_eq!(
+            project.symbols().get("Root.Declared").unwrap().return_type,
+            Some(ValueType::Float)
+        );
+        assert_eq!(
+            result.sources[0]
+                .diagnostics
+                .iter()
+                .any(|d| d.code.as_str() == "T030"),
+            expected == Some(ValueType::Float),
+            "body {body:?}"
+        );
+        let mut fresh = Project::from_xml(xml).unwrap();
+        fresh.infer_return_types(&scripts);
+        assert_eq!(fresh.symbols().get("Root.F").unwrap().return_type, expected);
+    }
+}

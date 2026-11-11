@@ -194,6 +194,7 @@ impl Project {
     /// `&self` (the in-progress table, where not-yet-inferred callees stay
     /// Unknown — conservative); phase 2 writes the results back via `&mut self`.
     pub fn infer_return_types(&mut self, scripts: &[crate::parsed::ParsedScript]) {
+        self.table.clear_inferred_return_types();
         let mut inferred: Vec<(String, ValueType)> = Vec::new();
         for script in scripts {
             let file_name = &script.name;
