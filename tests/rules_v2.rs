@@ -708,3 +708,60 @@ fn t030_carries_declaration_related_location() {
     assert_eq!(r.place, RelatedPlace::Project { line: def_line });
     assert!(r.message.contains("declared"), "{:?}", r.message);
 }
+
+#[test]
+fn when_case_variants_cover_the_canonical_members() {
+    let p = proj();
+    for arms in [
+        "is (off) {} is (on) {}",
+        "is (Switch State.oFF) {} is (Switch State.On) {}",
+        "is (oFf or ON) {}",
+    ] {
+        let src = format!("when (SwitchMode.Value) {{ {arms} }}");
+        let result = check_script(&p, Path::new("Foo Update.m1scr"), &src);
+        assert!(result.syntax_errors.is_empty(), "{src}");
+        assert!(
+            !result
+                .diagnostics
+                .iter()
+                .any(|d| matches!(d.code, TypeCode::T020 | TypeCode::T070)
+                    && d.inner.severity == m1_core::Severity::Error),
+            "{src}: {:?}",
+            result.diagnostics
+        );
+    }
+    let c = codes(&p, "when (SwitchMode.Value) { is (off or Typo) {} }");
+    assert!(c.contains(&TypeCode::T020));
+    assert!(c.contains(&TypeCode::T070));
+}
+
+#[test]
+fn ambiguous_enum_coverage_keeps_definite_nonmember_errors() {
+    let project = Project::from_xml(
+        r#"<Project><DataTypes><Type Name="Mode" Storage="enum">
+        <Enum Name="Off" ContainerOrder="0"/><Enum Name="OFF" ContainerOrder="1"/>
+        <Enum Name="On" ContainerOrder="2"/></Type></DataTypes>
+        <Component Classname="BuiltIn.Channel" Name="Root.Value"><Props Type="::This.Mode"/>
+        </Component></Project>"#,
+    )
+    .unwrap();
+    for arms in [
+        "is (Typo or off) {}",
+        "is (off or Typo) {}",
+        "is (Typo) {} is (off) {}",
+        "is (off) {} is (Typo) {}",
+    ] {
+        let source = format!("when (Value) {{ {arms} }}");
+        let result = check_script(&project, Path::new("Update.m1scr"), &source);
+        assert!(result.syntax_errors.is_empty());
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == TypeCode::T020 && d.inner.severity == m1_core::Severity::Error),
+            "{source}: {:?}",
+            result.diagnostics
+        );
+        assert!(!result.diagnostics.iter().any(|d| d.code == TypeCode::T070));
+    }
+}
