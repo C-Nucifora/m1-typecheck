@@ -463,11 +463,13 @@ pub fn check_usage(
 
 /// Cross-script writer audit (default-on, T096): a channel assigned by more
 /// than one *periodically scheduled* function — M1 Build Error 1022 "Object
-/// assigned to from multiple periodically scheduled functions", which fails
-/// the build. The intra-script complement is T040 (multiple assignments on
-/// one code path). Only functions with a known trigger rate count: a Startup
-/// or event function initialising a channel one scheduled function owns is
-/// not a 1022 (and an unparseable rate conservatively stays silent).
+/// assigned to from multiple periodically scheduled functions" — or by more
+/// than one `On Startup` function — Error 1020. A write counts for every
+/// scheduled function that reaches it through user-function calls, so a helper
+/// called from a second scheduled function is a second writer. The intra-script
+/// complement is T040 (multiple assignments on one code path). A Startup
+/// function initialising a channel that one periodic function owns is not a
+/// conflict, and an unparseable rate conservatively stays silent.
 pub fn check_multi_writers(
     project: &Project,
     scripts: &[crate::parsed::ParsedScript],
@@ -475,32 +477,69 @@ pub fn check_multi_writers(
     let ios: Vec<ScriptIo> = scripts
         .iter()
         .filter_map(|s| script_io(project, &s.name, &s.cst))
-        .filter(|io| io.rate_hz.is_some())
         .collect();
-    let mut writers: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
-    for io in &ios {
-        for w in &io.writes {
-            writers.entry(w).or_default().insert(io.fn_path.as_str());
+    let by_path: BTreeMap<&str, &ScriptIo> =
+        ios.iter().map(|io| (io.fn_path.as_str(), io)).collect();
+    // Writes made by `root` itself or by any user function it calls.
+    let reachable_writes = |root: &ScriptIo| -> BTreeSet<String> {
+        let mut writes = BTreeSet::new();
+        let mut seen = BTreeSet::new();
+        let mut stack = vec![root.fn_path.as_str()];
+        while let Some(path) = stack.pop() {
+            if !seen.insert(path) {
+                continue;
+            }
+            if let Some(io) = by_path.get(path) {
+                writes.extend(io.writes.iter().cloned());
+                stack.extend(io.calls.iter().map(String::as_str));
+            }
         }
-    }
+        writes
+    };
     let mut out = Vec::new();
-    for (chan, fns) in &writers {
-        if fns.len() < 2 {
-            continue;
+    for (roots, kind, native) in [
+        (
+            ios.iter()
+                .filter(|io| io.rate_hz.is_some())
+                .collect::<Vec<_>>(),
+            "periodically scheduled",
+            "1022",
+        ),
+        (
+            ios.iter()
+                .filter(|io| project.is_startup_function(&io.fn_path))
+                .collect::<Vec<_>>(),
+            "startup",
+            "1020",
+        ),
+    ] {
+        let mut writers: BTreeMap<String, BTreeSet<&str>> = BTreeMap::new();
+        for root in roots {
+            for chan in reachable_writes(root) {
+                writers
+                    .entry(chan)
+                    .or_default()
+                    .insert(root.fn_path.as_str());
+            }
         }
-        let list = fns
-            .iter()
-            .map(|f| format!("`{f}`"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        out.push(make_project_for(
-            TypeCode::T096,
-            Severity::Error,
-            format!(
-                "channel `{chan}` is assigned by multiple periodically scheduled functions: {list} (M1 Build Error 1022)"
-            ),
-            *chan,
-        ));
+        for (chan, fns) in &writers {
+            if fns.len() < 2 {
+                continue;
+            }
+            let list = fns
+                .iter()
+                .map(|f| format!("`{f}`"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push(make_project_for(
+                TypeCode::T096,
+                Severity::Error,
+                format!(
+                    "channel `{chan}` is assigned by multiple {kind} functions: {list} (M1 Build Error {native})"
+                ),
+                chan.as_str(),
+            ));
+        }
     }
     out
 }
@@ -723,9 +762,50 @@ fn is_user_function(classname: Option<&str>) -> bool {
     )
 }
 
-/// Reachability audit (default-on, T104): a user function that no scheduled
-/// function reaches through the call graph — M1 Build Error 1642 "Function '…'
-/// not executed by a scheduled function", which fails the build.
+/// User functions that assign a channel directly, or through calls to other
+/// analysed user functions. Writes to parameters, locals and `Out` do not
+/// count; neither do calls whose bodies are unavailable (generated functions,
+/// unparsable scripts), so an absent function means "not established".
+pub(crate) fn channel_writing_functions(
+    project: &Project,
+    scripts: &[crate::parsed::ParsedScript],
+) -> HashSet<String> {
+    let ios: Vec<ScriptIo> = scripts
+        .iter()
+        .filter_map(|s| script_io(project, &s.name, &s.cst))
+        .collect();
+    let table = project.symbols();
+    let mut writers: HashSet<String> = ios
+        .iter()
+        .filter(|io| {
+            io.writes
+                .iter()
+                .any(|w| table.get(w).is_some_and(|s| s.kind == SymbolKind::Channel))
+        })
+        .map(|io| io.fn_path.clone())
+        .collect();
+    // Propagate to callers until nothing changes; each pass adds at least one
+    // function, so this terminates within |ios| passes.
+    loop {
+        let added: Vec<String> = ios
+            .iter()
+            .filter(|io| !writers.contains(&io.fn_path))
+            .filter(|io| io.calls.iter().any(|callee| writers.contains(callee)))
+            .map(|io| io.fn_path.clone())
+            .collect();
+        if added.is_empty() {
+            return writers;
+        }
+        writers.extend(added);
+    }
+}
+
+/// Reachability audit (default-on, T104): a user function that directly updates
+/// channels but that no scheduled function reaches through the call graph —
+/// M1 Build Error 1642 "The Function '…' updates channel(s), but it is not
+/// executed by a scheduled function", which fails the build. A function that
+/// writes no channel (only locals, `Out`, or generated timer/table methods) is
+/// not reported, matching M1 Build.
 ///
 /// The roots are every user function bound to a schedule event
 /// ([`crate::symbols::Symbol::scheduled`] — any `SelectedTrigger`, including
@@ -772,21 +852,27 @@ pub fn check_reachability(
         }
     }
 
-    // Flag every user function (backed by a parsed script) not reached. Anchoring
-    // on `ios` keeps the check to functions whose body we actually analysed; a
-    // generated/kernel function or one with no script is never reported.
+    // Flag every channel-writing user function (backed by a parsed script) not
+    // reached. Anchoring on `ios` keeps the check to functions whose body we
+    // actually analysed; a generated/kernel function or one with no script is
+    // never reported.
     let mut out = Vec::new();
     for io in &ios {
         let sym = table.get(&io.fn_path);
         if !sym.is_some_and(|s| is_user_function(s.classname.as_deref())) {
             continue;
         }
-        if !reachable.contains(io.fn_path.as_str()) {
+        let writes_channel = io.writes.iter().any(|path| {
+            table
+                .get(path)
+                .is_some_and(|symbol| symbol.kind == SymbolKind::Channel)
+        });
+        if !reachable.contains(io.fn_path.as_str()) && writes_channel {
             out.push(make_project_for(
                 TypeCode::T104,
                 Severity::Error,
                 format!(
-                    "function `{}` is not executed by any scheduled function (M1 Build Error 1642: \"Function not executed by a scheduled function\")",
+                    "function `{}` updates channels but is not executed by any scheduled function (M1 Build Error 1642: \"Function not executed by a scheduled function\")",
                     io.fn_path
                 ),
                 &io.fn_path,
@@ -1061,6 +1147,34 @@ mod reachability_tests {
     }
 
     #[test]
+    fn unscheduled_functions_that_only_return_values_are_silent() {
+        assert!(run(&[("Ctrl.Orphan.m1scr", "Out = 1.0;\n")]).is_empty());
+        assert!(
+            run(&[(
+                "Ctrl.Orphan.m1scr",
+                "local value = 1.0; System.Unused(value);\n"
+            )])
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn scheduling_reports_only_the_direct_writer_in_an_unreachable_call_chain() {
+        let messages = run(&[
+            ("Ctrl.Orphan.m1scr", "Helper();\n"),
+            ("Ctrl.Helper.m1scr", "Deep();\n"),
+            ("Ctrl.Deep.m1scr", "X = 1.0;\n"),
+        ]);
+        assert_eq!(messages.len(), 1, "{messages:?}");
+        assert!(messages[0].contains("Root.Ctrl.Deep"));
+    }
+
+    #[test]
+    fn unavailable_callee_bodies_do_not_establish_channel_writes() {
+        assert!(run(&[("Ctrl.Orphan.m1scr", "Helper();\n")]).is_empty());
+    }
+
+    #[test]
     fn orphans_are_errors() {
         let project = Project::from_xml(XML).unwrap();
         let scripts = crate::parsed::parse_all(&[
@@ -1296,6 +1410,73 @@ mod usage_tests {
         assert!(check_multi_writers(&project, &scripts).is_empty());
     }
 
+    #[test]
+    fn writes_through_called_functions_count_for_each_scheduled_caller() {
+        // M1 Build reports 1022 when a second periodic function reaches the
+        // channel write through a user-function call.
+        let project = Project::from_xml(XML_TWO_FNS).unwrap();
+        let scripts = crate::parsed::parse_all(&[
+            (
+                "Ctrl.Update.m1scr".to_string(),
+                "Written = 1.0;\n".to_string(),
+            ),
+            (
+                "Aux.Update.m1scr".to_string(),
+                "Ctrl.Helper();\n".to_string(),
+            ),
+            (
+                "Ctrl.Helper.m1scr".to_string(),
+                "Written = 2.0;\n".to_string(),
+            ),
+        ]);
+        let diags = check_multi_writers(&project, &scripts);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(
+            diags[0].inner.message.contains("Root.Aux.Update")
+                && diags[0].inner.message.contains("1022"),
+            "{}",
+            diags[0].inner.message
+        );
+    }
+
+    #[test]
+    fn one_scheduled_caller_and_its_helper_are_one_writer() {
+        let project = Project::from_xml(XML_TWO_FNS).unwrap();
+        let scripts = crate::parsed::parse_all(&[
+            ("Ctrl.Update.m1scr".to_string(), "Helper();\n".to_string()),
+            (
+                "Ctrl.Helper.m1scr".to_string(),
+                "Written = 2.0;\n".to_string(),
+            ),
+        ]);
+        assert!(check_multi_writers(&project, &scripts).is_empty());
+    }
+
+    #[test]
+    fn two_startup_writers_are_error_1020() {
+        let project = Project::from_xml(XML_TWO_FNS).unwrap();
+        let scripts = crate::parsed::parse_all(&[
+            (
+                "Aux.Startup.m1scr".to_string(),
+                "Ctrl.Written = 0.0;\n".to_string(),
+            ),
+            (
+                "Aux.Init.m1scr".to_string(),
+                "Ctrl.Written = 1.0;\nCtrl.Only Mine = 1.0;\n".to_string(),
+            ),
+        ]);
+        let diags = check_multi_writers(&project, &scripts);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].inner.severity, Severity::Error);
+        assert!(
+            diags[0].inner.message.contains("startup")
+                && diags[0].inner.message.contains("1020")
+                && diags[0].inner.message.contains("`Root.Ctrl.Written`"),
+            "{}",
+            diags[0].inner.message
+        );
+    }
+
     const XML_TWO_FNS: &str = r#"<?xml version="1.0"?>
 <Project>
   <Component Classname="BuiltIn.GroupCompound" Name="Root"/>
@@ -1303,7 +1484,9 @@ mod usage_tests {
   <Component Classname="BuiltIn.GroupCompound" Name="Root.Aux"/>
   <Component Classname="BuiltIn.FuncUser" Filename="Ctrl.Update.m1scr" Name="Root.Ctrl.Update"><Props SelectedTrigger="Root.Events.On 100Hz"/></Component>
   <Component Classname="BuiltIn.FuncUser" Filename="Aux.Update.m1scr" Name="Root.Aux.Update"><Props SelectedTrigger="Root.Events.On 50Hz"/></Component>
-  <Component Classname="BuiltIn.FuncUser" Filename="Aux.Startup.m1scr" Name="Root.Aux.Startup"/>
+  <Component Classname="BuiltIn.FuncUser" Filename="Aux.Startup.m1scr" Name="Root.Aux.Startup"><Props SelectedTrigger="Root.Events.On Startup"/></Component>
+  <Component Classname="BuiltIn.FuncUser" Filename="Aux.Init.m1scr" Name="Root.Aux.Init"><Props SelectedTrigger="Parent.Parent.Events.On Startup"/></Component>
+  <Component Classname="BuiltIn.FuncUserParam" Filename="Ctrl.Helper.m1scr" Name="Root.Ctrl.Helper"/>
   <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.Written"><Props Type="f32" Security="Tune"/></Component>
   <Component Classname="BuiltIn.Channel" Name="Root.Ctrl.Only Mine"><Props Type="f32" Security="Tune"/></Component>
 </Project>"#;

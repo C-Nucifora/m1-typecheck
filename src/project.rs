@@ -6,7 +6,7 @@ use crate::typer::{path_text, type_of};
 use crate::types::ValueType;
 use m1_core::{Field, Kind, Node, Severity};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// M1 standard-library roots always treated as opaque (never flagged).
 const STATIC_OPAQUE_ROOTS: &[&str] = &[
@@ -26,6 +26,7 @@ const STATIC_OPAQUE_ROOTS: &[&str] = &[
 ];
 
 pub struct Project {
+    build_version: crate::compatibility::BuildVersion,
     table: SymbolTable,
     opaque_roots: HashSet<String>,
     file_to_group: HashMap<String, String>,
@@ -33,6 +34,15 @@ pub struct Project {
     /// symbol-table keys, e.g. `Root.Foo.Bar`). `None` when no cfg was loaded —
     /// the missing-parameter audit (T041) is then skipped.
     cfg_params: Option<HashSet<String>>,
+    native_tag_diagnostics: Vec<TypeDiagnostic>,
+    /// User functions known to assign a channel, directly or through calls to
+    /// other analysed user functions. Filled by [`Project::infer_channel_writes`].
+    channel_writers: HashSet<String>,
+    /// Functions whose `SelectedTrigger` is the `On Startup` event.
+    startup_functions: HashSet<String>,
+    /// Components M1 Build generated (`Caps="AutoCreated"`), such as a table's
+    /// `.Value` output.
+    auto_created: HashSet<String>,
 }
 
 #[derive(Debug)]
@@ -52,8 +62,71 @@ impl std::error::Error for LoadError {}
 
 impl Project {
     pub fn load(m1prj_path: &Path) -> Result<Project, LoadError> {
-        let xml = m1_workspace::read_motec_xml(m1prj_path).map_err(LoadError::Io)?;
-        Self::from_xml(&xml)
+        Self::load_with_module_dirs(m1prj_path, &[])
+    }
+
+    /// Load a project with the exact selected module metadata from explicit
+    /// directories, or the shared environment/install search when empty.
+    pub fn load_with_module_dirs(
+        m1prj_path: &Path,
+        module_dirs: &[PathBuf],
+    ) -> Result<Project, LoadError> {
+        Self::load_with_module_dirs_for_build(m1prj_path, module_dirs, None)
+    }
+
+    /// Load with module discovery and an optional explicit compiler baseline.
+    pub fn load_with_module_dirs_for_build(
+        path: &Path,
+        module_dirs: &[PathBuf],
+        version: Option<crate::compatibility::BuildVersion>,
+    ) -> Result<Project, LoadError> {
+        let xml = m1_workspace::read_motec_xml(path).map_err(LoadError::Io)?;
+        Self::from_xml_with_module_dirs_for_build(&xml, module_dirs, version)
+    }
+
+    pub fn load_for_build(
+        path: &Path,
+        version: crate::compatibility::BuildVersion,
+    ) -> Result<Project, LoadError> {
+        Self::load_with_module_dirs_for_build(path, &[], Some(version))
+    }
+
+    pub fn build_version(&self) -> crate::compatibility::BuildVersion {
+        self.build_version
+    }
+
+    /// Rebuild edited project text using the same disk module discovery as load.
+    /// Missing selected files produce coverage notes rather than guessed tags.
+    pub fn from_xml_with_module_dirs(
+        xml: &str,
+        module_dirs: &[PathBuf],
+    ) -> Result<Project, LoadError> {
+        Self::from_xml_with_module_dirs_for_build(xml, module_dirs, None)
+    }
+
+    /// Rebuild using module discovery and an optional compiler baseline.
+    pub fn from_xml_with_module_dirs_for_build(
+        xml: &str,
+        module_dirs: &[PathBuf],
+        version: Option<crate::compatibility::BuildVersion>,
+    ) -> Result<Project, LoadError> {
+        let selected = m1_project::selected_module_xmls(xml, module_dirs)
+            .map_err(|error| LoadError::Parse(error.to_string()))?;
+        let module_xmls: Vec<_> = selected.xmls.iter().map(String::as_str).collect();
+        let mut project = Self::from_xml_with_modules_for_build(
+            xml,
+            &module_xmls,
+            version.unwrap_or_else(|| crate::compatibility::BuildVersion::from_project_xml(xml)),
+        )?;
+        for finding in selected.findings {
+            project.native_tag_diagnostics.push(make_project_for(
+                TypeCode::T113,
+                Severity::Warning,
+                finding.message.clone(),
+                &finding.path,
+            ));
+        }
+        Ok(project)
     }
 
     /// Build a project from `.m1prj` XML already in memory, without reading from
@@ -63,15 +136,83 @@ impl Project {
     /// disk-sourced and unchanged by such edits, is applied separately via
     /// [`Project::with_config`] / [`Project::with_dbc`].
     pub fn from_xml(xml: &str) -> Result<Project, LoadError> {
-        let parsed = m1prj::parse(xml).map_err(|e| LoadError::Parse(e.to_string()))?;
+        Self::from_xml_with_modules(xml, &[])
+    }
+
+    /// Build the symbol model and shared native tag audit with optional selected
+    /// `.m1mod` definitions. Missing module metadata stays unknown: the shared
+    /// validator does not infer inherited tags from an opaque module name.
+    pub fn from_xml_with_modules(xml: &str, module_xmls: &[&str]) -> Result<Project, LoadError> {
+        Self::from_xml_with_modules_for_build(
+            xml,
+            module_xmls,
+            crate::compatibility::BuildVersion::from_project_xml(xml),
+        )
+    }
+
+    pub fn from_xml_for_build(
+        xml: &str,
+        version: crate::compatibility::BuildVersion,
+    ) -> Result<Project, LoadError> {
+        Self::from_xml_with_modules_for_build(xml, &[], version)
+    }
+
+    /// Build with explicit module definitions and compiler baseline.
+    pub fn from_xml_with_modules_for_build(
+        xml: &str,
+        module_xmls: &[&str],
+        build_version: crate::compatibility::BuildVersion,
+    ) -> Result<Project, LoadError> {
+        let startup_functions = startup_functions(xml);
+        let auto_created = auto_created_components(xml);
+        // A newer project format is rejected before symbol validation by the
+        // selected compiler. Missing metadata remains usable for synthetic XML.
+        let format = roxmltree::Document::parse(xml).ok().and_then(|doc| {
+            let root = doc.root_element();
+            let project = if root.has_tag_name("Project") {
+                Some(root)
+            } else {
+                root.children().find(|n| n.has_tag_name("Project"))
+            }?;
+            project.attribute("FileFormat")?.parse::<u32>().ok()
+        });
+        let maximum = match build_version {
+            crate::compatibility::BuildVersion::Stable144981 => 10108,
+            crate::compatibility::BuildVersion::Beta145556 => 10109,
+        };
+        if let Some(format) = format.filter(|format| *format > maximum) {
+            return Err(LoadError::Parse(format!(
+                "project FileFormat {format} is not supported by M1 Build {build_version}; maximum supported format is {maximum}"
+            )));
+        }
+        let native_tag_diagnostics = m1_project::validate_with_modules(xml, module_xmls)
+            .map_err(|e| LoadError::Parse(e.to_string()))?
+            .into_iter()
+            .filter(|finding| matches!(finding.code, Some(1140 | 1141 | 1647 | 1648 | 1649)))
+            .map(|finding| {
+                make_project_for(
+                    TypeCode::T112,
+                    Severity::Warning,
+                    finding.message,
+                    &finding.path,
+                )
+            })
+            .collect();
+        let parsed = m1prj::parse_for_build(xml, build_version)
+            .map_err(|e| LoadError::Parse(e.to_string()))?;
         let mut opaque_roots: HashSet<String> =
             STATIC_OPAQUE_ROOTS.iter().map(|s| s.to_string()).collect();
         opaque_roots.extend(parsed.module_roots);
         Ok(Project {
+            build_version,
             table: parsed.table,
             opaque_roots,
             file_to_group: parsed.file_to_group,
             cfg_params: None,
+            native_tag_diagnostics,
+            channel_writers: HashSet::new(),
+            startup_functions,
+            auto_created,
         })
     }
 
@@ -163,10 +304,16 @@ impl Project {
         crate::audit::audit_project(self)
     }
 
-    /// Mandatory-Type-tag audit (T092, default-on): known M1 Build 1142 cases — see
-    /// [`crate::audit::audit_tags`].
+    /// Default-on native tag audit: mandatory Type tags (T092 / warning 1142)
+    /// plus the shared m1-project component rules (T112 / warnings 1140, 1141,
+    /// 1647, 1648 and 1649), plus metadata coverage warnings (T113). Structural
+    /// findings outside tag rules stay in m1-project; each native rule is
+    /// emitted once.
     pub fn audit_tags(&self) -> Vec<crate::diagnostics::TypeDiagnostic> {
-        crate::audit::audit_tags(self)
+        let mut findings = crate::audit::audit_tags(self);
+        findings.extend(self.native_tag_diagnostics.iter().cloned());
+        findings.sort_by(|a, b| a.inner.message.cmp(&b.inner.message));
+        findings
     }
 
     /// Display-unit audit (T095, default-on): M1 Build Error 1017 parity — see
@@ -202,11 +349,12 @@ impl Project {
             };
             // A `<Signature ReturnType>` declared in the .m1prj is
             // authoritative (#110); only infer when nothing is declared.
-            if self
-                .table
-                .get(&sym_path)
-                .is_some_and(|s| s.return_type.is_some())
-            {
+            if self.table.get(&sym_path).is_some_and(|s| {
+                s.return_type.is_some()
+                    || !s.declared_returns.is_empty()
+                    || (self.build_version == crate::compatibility::BuildVersion::Stable144981
+                        && s.in_params.is_some())
+            }) {
                 continue;
             }
             let cst = &script.cst;
@@ -240,6 +388,32 @@ impl Project {
         }
     }
 
+    /// Record which user functions assign a channel directly or through calls
+    /// to other analysed user functions. M1 Build restricts calls of such
+    /// functions (Error 1372) and requires them to be scheduled (Error 1642).
+    /// Call this with the complete project script set, after the project (and
+    /// any `.m1cfg`/`.m1dbc`) is loaded.
+    pub fn infer_channel_writes(&mut self, scripts: &[crate::parsed::ParsedScript]) {
+        self.channel_writers = crate::schedule::channel_writing_functions(self, scripts);
+    }
+
+    /// True when [`Project::infer_channel_writes`] established that `function`
+    /// assigns a channel. False otherwise, including when no inference ran or
+    /// the function's body (or a callee's) could not be analysed.
+    pub fn function_writes_channels(&self, function: &str) -> bool {
+        self.channel_writers.contains(function)
+    }
+
+    /// True when `function` runs on the `On Startup` event.
+    pub(crate) fn is_startup_function(&self, function: &str) -> bool {
+        self.startup_functions.contains(function)
+    }
+
+    /// True when M1 Build generated the component (`Caps="AutoCreated"`).
+    pub(crate) fn is_auto_created(&self, path: &str) -> bool {
+        self.auto_created.contains(path)
+    }
+
     /// The path of the `Function`/`Method` symbol backed by `file_name`: an
     /// explicit `Filename=` match first, else the `Root.<stem>` path convention
     /// real projects use (`Engine.Update.m1scr` → `Root.Engine.Update`).
@@ -252,6 +426,39 @@ impl Project {
         let path = format!("Root.{stem}");
         self.table.get(&path).filter(is_fn).map(|s| s.path.clone())
     }
+}
+
+/// Components carrying `Caps="AutoCreated"`.
+fn auto_created_components(xml: &str) -> HashSet<String> {
+    let Ok(doc) = roxmltree::Document::parse(xml) else {
+        return HashSet::new();
+    };
+    doc.descendants()
+        .filter(|node| {
+            node.has_tag_name("Component") && node.attribute("Caps") == Some("AutoCreated")
+        })
+        .filter_map(|node| node.attribute("Name"))
+        .map(|name| m1_workspace::qualify_root(name).into_owned())
+        .collect()
+}
+
+/// Components whose `SelectedTrigger` names the `On Startup` event, whatever
+/// its relative path prefix.
+fn startup_functions(xml: &str) -> HashSet<String> {
+    let Ok(doc) = roxmltree::Document::parse(xml) else {
+        return HashSet::new();
+    };
+    doc.descendants()
+        .filter(|node| node.has_tag_name("Component"))
+        .filter(|node| {
+            node.children()
+                .find(|child| child.has_tag_name("Props"))
+                .and_then(|props| props.attribute("SelectedTrigger"))
+                .is_some_and(|trigger| trigger.rsplit('.').next() == Some("On Startup"))
+        })
+        .filter_map(|node| node.attribute("Name"))
+        .map(|name| m1_workspace::qualify_root(name).into_owned())
+        .collect()
 }
 
 /// The concrete type all `Out = <expr>` assignments in a function body agree on,

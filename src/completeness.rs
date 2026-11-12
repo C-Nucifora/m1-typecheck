@@ -84,6 +84,8 @@ pub struct CompletenessReport {
     /// checks (library methods, builtin enums, class docs) were verified
     /// against. See [`intrinsics::active_target`].
     pub catalogue_target: &'static str,
+    /// Selected project-format baseline; absent when no project is loaded.
+    pub m1_build_version: Option<crate::compatibility::BuildVersion>,
 }
 
 impl CompletenessReport {
@@ -130,6 +132,7 @@ pub fn analyze(
         cfg_loaded,
         dbc_loaded,
         catalogue_target: intrinsics::active_target(),
+        m1_build_version: project.map(Project::build_version),
         ..Default::default()
     };
 

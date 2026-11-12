@@ -64,6 +64,14 @@ pub enum SymbolKind {
     Other,
 }
 
+/// One declared return slot. Raw type spelling survives unknown type mappings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeclaredReturn {
+    pub name: Option<String>,
+    pub declared_type: String,
+    pub value_type: ValueType,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Symbol {
     pub path: String,
@@ -166,11 +174,15 @@ pub struct Symbol {
     /// `Some` only when every `Out = <expr>` in the body agrees on one known type;
     /// `None` when there is no `Out` assignment, the types disagree, or the symbol
     /// is not a user function — never a guessed type. Populated by
-    /// (For a declared `<Signature ReturnType="…">` it is set at parse time;
+    /// (For a declared `<Signature ReturnType="…">` or a known singleton
+    /// `<Returns><Return Type="…"/></Returns>` it is set at parse time;
     /// otherwise inferred by)
     /// [`crate::project::Project::infer_return_types`] and read by `type_of_call`
     /// so user-function call sites participate in T030/T003/T004/T021 (#110).
     pub return_type: Option<ValueType>,
+    /// Ordered explicit return slots, from `<Returns>` or legacy `ReturnType`.
+    /// Multiple returns have no scalar `return_type` projection.
+    pub declared_returns: Vec<DeclaredReturn>,
     /// The function's declared input parameters from the `.m1prj`
     /// `<Signature><Params><Param Name Type>` (#110): name → value type, in
     /// declaration order. `None` when the component declares no signature —
