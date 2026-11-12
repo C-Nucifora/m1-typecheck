@@ -44,6 +44,15 @@ pub fn parse(xml: &str) -> Result<Parsed, XmlParseError> {
             _ => {}
         }
     }
+    // Explicit filenames beat conventional names in either declaration order;
+    // the symbol index also preserves the first duplicate explicit match.
+    for (file, group) in &mut file_to_group {
+        if let Some(path) = table.function_path_for_filename(file)
+            && let Some(selected_group) = super::parent_group(path)
+        {
+            *group = selected_group;
+        }
+    }
     Ok(Parsed {
         table,
         file_to_group,

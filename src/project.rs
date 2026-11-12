@@ -5,7 +5,7 @@ use crate::symbols::{Symbol, SymbolKind, SymbolTable, m1cfg, m1dbc, m1prj};
 use crate::typer::{path_text, type_of};
 use crate::types::ValueType;
 use m1_core::{Field, Kind, Node, Severity};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::Path;
 
 /// M1 standard-library roots always treated as opaque (never flagged).
@@ -28,7 +28,6 @@ const STATIC_OPAQUE_ROOTS: &[&str] = &[
 pub struct Project {
     table: SymbolTable,
     opaque_roots: HashSet<String>,
-    file_to_group: HashMap<String, String>,
     /// The parameter symbol paths a loaded `.m1cfg` declares (qualified to the
     /// symbol-table keys, e.g. `Root.Foo.Bar`). `None` when no cfg was loaded —
     /// the missing-parameter audit (T041) is then skipped.
@@ -70,7 +69,6 @@ impl Project {
         Ok(Project {
             table: parsed.table,
             opaque_roots,
-            file_to_group: parsed.file_to_group,
             cfg_params: None,
         })
     }
@@ -154,8 +152,12 @@ impl Project {
 
     /// Enclosing group for a script file name (the bare `Filename`, e.g.
     /// "Foo Update.m1scr"); None if the project has no such function/method.
+    /// Uses the selected function's parent so explicit filename precedence and
+    /// duplicate handling agree with signature lookup and return inference.
     pub fn group_for_script(&self, file_name: &str) -> Option<String> {
-        self.file_to_group.get(file_name).cloned()
+        self.function_symbol_for_script(file_name)?
+            .rsplit_once('.')
+            .map(|(group, _)| group.to_string())
     }
 
     /// Audit the project's own symbol names (T050).
