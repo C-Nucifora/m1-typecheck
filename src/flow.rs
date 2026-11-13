@@ -241,7 +241,7 @@ pub(crate) fn user_callees(node: Node, scope: &Scope) -> Vec<String> {
 fn merge_seq(mut a: Facts, b: Facts) -> Facts {
     for (k, v) in b.max_per_path {
         let entry = a.max_per_path.entry(k).or_insert(0);
-        *entry += v;
+        *entry = entry.saturating_add(v);
     }
     a
 }
