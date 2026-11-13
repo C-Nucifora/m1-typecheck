@@ -48,6 +48,7 @@ impl super::Rule for Rule {
         // checking exhaustiveness so a typo cannot mask a missing enumerator (#212).
         let mut covered: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut nonmember_buf: Vec<TypeDiagnostic> = Vec::new();
+        let mut ambiguous_coverage = false;
         for arm in node.named_children() {
             if arm.kind() != Kind::IsClause {
                 continue;
@@ -64,6 +65,24 @@ impl super::Rule for Rule {
             for name in names {
                 if enum_ty.members.iter().any(|(m, _)| *m == name) {
                     covered.insert(name);
+                } else if let Some((canonical, _)) = enum_ty
+                    .members
+                    .iter()
+                    .find(|(m, _)| m.eq_ignore_ascii_case(&name))
+                {
+                    // Exact matches above take precedence. Ambiguous casing
+                    // cannot prove which member is covered.
+                    if enum_ty
+                        .members
+                        .iter()
+                        .filter(|(m, _)| m.eq_ignore_ascii_case(&name))
+                        .count()
+                        != 1
+                    {
+                        ambiguous_coverage = true;
+                        continue;
+                    }
+                    covered.insert(canonical.clone());
                 } else if enum_open {
                     // Open firmware enum: the unlisted label may be a real member
                     // we cannot see, so treat the arm as a catch-all and bail.
@@ -82,6 +101,9 @@ impl super::Rule for Rule {
             }
         }
         out.append(&mut nonmember_buf);
+        if ambiguous_coverage {
+            return;
+        }
 
         let missing: Vec<&str> = enum_ty
             .members

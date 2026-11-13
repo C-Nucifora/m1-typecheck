@@ -92,3 +92,49 @@ fn still_applies_already_rooted_names() {
     assert!(matches!(gain.value_type, ValueType::Unsigned));
     assert_eq!(gain.unit.as_deref(), Some("ratio"));
 }
+
+#[test]
+fn missing_only_export_normalizes_baseline_names() {
+    use std::process::Command;
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("cfg_export_prefix");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("Project.m1prj"), PROJECT).unwrap();
+    let mut outputs = Vec::new();
+    for cfg in [
+        CFG_ROOTED,
+        &CFG_ROOTED.replace("Root.Foo.Gain.Value", "Foo.Gain.Value"),
+    ] {
+        fs::write(dir.join("baseline.m1cfg"), cfg).unwrap();
+        let mut formats = Vec::new();
+        for format in ["json", "cfg"] {
+            let output = Command::new(env!("CARGO_BIN_EXE_m1-cfg-export"))
+                .arg(dir.join("Project.m1prj"))
+                .arg("--baseline")
+                .arg(dir.join("baseline.m1cfg"))
+                .args(["--missing-only", "--format", format])
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{:?}", output);
+            let text = String::from_utf8(output.stdout).unwrap();
+            let names: Vec<String> = if format == "json" {
+                let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+                json.as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|e| e["name"].as_str().unwrap().into())
+                    .collect()
+            } else {
+                roxmltree::Document::parse(&text)
+                    .unwrap()
+                    .descendants()
+                    .filter(|n| n.has_tag_name("Parameter"))
+                    .map(|n| n.attribute("Name").unwrap().into())
+                    .collect()
+            };
+            assert_eq!(names, ["Foo.Mode"]);
+            formats.push(text);
+        }
+        outputs.push(formats);
+    }
+    assert_eq!(outputs[0], outputs[1]);
+}

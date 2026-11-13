@@ -181,7 +181,7 @@ fn cfg_type_from_value(vt: ValueType) -> Option<&'static str> {
     }
 }
 
-/// Parameter names declared in an existing `.m1cfg` (as written there — unprefixed).
+/// Parameter names declared in an existing `.m1cfg`, without the implicit root.
 fn read_param_names(cfg: &Path) -> Result<BTreeSet<String>, String> {
     let xml =
         m1_workspace::read_motec_xml(cfg).map_err(|e| format!("reading {}: {e}", cfg.display()))?;
@@ -191,7 +191,7 @@ fn read_param_names(cfg: &Path) -> Result<BTreeSet<String>, String> {
         .descendants()
         .filter(|n| n.has_tag_name("Parameter"))
         .filter_map(|n| n.attribute("Name"))
-        .map(str::to_string)
+        .map(|name| m1_workspace::strip_root(name).to_string())
         .collect())
 }
 
@@ -215,7 +215,7 @@ fn to_cfg(entries: &[ParamEntry]) -> String {
                 // Type could not be resolved from the project (and no cfg supplied
                 // a type). Flag it rather than invent one.
                 out.push_str(
-                    "   <!-- type unresolved from .m1prj; pass --baseline <.m1cfg> to fill -->\n",
+                    "   <!-- type unresolved from .m1prj; supply a baseline .m1cfg to fill -->\n",
                 );
                 out.push_str("   <Cell Type=\"\"><![CDATA[]]></Cell>\n");
             }
@@ -263,21 +263,14 @@ fn xml_attr(s: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+        .replace('\r', "&#13;")
+        .replace('\n', "&#10;")
+        .replace('\t', "&#9;")
 }
 
 /// Render an optional string as a JSON value (`null` or an escaped string).
 fn json_str(s: Option<&str>) -> String {
-    match s {
-        None => "null".to_string(),
-        Some(s) => {
-            let escaped = s
-                .replace('\\', "\\\\")
-                .replace('"', "\\\"")
-                .replace('\n', "\\n")
-                .replace('\t', "\\t");
-            format!("\"{escaped}\"")
-        }
-    }
+    serde_json::to_string(&s).expect("serializing an optional string cannot fail")
 }
 
 /// Quote a CSV field if it contains a comma, quote, or newline (RFC 4180).
@@ -358,6 +351,7 @@ mod tests {
         let cfg = to_cfg(&[e("Foo.Bar", None, None)]);
         assert!(cfg.contains("type unresolved"));
         assert!(cfg.contains("Type=\"\""));
+        assert!(roxmltree::Document::parse(&cfg).is_ok());
     }
 
     #[test]
@@ -365,6 +359,20 @@ mod tests {
         let cfg = to_cfg(&[e("A & B.\"x\"", Some("u32"), None)]);
         assert!(cfg.contains("A &amp; B.&quot;x&quot;"));
         assert!(roxmltree::Document::parse(&cfg).is_ok());
+    }
+
+    #[test]
+    fn xml_attribute_whitespace_round_trips() {
+        let text = "A\rB\nC\tD&\"é";
+        let cfg = to_cfg(&[e(text, Some("u32"), Some(text))]);
+        let doc = roxmltree::Document::parse(&cfg).unwrap();
+        let parameter = doc
+            .descendants()
+            .find(|n| n.has_tag_name("Parameter"))
+            .unwrap();
+        let cell = doc.descendants().find(|n| n.has_tag_name("Cell")).unwrap();
+        assert_eq!(parameter.attribute("Name"), Some(text));
+        assert_eq!(cell.attribute("Unit"), Some(text));
     }
 
     #[test]
@@ -379,5 +387,12 @@ mod tests {
         // A name containing a comma must be quoted to stay RFC-4180 valid.
         let csv = to_csv(&[e("Foo,Bar", Some("f32"), None)]);
         assert!(csv.contains("\"Foo,Bar\",f32,,"));
+    }
+
+    #[test]
+    fn json_strings_round_trip_control_characters() {
+        let text: String = (0..=31).map(char::from).chain(['"', '\\', 'é']).collect();
+        let encoded = json_str(Some(&text));
+        assert_eq!(serde_json::from_str::<String>(&encoded).unwrap(), text);
     }
 }

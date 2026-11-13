@@ -84,3 +84,28 @@ fn expand_templated_target_with_non_literal_bound_is_suppressed() {
         "non-literal-bound expand target must not be flagged: {c:?}"
     );
 }
+
+#[test]
+fn extreme_expand_bounds_report_in_both_checking_paths() {
+    use m1_typecheck::{
+        parsed,
+        project_check::{self, ProjectCheckOptions, SourceInput},
+    };
+    let mut p = proj();
+    let src =
+        "expand (N = -9223372036854775808 to 9223372036854775807) { Acc.Segment $(N).Cell = 1; }";
+    assert!(codes(&p, src).contains(&TypeCode::T084));
+    let scripts = parsed::parse_all(&[("Drv Update.m1scr".into(), src.into())]);
+    let result = project_check::check(
+        Some(&mut p),
+        &scripts,
+        &[SourceInput::inline(src)],
+        &ProjectCheckOptions::default(),
+    );
+    assert!(
+        result.sources[0]
+            .diagnostics
+            .iter()
+            .any(|d| d.code == TypeCode::T084)
+    );
+}

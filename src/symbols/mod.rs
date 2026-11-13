@@ -291,6 +291,8 @@ pub struct SymbolTable {
     /// of that parent's immediate children, in declaration order. Backs
     /// `immediate_children` (LSP hover/completion member enumeration).
     by_parent: HashMap<String, Vec<usize>>,
+    /// Original return types, retained when inference updates a symbol.
+    inferred_returns: HashMap<usize, Option<ValueType>>,
 }
 
 impl SymbolTable {
@@ -398,7 +400,16 @@ impl SymbolTable {
     /// Set a symbol's inferred return type (by path). No-op if absent (#110).
     pub fn set_return_type(&mut self, path: &str, ty: ValueType) {
         if let Some(&i) = self.by_path.get(path) {
+            self.inferred_returns
+                .entry(i)
+                .or_insert(self.symbols[i].return_type);
             self.symbols[i].return_type = Some(ty);
+        }
+    }
+    /// Discard the previous inference pass, preserving parsed declarations.
+    pub(crate) fn clear_inferred_return_types(&mut self) {
+        for (i, original) in self.inferred_returns.drain() {
+            self.symbols[i].return_type = original;
         }
     }
     /// Associate a symbol (by path) with an enum type id. No-op if absent.

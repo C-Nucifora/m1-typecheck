@@ -50,16 +50,22 @@ pub(crate) fn substituted(text: &str, bindings: &ExpandBindings) -> Vec<String> 
         if !variants[0].contains(&needle) {
             continue;
         }
-        let mut next = Vec::with_capacity(variants.len() * (hi - lo + 1) as usize);
+        let Some(count) = hi
+            .checked_sub(*lo)
+            .and_then(|n| n.checked_add(1))
+            .and_then(|n| usize::try_from(n).ok())
+            .and_then(|n| variants.len().checked_mul(n))
+            .filter(|&n| n > 0 && n <= 4096)
+        else {
+            return Vec::new();
+        };
+        let mut next = Vec::with_capacity(count);
         for v in &variants {
             for val in *lo..=*hi {
                 next.push(v.replace(&needle, &val.to_string()));
             }
         }
         variants = next;
-        if variants.len() > 4096 {
-            return Vec::new();
-        }
     }
     variants
 }
@@ -83,4 +89,47 @@ pub(crate) fn enclosing_expand_bindings(node: &Node) -> ExpandBindings {
         cur = n.parent();
     }
     bindings
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn binding_bounds_are_checked_without_overflow() {
+        for (lo, hi, accepted) in [
+            (i64::MIN, i64::MAX, false),
+            (-1, 1, false),
+            (2, 1, false),
+            (0, 255, true),
+            (0, 256, false),
+            (i64::MAX - 1, i64::MAX, true),
+        ] {
+            let cst = m1_core::parse(&format!("expand (I = {lo} to {hi}) {{ x = 1; }}"));
+            let node = cst
+                .root()
+                .descendants()
+                .find(|n| n.kind() == Kind::ExpandStatement)
+                .unwrap();
+            assert_eq!(expand_binding(&node).is_some(), accepted, "{lo}..{hi}");
+        }
+    }
+
+    #[test]
+    fn substitution_product_is_bounded_before_enumeration() {
+        assert_eq!(
+            substituted("$(I).$(J)", &vec![("I".into(), 0, 63), ("J".into(), 0, 63)]).len(),
+            4096
+        );
+        assert!(
+            substituted("$(I).$(J)", &vec![("I".into(), 0, 63), ("J".into(), 0, 64)]).is_empty()
+        );
+        for (lo, hi) in [(i64::MIN, i64::MAX), (0, i64::MAX), (2, 1)] {
+            assert!(substituted("$(I)", &vec![("I".into(), lo, hi)]).is_empty());
+        }
+        assert_eq!(
+            substituted("plain", &vec![("I".into(), 0, i64::MAX)]),
+            ["plain"]
+        );
+    }
 }

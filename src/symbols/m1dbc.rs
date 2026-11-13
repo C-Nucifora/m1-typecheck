@@ -16,6 +16,34 @@ use super::{CanDirection, CanMeta, Symbol, SymbolKind, SymbolTable, XmlParseErro
 use crate::types::{ValueType, primitive_type};
 use m1_workspace::LineIndex;
 
+/// Why a source could not be loaded as a CAN database.
+#[derive(Debug)]
+pub enum DbcParseError {
+    Xml(XmlParseError),
+    MissingStructure,
+}
+
+impl std::fmt::Display for DbcParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Xml(error) => error.fmt(f),
+            Self::MissingStructure => write!(
+                f,
+                "invalid .m1dbc: missing ComponentStream/List or named CAN components"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for DbcParseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Xml(error) => Some(error),
+            Self::MissingStructure => None,
+        }
+    }
+}
+
 /// Classify a `BuiltIn.CAN.*` DBC component classname. Returns `None` for
 /// classnames that are not CAN objects (organisation wrappers, etc.).
 fn classify(classname: &str) -> Option<SymbolKind> {
@@ -33,8 +61,20 @@ pub fn augment(
     table: &mut SymbolTable,
     xml: &str,
     rel_filename: &str,
-) -> Result<(), XmlParseError> {
-    let doc = roxmltree::Document::parse(xml).map_err(XmlParseError::in_context(".m1dbc"))?;
+) -> Result<(), DbcParseError> {
+    let doc = roxmltree::Document::parse(xml)
+        .map_err(XmlParseError::in_context(".m1dbc"))
+        .map_err(DbcParseError::Xml)?;
+    // Keep legacy component-only inputs; an explicit empty List is also valid.
+    if !doc.descendants().any(|node| {
+        node.has_tag_name("ComponentStream")
+            && node.children().any(|child| child.has_tag_name("List"))
+            || node.has_tag_name("Component")
+                && node.attribute("Name").is_some()
+                && node.attribute("Classname").and_then(classify).is_some()
+    }) {
+        return Err(DbcParseError::MissingStructure);
+    }
     // Map a component's byte offset to its 0-based source line so Go to Definition
     // opens the `.m1dbc` at the declaration, not line 0 (#169). Built once over the
     // whole parse — roxmltree's own `text_pos_at` rescans from byte 0 each call.
@@ -178,6 +218,31 @@ fn can_meta(props: roxmltree::Node<'_, '_>, classname: &str) -> Option<CanMeta> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_unrelated_xml_without_changing_the_symbol_table() {
+        for xml in [
+            "<other/>",
+            "<ComponentStream/>",
+            "<ComponentStream><Lsist/></ComponentStream>",
+        ] {
+            let mut table = SymbolTable::default();
+            augment(&mut table, DBC, "good.m1dbc").unwrap();
+            let before = table.iter().count();
+            assert!(matches!(
+                augment(&mut table, xml, "bad.m1dbc"),
+                Err(DbcParseError::MissingStructure)
+            ));
+            assert_eq!(table.iter().count(), before);
+        }
+        for xml in [
+            "<ComponentStream><List/></ComponentStream>",
+            "<DBC><ComponentStream><List/></ComponentStream></DBC>",
+            r#"<DBCs><Component Classname="BuiltIn.CAN.Signal" Name="Bus.Msg.Sig"><Props Type="u32"/></Component></DBCs>"#,
+        ] {
+            assert!(augment(&mut SymbolTable::default(), xml, "empty.m1dbc").is_ok());
+        }
+    }
 
     const DBC: &str = r#"<?xml version="1.0"?>
 <DBC>
